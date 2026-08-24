@@ -1,6 +1,6 @@
 # Skills To Do Work
 
-[![skills.sh](https://skills.sh/b/likamrat/skills)](https://skills.sh/likamrat/skills)
+[![skills.sh](https://skills.sh/b/likamrat/skills?v=1)](https://skills.sh/likamrat/skills)
 
 I am building the Agent Skills I want beside me when a decision has an owner, a customer, and a cost of failure.
 
@@ -136,12 +136,9 @@ Each installable skill has a `SKILL.md` whose `name` matches its directory. Cate
 
 This repository follows the [Agent Skills specification](https://agentskills.io/specification.md) and is discoverable by the `skills` CLI.
 
-`skills.sh` uses anonymous CLI install telemetry to build its listings and rankings. Its public documentation does not define a separate publish command. After a release reaches the public default branch:
+`skills.sh` builds its listings and rankings from anonymous CLI install telemetry. Direct CLI discovery reads the public GitHub repository, while the catalog page and badge depend on a separate asynchronous index.
 
-1. verify discovery with `npx skills@latest add likamrat/skills --list`;
-2. install the public repository once with the command above;
-3. allow the skills.sh index to process the install;
-4. check [`skills.sh/likamrat/skills`](https://skills.sh/likamrat/skills).
+Verify the repository directly with `npx skills@latest add likamrat/skills --list`. The catalog and badge use [`skills.sh/likamrat/skills`](https://skills.sh/likamrat/skills).
 
 ## Quality and safety
 
