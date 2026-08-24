@@ -1,12 +1,12 @@
-# AI Agent Skills on the job
+# Skills To Do Work
 
 [![skills.sh](https://skills.sh/b/likamrat/skills)](https://skills.sh/likamrat/skills)
 
-Agent Skills for people who use AI in their work.
+I am building this repository for AI-assisted work that has to survive contact with real people, systems, constraints, and consequences.
 
-Each skill describes how a body of work should be carried out: what evidence to collect, which decisions require human judgment, what artifacts to produce, and what conditions should stop or redirect the work.
+Most AI examples stop when the demo works. Work starts earlier and ends later: understand the actual workflow, decide what software, models, and people should each own, test the ugly cases, deploy safely, earn adoption, and hand off something another person can operate.
 
-Skills are grouped by the role or practice they support.
+These skills turn that process into instructions an agent can follow without inventing experience or judgment. I use them to challenge my own thinking, keep evidence attached to decisions, and produce artifacts I can defend. Adapt them to your work, but keep a person accountable.
 
 ## Installation (30-second setup)
 
