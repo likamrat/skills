@@ -80,35 +80,14 @@ Block or bound autonomy when:
 
 These sources informed this skill. Re-check them before relying on time-sensitive facts.
 
-### First-party and practitioner material
+| Source | Used for | Boundary |
+|---|---|---|
+| Palantir, ["Dev versus Delta"](https://blog.palantir.com/dev-versus-delta-demystifying-engineering-roles-at-palantir-ad44c2a6e87) | Role distinction | First-party account of Palantir roles |
+| Kevin Bai, ["Forward Deployed Engineering 101"](https://www.youtube.com/watch?v=KwhgfwOSToQ) | Fit and platform reuse | Does not describe current Anthropic operations |
+| [Colin Jarvis, OpenAI interview](https://www.youtube.com/watch?v=cBD7_R-Cizg) | Discovery-to-production examples | Firsthand OpenAI account |
+| [Greg Isenberg and Vas](https://www.youtube.com/watch?v=zXysLUTLjw4) | Audit, evaluation, and deployment sequence | Compensation and timeline claims remain unverified |
+| Google SRE, [postmortem culture](https://sre.google/sre-book/postmortem-culture/) | Blameless learning and operational follow-through | Site reliability guidance, not an FDE operating model |
 
-- Palantir, "Dev versus Delta": https://blog.palantir.com/dev-versus-delta-demystifying-engineering-roles-at-palantir-ad44c2a6e87
-- Kevin Bai, "Forward Deployed Engineering 101": https://www.youtube.com/watch?v=KwhgfwOSToQ
-- Colin Jarvis, OpenAI FDE interview: https://www.youtube.com/watch?v=cBD7_R-Cizg
-- Greg Isenberg and Vas, FDE discussion: https://www.youtube.com/watch?v=zXysLUTLjw4
-- Google SRE, postmortem culture: https://sre.google/sre-book/postmortem-culture/
+Role breadth was checked against August 2026 postings from [Palantir](https://jobs.lever.co/palantir/dab396d4-2f14-4796-aac0-0d82883dccf0), [Scale AI](https://job-boards.greenhouse.io/scaleai/jobs/4593571005), [Vercel](https://vercel.com/careers/forward-deployed-engineer-5752684004), [Sixfold](https://job-boards.greenhouse.io/sixfold/jobs/5234031008), [Caylent](https://job-boards.greenhouse.io/caylent/jobs/5973732004), [Redapt](https://job-boards.greenhouse.io/redapt/jobs/5396488008), and [Databricks](https://www.databricks.com/company/careers/professional-services-operations/sr-forward-deployed-engineer-fde---public-sector-8423296002). These posts show hiring signals, not day-to-day practice.
 
-### Representative requisitions observed in August 2026
-
-- Palantir FDSE: https://jobs.lever.co/palantir/dab396d4-2f14-4796-aac0-0d82883dccf0
-- Scale AI FDE: https://job-boards.greenhouse.io/scaleai/jobs/4593571005
-- Vercel FDE: https://vercel.com/careers/forward-deployed-engineer-5752684004
-- Sixfold FDE: https://job-boards.greenhouse.io/sixfold/jobs/5234031008
-- Caylent FDE: https://job-boards.greenhouse.io/caylent/jobs/5973732004
-- Redapt FDE: https://job-boards.greenhouse.io/redapt/jobs/5396488008
-- Databricks public-sector FDE: https://www.databricks.com/company/careers/professional-services-operations/sr-forward-deployed-engineer-fde---public-sector-8423296002
-
-Job descriptions show desired operating models and hiring signals. They do not prove day-to-day practice.
-
-### Writing and editing material
-
-- Peter Yang, [Use My /No-AI-Slop Skill](https://creatoreconomy.so/p/use-my-no-ai-slop-skill-to-remove-20-ai-slop-patterns)
-- Peter Yang, [No AI Slop skill](https://github.com/petergyang/no-ai-slop), version 1.0.6
-
-## Source boundaries to preserve
-
-- Kevin Bai's talk supplies a fit model and platform-reuse argument. He explicitly does not describe current Anthropic operations.
-- Colin Jarvis supplies firsthand OpenAI examples of taking work from discovery through production with evals.
-- The Greg Isenberg/Vas material describes an audit, evaluation, and deployment sequence. Its compensation and timeline claims lack verification.
-- The "FDE in 30 Days" PDF is derivative learning material, not independent evidence.
-- Public job posts show role breadth: product-generating, billable services, domain, migration, infrastructure, and field-operations variants.
+Writing rules adapt Peter Yang's [article](https://creatoreconomy.so/p/use-my-no-ai-slop-skill-to-remove-20-ai-slop-patterns) and [No AI Slop skill](https://github.com/petergyang/no-ai-slop), version 1.0.6. The "FDE in 30 Days" PDF remains derivative learning material, not independent evidence.

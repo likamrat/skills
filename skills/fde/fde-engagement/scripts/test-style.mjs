@@ -46,7 +46,7 @@ const cases = [
   {
     name: "rejects bare source link dumps",
     text: [
-      "## Sources",
+      "## Public research baseline",
       "",
       "- [One](https://example.com/one)",
       "- Two: https://example.com/two",

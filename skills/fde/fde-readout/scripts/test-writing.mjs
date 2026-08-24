@@ -82,7 +82,7 @@ check(
 );
 
 const sourceDump = [
-  "## Sources",
+  "## Public research baseline",
   "",
   "- [One](https://example.com/one)",
   "- Two: https://example.com/two",
