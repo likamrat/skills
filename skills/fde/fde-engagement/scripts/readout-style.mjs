@@ -169,7 +169,7 @@ function findBareSourceList(text) {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (/^#{1,6}\s+(?:Sources|References|Further reading)\s*$/i.test(line)) {
+    if (/^#{1,6}\s+\S/.test(line)) {
       let links = 0;
       for (const candidate of lines.slice(index + 1)) {
         if (/^#{1,6}\s+/.test(candidate)) break;
