@@ -57,48 +57,14 @@ Separate presentation workflows drift. Numbers change, recommendations move, and
 
 [`fde-readout`](skills/fde/fde-readout/README.md) uses one validated plan for both formats. The plan carries the decision, evidence, human context, brand, slide structure, and speaker notes; each renderer still receives its own visual and package review.
 
-## Skill catalog
+## Skills
 
 ### Forward deployed engineering
 
 | Skill | Use it for |
 |---|---|
-| [`fde-engagement`](skills/fde/fde-engagement/README.md) | Qualify, audit, design, evaluate, deploy, review, and report on an end-to-end FDE customer engagement |
-| [`fde-readout`](skills/fde/fde-readout/README.md) | Plan and deliver evidence-bound FDE customer or leadership readouts as interactive HTML, editable PowerPoint, or both |
-
-#### `fde-engagement`
-
-The skill requires the agent to:
-
-- qualify FDE fit before recommending embedded engineering;
-- reconstruct the real workflow from operators, systems, and cases;
-- question decisions in dependency order;
-- preserve human-confirmed observations, failures, surprises, and rationale;
-- maintain a shared domain model;
-- separate deterministic software, model judgment, and human authority;
-- gate rollout on eval, recovery, monitoring, and adoption evidence;
-- record field evidence that may support product changes;
-- generate customer reports, leadership updates, and PowerPoint readouts;
-- reject unsupported claims, generic prose, and visual filler.
-
-#### `fde-readout`
-
-The skill requires the agent to:
-
-- use one validated `ReadoutPlan` for HTML and PowerPoint;
-- bind slide claims, metrics, risks, and timelines to evidence;
-- plan with deterministic slide families before layout;
-- run dependency-free HTML decks on localhost;
-- use native Office authoring or an approved optional HTML-to-PPTX converter;
-- inspect every HTML and PowerPoint slide independently.
-
-![Four-slide preview of the fictional branded FDE customer readout](skills/fde/fde-readout/assets/examples/lattice-harbor-readout.png)
-
-Preview: cover, pilot decision, current workflow, and offline evaluation.
-
-The [`fde-readout` guide](skills/fde/fde-readout/README.md#example) includes the plan, interactive HTML, editable PowerPoint, and preview.
-
-The same example also includes an interactive HTML deck that runs on localhost with keyboard, touch, fullscreen, notes, and export mode.
+| [`fde-engagement`](skills/fde/fde-engagement/README.md) | Run, teach, review, or report on an end-to-end FDE engagement |
+| [`fde-readout`](skills/fde/fde-readout/README.md) | Build evidence-bound FDE readouts as HTML, PowerPoint, or both |
 
 ## More install options
 
