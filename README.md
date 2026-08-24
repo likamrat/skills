@@ -1,5 +1,7 @@
 # AI Agent Skills on the job
 
+[![skills.sh](https://skills.sh/b/likamrat/skills)](https://skills.sh/likamrat/skills)
+
 Agent Skills for people who use AI in their work.
 
 Each skill describes how a body of work should be carried out: what evidence to collect, which decisions require human judgment, what artifacts to produce, and what conditions should stop or redirect the work.
