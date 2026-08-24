@@ -14,7 +14,13 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const cli = "npx";
-const version = "1.5.22";
+const version = process.env.SKILLS_SMOKE_VERSION ?? "1.5.22";
+const source = process.env.SKILLS_SMOKE_SOURCE ?? root;
+const expectedSourceType = source === root ? "local" : "github";
+const treeMarker = "/tree/";
+const expectedRef = source.includes(treeMarker)
+  ? source.slice(source.indexOf(treeMarker) + treeMarker.length).split("/")[0]
+  : undefined;
 const directory = await mkdtemp(join(root, ".cli-smoke-"));
 const failures = [];
 
@@ -53,12 +59,12 @@ async function project(name) {
 }
 
 try {
-  const list = run(["add", root, "--list"]);
-  check(list.status === 0, `local discovery failed:\n${list.output}`);
+  const list = run(["add", source, "--list"]);
+  check(list.status === 0, `source discovery failed:\n${list.output}`);
   check(
     list.output.includes("fde-engagement") &&
       list.output.includes("fde-readout"),
-    "local discovery did not list both skills",
+    "source discovery did not list both skills",
   );
 
   for (const skill of ["fde-engagement", "fde-readout"]) {
@@ -66,7 +72,7 @@ try {
     const install = run(
       [
         "add",
-        root,
+        source,
         "--skill",
         skill,
         "--agent",
@@ -117,10 +123,16 @@ try {
       );
       check(lock.version === 1, `${skill} lockfile version is invalid`);
       check(
-        lock.skills?.[skill]?.sourceType === "local" &&
+        lock.skills?.[skill]?.sourceType === expectedSourceType &&
           typeof lock.skills?.[skill]?.computedHash === "string",
         `${skill} lockfile source metadata is invalid`,
       );
+      if (expectedRef) {
+        check(
+          lock.skills?.[skill]?.ref === expectedRef,
+          `${skill} lockfile did not preserve branch ref ${expectedRef}`,
+        );
+      }
 
       const update = run(["update", "--project", "-y"], { cwd });
       check(
@@ -138,7 +150,7 @@ try {
   const wildcard = run(
     [
       "add",
-      root,
+      source,
       "--skill",
       "*",
       "--agent",
@@ -158,7 +170,7 @@ try {
     }
   }
 
-  const use = run(["use", root, "--skill", "fde-engagement"]);
+  const use = run(["use", source, "--skill", "fde-engagement"]);
   check(use.status === 0, `one-session use failed:\n${use.output}`);
   check(
     use.output.includes("fde-engagement") && use.output.length > 100,
@@ -176,7 +188,7 @@ try {
   const globalInstall = run(
     [
       "add",
-      root,
+      source,
       "--skill",
       "fde-engagement",
       "--global",
@@ -210,5 +222,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Skills CLI smoke tests passed with skills@${version}: discovery, project installs, wildcard, use, update, and isolated global install.`,
+  `Skills CLI smoke tests passed with skills@${version} from ${source}: discovery, project installs, wildcard, use, update, and isolated global install.`,
 );
