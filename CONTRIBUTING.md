@@ -50,7 +50,7 @@ A draft can move under `skills/` after its trigger cases, behavior evals, packag
 
 1. Create `skills/<category>/<skill-name>/SKILL.md`.
 2. Make the frontmatter `name` exactly match the directory.
-3. Write the description as a trigger contract: what it does, when to use it, and when not to use it.
+3. Keep the description under 400 characters: say what the skill does and which user intent should load it. Put adjacent boundaries in the body and near-miss tests instead of stuffing negative keywords into the listing.
 4. Keep the main instructions concise. Put conditional detail in `references/`.
 5. Add deterministic scripts only for repeatable checks or fragile operations.
 6. Add behavior evals and near-miss trigger fixtures.

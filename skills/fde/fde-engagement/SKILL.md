@@ -1,7 +1,7 @@
 ---
 name: fde-engagement
 description: >-
-  Guide, teach, review, or report on an end-to-end forward deployed engineering (FDE) customer engagement: qualify the work, audit the real workflow, define an outcome, assign human/rules/model responsibility, build and evaluate a production system, deploy safely, measure adoption, hand off operations, and record evidence for product reuse. Use when the user asks to run or practice an FDE engagement, conduct customer discovery, produce an operating map, plan evals or rollout, review engagement artifacts, diagnose a deployment, or create a written findings, leadership, or handoff report. For any slide, deck, presentation, HTML, PowerPoint, or ReadoutPlan request, use `fde-readout` instead, even when the source is an FDE engagement. Do not use for generic AI app coding, consulting or sales advice, salary research, interview trivia, or project management without an embedded customer outcome.
+  Run or practice the forward deployed engineering (FDE) delivery lifecycle itself, from qualification through handoff. Use when working on customer discovery, workflow audits, evals, rollout, adoption, handoff, or written engagement reports.
 license: MIT
 compatibility: Works in conversational agents. File and shell tools are optional. Node.js 18+ is required only for the included validators. Real engagements require authorized customer evidence.
 metadata:

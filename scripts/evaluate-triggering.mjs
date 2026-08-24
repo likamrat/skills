@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 const args = process.argv.slice(2);
 
 function option(name, fallback) {
@@ -46,6 +47,9 @@ if (
 }
 
 const skillRoot = join(root, "skills", "fde", skillName);
+const registeredSkillRoots = (manifest.skills ?? []).map((path) =>
+  resolve(root, path),
+);
 const triggerPath = join(skillRoot, "evals", "trigger-cases.json");
 const triggers = JSON.parse(await readFile(triggerPath, "utf8"));
 const allCases = [
@@ -72,7 +76,7 @@ if (cases.length === 0) {
 const workspace = await mkdtemp(join(root, ".trigger-eval-"));
 const project = join(workspace, "project");
 const isolatedHome = join(workspace, "home");
-const installedSkill = join(project, ".agents", "skills", skillName);
+const installedSkillsRoot = join(project, ".agents", "skills");
 const disabledServers = [
   "insights-agent",
   "playwright",
@@ -123,9 +127,15 @@ function grade(events) {
 const results = [];
 
 try {
-  await mkdir(dirname(installedSkill), { recursive: true });
+  await mkdir(installedSkillsRoot, { recursive: true });
   await mkdir(isolatedHome, { recursive: true });
-  await cp(skillRoot, installedSkill, { recursive: true });
+  for (const registeredSkillRoot of registeredSkillRoots) {
+    await cp(
+      registeredSkillRoot,
+      join(installedSkillsRoot, basename(registeredSkillRoot)),
+      { recursive: true },
+    );
+  }
   await writeFile(
     join(project, "package.json"),
     JSON.stringify({ name: "skill-trigger-eval", private: true }),
@@ -226,6 +236,7 @@ const negative = results.filter((result) => !result.shouldTrigger);
 const summary = {
   skill: skillName,
   model,
+  registeredSkills: registeredSkillRoots.map((path) => basename(path)),
   runsPerCase: runs,
   generatedAt: new Date().toISOString(),
   cases: cases.length,

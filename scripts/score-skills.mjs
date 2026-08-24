@@ -175,7 +175,7 @@ for (const declaredPath of manifest.skills ?? []) {
 
   const activation =
     (/\bUse (?:this skill )?(?:when|only for)\b/.test(description) ? 5 : 0) +
-    (/\bDo not use\b/.test(description) ? 3 : 0) +
+    (description.length <= 400 ? 3 : 0) +
     points((positiveTriggers.length / 8) * 5, 5) +
     points((negativeTriggers.length / 8) * 5, 5) +
     (positiveTriggers.length + negativeTriggers.length >= 20 ? 2 : 0);
