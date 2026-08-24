@@ -71,12 +71,12 @@ if (frontmatter) {
     "description must be 1-1024 characters",
   );
   check(
-    /\bUse (?:this skill )?when\b/.test(description),
-    "description must include triggers",
+    description.length <= 400,
+    "description must not exceed the repository's 400-character limit",
   );
   check(
-    description.includes("Do not use"),
-    "description must include anti-triggers",
+    /\bUse (?:this skill )?when\b/.test(description),
+    "description must include triggers",
   );
   check(compatibility.length <= 500, "compatibility must not exceed 500 characters");
 }

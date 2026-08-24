@@ -78,12 +78,15 @@ if (frontmatter) {
   check((name?.length ?? 0) <= 64, "name must not exceed 64 characters");
   check(name === basename(skillRoot), "name must match the skill directory");
   check(description.length >= 1 && description.length <= 1024, "description must be 1-1024 characters");
+  check(
+    description.length <= 400,
+    "description must not exceed the repository's 400-character limit",
+  );
   check(compatibility.length <= 500, "compatibility must not exceed 500 characters");
   check(
     /\bUse (?:this skill )?when\b/.test(description),
     "description must state when to use the skill",
   );
-  check(description.includes("Do not use"), "description must include anti-triggers");
 }
 
 check(skill.split(/\r?\n/).length <= 500, "SKILL.md must not exceed 500 lines");

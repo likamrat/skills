@@ -144,7 +144,7 @@ Verify the repository directly with `npx skills@latest add likamrat/skills --lis
 
 Every skill must:
 
-- use precise trigger and anti-trigger language;
+- use concise trigger language and realistic near-miss cases;
 - keep core instructions concise and disclose references only when needed;
 - include behavior and near-miss evals;
 - validate any deterministic artifact or gate it creates;
