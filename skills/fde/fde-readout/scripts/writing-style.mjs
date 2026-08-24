@@ -117,7 +117,10 @@ function findBareSourceList(text) {
       let links = 0;
       for (const candidate of lines.slice(index + 1)) {
         if (/^#{1,6}\s+/.test(candidate)) break;
-        if (/^\s*[-*]\s+\[[^\]]+\]\([^)]+\)\s*$/.test(candidate)) {
+        if (
+          /^\s*[-*]\s+\[[^\]]+\]\([^)]+\)\s*$/.test(candidate) ||
+          /^\s*[-*]\s+(?:[^:\n]+:\s*)?https?:\/\/\S+\s*$/.test(candidate)
+        ) {
           links += 1;
         }
       }
@@ -145,6 +148,7 @@ export function maskLiteralContent(text) {
     /^~~~[\s\S]*?^~~~[ \t]*$/gm,
     /`[^`\n]+`/g,
     /\]\((?:https?:\/\/|mailto:)[^)]+\)/gi,
+    /^>.*$/gm,
   ];
 
   for (const pattern of patterns) {

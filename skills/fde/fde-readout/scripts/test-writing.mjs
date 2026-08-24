@@ -85,8 +85,8 @@ const sourceDump = [
   "## Sources",
   "",
   "- [One](https://example.com/one)",
-  "- [Two](https://example.com/two)",
-  "- [Three](https://example.com/three)",
+  "- Two: https://example.com/two",
+  "- https://example.com/three",
 ].join("\n");
 check(
   findWritingIssues(sourceDump, { profile: "docs" }).some(
