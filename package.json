@@ -1,0 +1,32 @@
+{
+  "name": "likamrat-skills",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent Skills that describe how specific work should be carried out with AI",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/likamrat/skills.git"
+  },
+  "homepage": "https://skills.sh/likamrat/skills",
+  "license": "MIT",
+  "keywords": [
+    "agent-skills",
+    "ai-at-work",
+    "role-specific-ai",
+    "forward-deployed-engineering",
+    "fde",
+    "customer-engineering",
+    "ai"
+  ],
+  "skills": [
+    "./skills/fde/fde-engagement",
+    "./skills/fde/fde-readout"
+  ],
+  "scripts": {
+    "check": "node scripts/check-em-dashes.mjs && node scripts/validate-skills.mjs && node scripts/check-links.mjs --local",
+    "check:cli": "node --no-deprecation scripts/test-cli-commands.mjs",
+    "check:links": "node scripts/check-links.mjs --external",
+    "list:skills": "npx skills@1.5.22 add . --list"
+  },
+  "packageManager": "npm@11.17.0"
+}

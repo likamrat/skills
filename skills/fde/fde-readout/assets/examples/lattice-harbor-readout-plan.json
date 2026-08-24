@@ -1,0 +1,773 @@
+{
+  "version": "1.0",
+  "id": "lattice-harbor-exception-triage",
+  "title": "Lattice Harbor Logistics: shipment exception triage",
+  "fictional": true,
+  "asOf": "2026-08-23",
+  "audience": "customer",
+  "purpose": "Approve a four-week supervised triage pilot",
+  "confidentiality": "FICTIONAL CUSTOMER READOUT",
+  "density": "speaker-led",
+  "delivery": [
+    "html",
+    "pptx"
+  ],
+  "brand": {
+    "source": "fictional-defined",
+    "authorized": true,
+    "wordmark": "LATTICE HARBOR",
+    "fontFamily": "Segoe UI",
+    "colors": {
+      "ink": "#0B1020",
+      "system": "#2563EB",
+      "decision": "#B91C8C",
+      "risk": "#D92D20",
+      "paper": "#FFFFFF",
+      "muted": "#4B5563",
+      "line": "#D1D5DB"
+    },
+    "requiredFooter": "FICTIONAL DEMONSTRATION",
+    "evidenceIds": [
+      "brand-001"
+    ],
+    "styleReference": {
+      "source": "User-provided presentation reference (not included)",
+      "authorized": true,
+      "scope": "design-language-only",
+      "reusedAssets": []
+    }
+  },
+  "evidence": [
+    {
+      "id": "customer-001",
+      "statement": "Lattice Harbor Logistics is a fictional freight coordinator serving regional manufacturers across United States port, rail, and warehouse corridors.",
+      "class": "synthetic",
+      "source": "Fictional company definition",
+      "confidence": "high",
+      "sensitivity": "public",
+      "authorized": true
+    },
+    {
+      "id": "workflow-001",
+      "statement": "Exception dispatchers copy shipment data among Atlas TMS, a shared inbox, and a routing spreadsheet before selecting an operations queue.",
+      "class": "synthetic",
+      "source": "Fictional operator observation",
+      "confidence": "high",
+      "sensitivity": "internal",
+      "authorized": true
+    },
+    {
+      "id": "baseline-001",
+      "statement": "A fictional four-week sample of 1,240 shipment exceptions has a 47-minute median time to first queue assignment and a 21.6 percent reclassification rate.",
+      "class": "synthetic",
+      "source": "Fictional Atlas TMS workflow sample",
+      "confidence": "high",
+      "sensitivity": "internal",
+      "authorized": true
+    },
+    {
+      "id": "authority-001",
+      "statement": "Exception dispatchers may confirm queue assignments, but only a duty manager may authorize customer ETA commitments or detention-fee waivers.",
+      "class": "synthetic",
+      "source": "Fictional network operations policy",
+      "confidence": "high",
+      "sensitivity": "internal",
+      "authorized": true
+    },
+    {
+      "id": "target-001",
+      "statement": "The fictional pilot target is a median first routing time at or below 20 minutes and a reclassification rate at or below 10 percent over four weeks.",
+      "class": "synthetic",
+      "source": "Fictional sponsor decision record",
+      "confidence": "high",
+      "sensitivity": "internal",
+      "authorized": true
+    },
+    {
+      "id": "build-001",
+      "statement": "The fictional implementation reads shipment and message context, writes a queue recommendation with evidence, and has no tool for customer commitments or fee waivers.",
+      "class": "synthetic",
+      "source": "Fictional implementation trace",
+      "confidence": "high",
+      "sensitivity": "internal",
+      "authorized": true
+    },
+    {
+      "id": "eval-001",
+      "statement": "The fictional offline evaluation passed normal and edge routing cases and escalated incomplete, ambiguous, and high-risk cases without executing an operational action.",
+      "class": "synthetic",
+      "source": "Fictional evaluation run",
+      "confidence": "high",
+      "sensitivity": "internal",
+      "authorized": true
+    },
+    {
+      "id": "assignment-001",
+      "statement": "The fictional VP Network Operations owns the pilot decision due 2026-08-29.",
+      "class": "synthetic",
+      "source": "Fictional steering record",
+      "confidence": "high",
+      "sensitivity": "internal",
+      "authorized": true
+    },
+    {
+      "id": "assignment-002",
+      "statement": "The fictional Director of Operations Systems owns pilot setup due 2026-09-08.",
+      "class": "synthetic",
+      "source": "Fictional delivery plan",
+      "confidence": "high",
+      "sensitivity": "internal",
+      "authorized": true
+    },
+    {
+      "id": "assignment-003",
+      "statement": "The fictional Network Analytics Lead owns the pilot measurement dashboard due 2026-09-05.",
+      "class": "synthetic",
+      "source": "Fictional delivery plan",
+      "confidence": "high",
+      "sensitivity": "internal",
+      "authorized": true
+    },
+    {
+      "id": "brand-001",
+      "statement": "The fictional Lattice Harbor brand uses a white canvas, near-black text, cobalt and magenta accents, crimson for risk, Segoe type, a strict grid, and a fictional-demonstration footer.",
+      "class": "synthetic",
+      "source": "Fictional brand definition derived from an authorized design-language-only reference",
+      "confidence": "high",
+      "sensitivity": "public",
+      "authorized": true
+    }
+  ],
+  "humanContext": [
+    {
+      "id": "judgment-observation-001",
+      "kind": "firsthand-observation",
+      "authorRole": "FDE",
+      "origin": "human-confirmed",
+      "statement": "Dispatchers treated Atlas TMS as the record but assembled the routing decision from the inbox and spreadsheet as well.",
+      "whyItMatters": "The observed work cannot be improved by changing one system field or one prompt.",
+      "evidenceIds": [
+        "workflow-001"
+      ],
+      "customerSafe": true
+    },
+    {
+      "id": "judgment-failed-attempt-001",
+      "kind": "failed-attempt",
+      "authorRole": "FDE",
+      "origin": "human-confirmed",
+      "statement": "The routing spreadsheet centralized guidance but did not resolve conflicting source context.",
+      "whyItMatters": "Adding more rules to the spreadsheet would preserve the same fragmented decision path.",
+      "evidenceIds": [
+        "workflow-001"
+      ],
+      "customerSafe": true
+    },
+    {
+      "id": "judgment-surprise-001",
+      "kind": "surprise",
+      "authorRole": "FDE",
+      "origin": "human-confirmed",
+      "statement": "The reclassification sample made repeated routing work more consequential than the team expected.",
+      "whyItMatters": "The pilot must measure reclassification, not only time to first routing.",
+      "evidenceIds": [
+        "baseline-001"
+      ],
+      "customerSafe": true
+    },
+    {
+      "id": "judgment-rationale-001",
+      "kind": "decision-rationale",
+      "authorRole": "FDE",
+      "origin": "human-confirmed",
+      "statement": "The recommendation remains supervised because offline evidence supports queue suggestions but not transferred operating authority.",
+      "whyItMatters": "The design follows the observed authority boundary instead of treating model accuracy as permission to act.",
+      "evidenceIds": [
+        "authority-001",
+        "build-001",
+        "eval-001"
+      ],
+      "customerSafe": true
+    }
+  ],
+  "slides": [
+    {
+      "id": "cover",
+      "family": "cover",
+      "title": "Shipment exception triage",
+      "customerSafe": true,
+      "notes": "Fictional demonstration. Brand source: [brand-001]. Decision and assignment: [assignment-001]. No real company, customer, operator, or metric is represented.",
+      "evidenceIds": [
+        "customer-001",
+        "assignment-001",
+        "brand-001"
+      ],
+      "judgmentIds": [
+        "judgment-observation-001"
+      ],
+      "content": {
+        "subtitle": "Decision readout for a recommendation-only supervised pilot",
+        "decision": "APPROVE A FOUR-WEEK SUPERVISED PILOT"
+      }
+    },
+    {
+      "id": "pilot-decision",
+      "family": "decision",
+      "title": "Approve a supervised pilot within a fixed authority boundary",
+      "customerSafe": true,
+      "notes": "Decision: approve a four-week recommendation-only supervised pilot. Sources: [baseline-001], [authority-001], [target-001], [build-001], [eval-001], [assignment-001].",
+      "evidenceIds": [
+        "baseline-001",
+        "authority-001",
+        "target-001",
+        "build-001",
+        "eval-001",
+        "assignment-001"
+      ],
+      "judgmentIds": [
+        "judgment-rationale-001"
+      ],
+      "content": {
+        "recommendation": "APPROVE",
+        "bullets": [
+          "Four-week, recommendation-only pilot",
+          "Dispatcher confirms every queue assignment",
+          "No customer commitment or fee-waiver tools"
+        ],
+        "facts": [
+          {
+            "label": "Pilot target",
+            "value": "<=20 min median; <=10% reclassified",
+            "evidenceIds": [
+              "target-001"
+            ]
+          },
+          {
+            "label": "Authority limit",
+            "value": "Duty manager retains commitments",
+            "evidenceIds": [
+              "authority-001"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "customer-profile",
+      "family": "profile",
+      "title": "Lattice Harbor coordinates exception recovery across three operating corridors",
+      "customerSafe": true,
+      "notes": "Fictional customer profile. Source: [customer-001]. The company description, business model, customer segments, and operating footprint are synthetic.",
+      "evidenceIds": [
+        "customer-001"
+      ],
+      "judgmentIds": [
+        "judgment-observation-001"
+      ],
+      "content": {
+        "company": "Lattice Harbor Logistics",
+        "businessModel": "Coordinates freight movements and exception recovery for regional manufacturers.",
+        "facts": [
+          {
+            "label": "Industry",
+            "value": "Freight logistics",
+            "evidenceIds": [
+              "customer-001"
+            ]
+          },
+          {
+            "label": "Business unit",
+            "value": "Network Operations",
+            "evidenceIds": [
+              "customer-001"
+            ]
+          },
+          {
+            "label": "Customers",
+            "value": "Regional manufacturers and distributors",
+            "evidenceIds": [
+              "customer-001"
+            ]
+          }
+        ],
+        "valueStatement": {
+          "statement": "Correct routing starts recovery work earlier and reduces dispatcher rework.",
+          "evidenceIds": [
+            "customer-001"
+          ]
+        },
+        "contexts": [
+          "Port",
+          "Rail",
+          "Warehouse"
+        ]
+      }
+    },
+    {
+      "id": "fictional-baseline",
+      "family": "metrics",
+      "title": "The fictional baseline shows delayed routing and repeated classification",
+      "customerSafe": true,
+      "notes": "Fictional baseline and target. Sources: [baseline-001], [target-001]. The sample and thresholds are synthetic.",
+      "evidenceIds": [
+        "baseline-001",
+        "target-001"
+      ],
+      "judgmentIds": [
+        "judgment-surprise-001"
+      ],
+      "content": {
+        "metrics": [
+          {
+            "label": "Median first routing",
+            "value": "47 min",
+            "context": "fictional baseline",
+            "evidenceIds": [
+              "baseline-001"
+            ]
+          },
+          {
+            "label": "Reclassified",
+            "value": "21.6%",
+            "context": "fictional baseline",
+            "evidenceIds": [
+              "baseline-001"
+            ]
+          },
+          {
+            "label": "Sample",
+            "value": "1,240",
+            "context": "exceptions / 4 weeks",
+            "evidenceIds": [
+              "baseline-001"
+            ]
+          }
+        ],
+        "outcome": {
+          "statement": "Reach <=20 minutes median and <=10% reclassification without transferring commitment authority.",
+          "evidenceIds": [
+            "target-001",
+            "authority-001"
+          ]
+        }
+      }
+    },
+    {
+      "id": "current-workflow",
+      "family": "workflow",
+      "title": "Dispatchers assemble one decision from three systems",
+      "customerSafe": true,
+      "notes": "Current workflow diagram. Source: [workflow-001]. The three sources, dispatcher activity, and queue assignment are synthetic.",
+      "evidenceIds": [
+        "workflow-001"
+      ],
+      "judgmentIds": [
+        "judgment-observation-001",
+        "judgment-failed-attempt-001"
+      ],
+      "content": {
+        "nodes": [
+          {
+            "id": "atlas-tms",
+            "label": "ATLAS TMS",
+            "detail": "shipment + status",
+            "role": "source"
+          },
+          {
+            "id": "shared-inbox",
+            "label": "SHARED INBOX",
+            "detail": "carrier + warehouse",
+            "role": "source"
+          },
+          {
+            "id": "routing-sheet",
+            "label": "ROUTING SHEET",
+            "detail": "local rules + notes",
+            "role": "source"
+          },
+          {
+            "id": "exception-dispatcher",
+            "label": "EXCEPTION DISPATCHER",
+            "detail": "copies context; interprets exception; selects queue",
+            "role": "actor"
+          },
+          {
+            "id": "queue-assignment",
+            "label": "QUEUE ASSIGNMENT",
+            "detail": "human-confirmed decision",
+            "role": "decision"
+          }
+        ],
+        "edges": [
+          {
+            "from": "atlas-tms",
+            "to": "exception-dispatcher",
+            "kind": "system"
+          },
+          {
+            "from": "shared-inbox",
+            "to": "exception-dispatcher",
+            "kind": "system"
+          },
+          {
+            "from": "routing-sheet",
+            "to": "exception-dispatcher",
+            "kind": "system"
+          },
+          {
+            "from": "exception-dispatcher",
+            "to": "queue-assignment",
+            "kind": "decision"
+          }
+        ]
+      }
+    },
+    {
+      "id": "pilot-findings",
+      "family": "findings",
+      "title": "Three findings define the pilot scope",
+      "customerSafe": true,
+      "notes": "Findings: [workflow-001], [baseline-001], [authority-001]. All findings and metrics are fictional.",
+      "evidenceIds": [
+        "workflow-001",
+        "baseline-001",
+        "authority-001"
+      ],
+      "judgmentIds": [
+        "judgment-observation-001",
+        "judgment-failed-attempt-001",
+        "judgment-surprise-001"
+      ],
+      "content": {
+        "items": [
+          {
+            "title": "Context is split across three systems",
+            "statement": "Dispatchers copy shipment data before routing.",
+            "consequence": "The decision basis is difficult to audit.",
+            "evidenceIds": [
+              "workflow-001"
+            ]
+          },
+          {
+            "title": "One in five fictional cases is reclassified",
+            "statement": "The sample records a 21.6 percent reclassification rate.",
+            "consequence": "Recovery may start in the wrong queue.",
+            "evidenceIds": [
+              "baseline-001"
+            ]
+          },
+          {
+            "title": "Routing and commitment are different authorities",
+            "statement": "Dispatchers confirm queues; duty managers authorize commitments.",
+            "consequence": "The pilot cannot expose commitment or waiver tools.",
+            "evidenceIds": [
+              "authority-001"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "target-responsibility",
+      "family": "responsibility",
+      "title": "The pilot separates retrieval, recommendation, and authority",
+      "customerSafe": true,
+      "notes": "Future-state responsibility allocation. Sources: [authority-001], [build-001]. The system cannot execute a commitment or fee waiver.",
+      "evidenceIds": [
+        "authority-001",
+        "build-001"
+      ],
+      "judgmentIds": [
+        "judgment-rationale-001"
+      ],
+      "content": {
+        "steps": [
+          {
+            "type": "deterministic",
+            "statement": "Retrieve authorized shipment and message context",
+            "evidenceIds": [
+              "build-001"
+            ]
+          },
+          {
+            "type": "model",
+            "statement": "Recommend one queue and cite the supporting context",
+            "evidenceIds": [
+              "build-001"
+            ]
+          },
+          {
+            "type": "human",
+            "statement": "Review evidence and confirm or reject",
+            "evidenceIds": [
+              "authority-001"
+            ]
+          }
+        ],
+        "excludedAuthority": {
+          "statement": "Customer ETA commitments and detention-fee waivers remain duty-manager decisions.",
+          "evidenceIds": [
+            "authority-001"
+          ]
+        }
+      }
+    },
+    {
+      "id": "offline-evaluation",
+      "family": "evaluation",
+      "title": "Offline evaluation supports supervised use, not autonomy",
+      "customerSafe": true,
+      "notes": "Fictional offline evaluation. Source: [eval-001]. Normal and edge cohorts passed; incomplete, ambiguous, and high-risk cohorts escalated.",
+      "evidenceIds": [
+        "eval-001"
+      ],
+      "judgmentIds": [
+        "judgment-rationale-001",
+        "judgment-surprise-001"
+      ],
+      "content": {
+        "cases": [
+          {
+            "cohort": "Normal",
+            "expected": "Expected queue + cited evidence",
+            "result": "pass",
+            "evidenceIds": [
+              "eval-001"
+            ]
+          },
+          {
+            "cohort": "Edge",
+            "expected": "Rare valid queue preserved",
+            "result": "pass",
+            "evidenceIds": [
+              "eval-001"
+            ]
+          },
+          {
+            "cohort": "Incomplete",
+            "expected": "Missing source named; no recommendation",
+            "result": "escalate",
+            "evidenceIds": [
+              "eval-001"
+            ]
+          },
+          {
+            "cohort": "Ambiguous",
+            "expected": "Source conflict shown to dispatcher",
+            "result": "escalate",
+            "evidenceIds": [
+              "eval-001"
+            ]
+          },
+          {
+            "cohort": "High-risk",
+            "expected": "Commitment refused; duty-manager route",
+            "result": "escalate",
+            "evidenceIds": [
+              "eval-001"
+            ]
+          }
+        ],
+        "releaseImplication": {
+          "statement": "Proceed to supervised recommendations; do not increase autonomy.",
+          "evidenceIds": [
+            "eval-001"
+          ]
+        }
+      }
+    },
+    {
+      "id": "pilot-risks",
+      "family": "risks",
+      "title": "The pilot contains the two highest-consequence risks",
+      "customerSafe": true,
+      "notes": "Highest-consequence risks and controls. Sources: [baseline-001], [authority-001], [build-001], [eval-001].",
+      "evidenceIds": [
+        "baseline-001",
+        "authority-001",
+        "build-001",
+        "eval-001"
+      ],
+      "judgmentIds": [
+        "judgment-rationale-001"
+      ],
+      "content": {
+        "items": [
+          {
+            "risk": "Wrong queue recommendation",
+            "impact": "Shipment recovery starts in the wrong team.",
+            "control": "Dispatcher confirms every recommendation and can route manually.",
+            "residualRisk": "Review still consumes dispatcher time.",
+            "evidenceIds": [
+              "baseline-001",
+              "build-001",
+              "eval-001"
+            ]
+          },
+          {
+            "risk": "Customer commitment authority is crossed",
+            "impact": "An unauthorized service or financial commitment is created.",
+            "control": "The system has no customer-communication or fee-waiver tool.",
+            "residualRisk": "A dispatcher could still make a separate manual commitment.",
+            "evidenceIds": [
+              "authority-001",
+              "build-001"
+            ]
+          }
+        ],
+        "stopCondition": {
+          "statement": "Stop if an authority breach occurs or a severe routing failure cannot be detected and reversed.",
+          "evidenceIds": [
+            "authority-001",
+            "eval-001"
+          ]
+        }
+      }
+    },
+    {
+      "id": "pilot-timeline",
+      "family": "timeline",
+      "title": "A four-week plan turns the decision into measured evidence",
+      "customerSafe": true,
+      "notes": "Decision and next steps. Sources: [target-001], [assignment-001], [assignment-002], [assignment-003]. Dates and owners are fictional.",
+      "evidenceIds": [
+        "target-001",
+        "assignment-001",
+        "assignment-002",
+        "assignment-003"
+      ],
+      "judgmentIds": [
+        "judgment-rationale-001"
+      ],
+      "content": {
+        "decision": {
+          "statement": "Approve or reject the supervised pilot",
+          "owner": "VP Network Operations",
+          "due": "29 AUG",
+          "evidenceIds": [
+            "assignment-001"
+          ]
+        },
+        "milestones": [
+          {
+            "label": "Pilot decision",
+            "owner": "VP Network Operations",
+            "due": "29 AUG",
+            "outcome": "Signed go or no-go",
+            "evidenceIds": [
+              "assignment-001"
+            ]
+          },
+          {
+            "label": "Measurement dashboard",
+            "owner": "Network Analytics Lead",
+            "due": "05 SEP",
+            "outcome": "Metrics visible",
+            "evidenceIds": [
+              "assignment-003"
+            ]
+          },
+          {
+            "label": "Pilot setup ready",
+            "owner": "Operations Systems",
+            "due": "08 SEP",
+            "outcome": "Release review passed",
+            "evidenceIds": [
+              "assignment-002"
+            ]
+          },
+          {
+            "label": "Measure and decide",
+            "owner": "VP Network Operations",
+            "due": "4 WEEKS",
+            "outcome": "Continue, change, or stop",
+            "evidenceIds": [
+              "target-001"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "evidence-register",
+      "family": "evidence",
+      "title": "Evidence, assumptions, and brand provenance remain visible",
+      "customerSafe": true,
+      "notes": "Evidence and provenance register. All company and engagement content is fictional.",
+      "evidenceIds": [
+        "customer-001",
+        "workflow-001",
+        "baseline-001",
+        "authority-001",
+        "target-001",
+        "build-001",
+        "eval-001",
+        "assignment-001",
+        "assignment-002",
+        "assignment-003",
+        "brand-001"
+      ],
+      "judgmentIds": [
+        "judgment-observation-001",
+        "judgment-failed-attempt-001",
+        "judgment-surprise-001",
+        "judgment-rationale-001"
+      ],
+      "content": {
+        "groups": [
+          {
+            "label": "Approved source set",
+            "items": [
+              "Company",
+              "Workflow and baseline",
+              "Authority and target",
+              "Build and evaluation"
+            ],
+            "evidenceIds": [
+              "customer-001",
+              "workflow-001",
+              "baseline-001",
+              "authority-001",
+              "target-001",
+              "build-001",
+              "eval-001"
+            ]
+          },
+          {
+            "label": "Fictional by design",
+            "items": [
+              "Company",
+              "People and systems",
+              "Workflow observations",
+              "Metrics and dates"
+            ],
+            "evidenceIds": [
+              "customer-001",
+              "baseline-001",
+              "assignment-001",
+              "assignment-002",
+              "assignment-003"
+            ]
+          },
+          {
+            "label": "Artifact controls",
+            "items": [
+              "Closed source set",
+              "Evidence IDs on claims",
+              "Customer-safe content",
+              "Brand provenance"
+            ],
+            "evidenceIds": [
+              "brand-001"
+            ]
+          }
+        ],
+        "controls": [
+          "No real customer data",
+          "No hidden reference assets",
+          "Rendered HTML and PPTX review"
+        ]
+      }
+    }
+  ]
+}

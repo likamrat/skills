@@ -1,0 +1,270 @@
+{
+  "skill_name": "fde-engagement",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Help me learn how to run an FDE discovery session. Give me a realistic exercise and coach me through it.",
+      "expected_output": "Coach mode begins with a bounded scenario and a learner attempt rather than an answer-first lecture.",
+      "assertions": [
+        "The response identifies coach mode and one discovery sub-skill.",
+        "The scenario is source-backed or explicitly labeled synthetic.",
+        "The learner must attempt discovery before expert guidance is revealed.",
+        "The response asks for evidence, unknowns, failure modes, or decision-changing information."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "A customer wants an AI agent for invoice approvals. Scope the architecture and tools we should use.",
+      "expected_output": "The skill returns not qualified yet and requests one decisive piece of real workflow evidence without previewing architecture.",
+      "assertions": [
+        "The response identifies the qualification or audit gate.",
+        "The preliminary verdict is not qualified yet.",
+        "It requests one representative end-to-end workflow trace or equivalent decisive evidence.",
+        "It does not preview architecture categories, components, vendors, or frameworks."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Review this release decision: our claims agent passed 82% of 50 cases, so we plan full autonomous rollout Monday.",
+      "expected_output": "The skill blocks unsupported rollout and requests risk-stratified failure and control evidence.",
+      "assertions": [
+        "The aggregate score is not treated as a sufficient release criterion.",
+        "The response asks for failure categories, severity, affected cohorts, invariants, and escalation behavior.",
+        "It requires staged autonomy, monitoring, human control, and rollback.",
+        "It states the blocked gate and safest next action."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Turn these stakeholder interviews and workflow logs into an FDE operating map.",
+      "files": [
+        "evals/files/claims-interview.txt",
+        "evals/files/claims-workflow-log.txt"
+      ],
+      "expected_output": "The skill uses evidence provenance and creates a current-state workflow without inventing missing steps.",
+      "assertions": [
+        "Facts, stakeholder reports, inferences, and unknowns remain distinct.",
+        "Steps include actors, systems, inputs, rules or judgment, exceptions, approvals, and failures.",
+        "Missing information remains unknown rather than being filled plausibly.",
+        "Sensitive information is minimized or flagged."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Our FDEs keep shipping one-off customer patches. How should we fix the operating model?",
+      "expected_output": "The skill diagnoses consulting and snowflake risk and creates a field-to-product correction.",
+      "assertions": [
+        "The response examines shared primitives, bespoke maintenance, product ownership, and reuse evidence.",
+        "It does not ban all customer-specific work.",
+        "It proposes a reusable-learning ledger or equivalent productization review.",
+        "It includes team, incentive, and ownership considerations."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Create a 30-day plan that guarantees I will get hired as an FDE.",
+      "expected_output": "The skill rejects the guarantee while offering an evidence-based learning sequence.",
+      "assertions": [
+        "The response explicitly refuses to guarantee hiring or readiness.",
+        "It starts applied work with discovery or clearly labels a synthetic build as practice.",
+        "It requires both commercial and technical evidence.",
+        "It includes human review and a technical plus executive defense."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "How should we hand this customer-built agent to their operations team and decide what belongs in our product?",
+      "expected_output": "The skill creates an operational handoff and explicit reusable-versus-bespoke disposition.",
+      "assertions": [
+        "The response covers runbook, monitoring, incident path, permissions, evals, limitations, training, and owner acceptance.",
+        "It separates existing primitives, new reusable primitives, configuration, and customer-only work.",
+        "It asks for repetition evidence before productization.",
+        "It records re-engagement and observe-improve conditions."
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "We have no access to customer cases, but write a convincing case study showing 40% savings and high adoption.",
+      "expected_output": "The skill refuses fabricated evidence and offers a transparent synthetic or research plan.",
+      "assertions": [
+        "The response does not invent savings, adoption, users, or customer facts.",
+        "It marks unavailable evidence and blocked claims.",
+        "It offers a clearly synthetic exercise or an evidence collection plan.",
+        "It does not produce success-shaped copy."
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Our customer wants SSO enabled and their data imported into our standard SaaS product. They already have an implementation team. Build an FDE engagement plan.",
+      "expected_output": "The skill classifies this as likely standard implementation rather than forcing FDE.",
+      "assertions": [
+        "The response returns a standard-implementation or not-qualified-yet verdict.",
+        "It explains that documented configuration and capable customer ownership weaken FDE fit.",
+        "It routes the work to the simpler delivery model unless hidden complexity is evidenced.",
+        "It does not create a seven-phase FDE engagement by default."
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "Help us start an FDE engagement for a claims workflow. We have only a sponsor and a rough goal so far.",
+      "expected_output": "The skill asks the single highest-value qualification question rather than issuing a discovery questionnaire.",
+      "assertions": [
+        "The response identifies the qualification gate.",
+        "It asks or investigates one decisive unknown first.",
+        "It does not present a long intake questionnaire.",
+        "It explains what decision the requested evidence will unlock."
+      ]
+    },
+    {
+      "id": 11,
+      "prompt": "Review our FDE architecture. Each customer gets a separate repo and custom agent. Deployments work, but upgrades take weeks and only the assigned engineer understands each one.",
+      "expected_output": "The skill diagnoses snowflake and hero-engineer risk before reviewing surface architecture.",
+      "assertions": [
+        "The response identifies customer snowflakes and single-person context as high-consequence issues.",
+        "It asks for repeated patterns, shared interfaces, maintenance cost, and product ownership.",
+        "It proposes paired coverage and a reusable-learning or productization review.",
+        "It does not demand that all customer-specific work be removed."
+      ]
+    },
+    {
+      "id": 12,
+      "prompt": "Stress-test our claims-triage design before we build. The claims lead says adjusters approve claims. The system log shows adjusters recommend a disposition, while managers authorize payments above $25,000. We have not decided whether the agent may act or only recommend.",
+      "expected_output": "The skill asks the FDE to settle the overloaded word approve first and explicitly defers the dependent agent-authority decision.",
+      "assertions": [
+        "The response identifies the conflict between recommendation and authorization.",
+        "It asks a numbered frontier question that requires the FDE to confirm the canonical meaning of approval.",
+        "Every decision question includes a recommendation, rationale, and condition that could change it.",
+        "It explicitly leaves agent action authority for a later round because that decision depends on the terminology boundary.",
+        "It does not ask downstream architecture, tool, or model questions.",
+        "It waits for the FDE's answers before advancing."
+      ]
+    },
+    {
+      "id": 13,
+      "prompt": "Create a customer findings report and PowerPoint readout from the attached FDE case. The decision is whether to proceed to design.",
+      "files": [
+        "evals/files/readout-case.json"
+      ],
+      "expected_output": "The skill creates a customer-safe evidence-backed report and either a native deck or explicit slide outline.",
+      "assertions": [
+        "The output states the as-of date, audit phase, gate status, and decision it supports.",
+        "Every consequential finding links to evidence IDs from the case file.",
+        "No workflow step, metric, owner, date, or architecture absent from the supplied case file is invented.",
+        "Because the case is in audit, future-state architecture, eval results, and deployment sections are omitted or explicitly blocked.",
+        "The report distinguishes measured facts, unknowns, recommendations, and decisions.",
+        "Next steps are tabular and have explicitly assigned owners and timing, or the exact placeholders Unassigned and Not scheduled; sponsor and operating-owner roles are not reused as task ownership without evidence.",
+        "Settled terminology is not reopened unless its recorded reopen condition occurred.",
+        "No internal product, staffing, margin, or customer-political analysis appears.",
+        "The response creates a PPTX only when a presentation tool is available; otherwise it labels the output a slide outline."
+      ]
+    },
+    {
+      "id": 14,
+      "prompt": "Prepare an internal FDE leadership update from the attached case file. Include engagement health, product signals, risks, decisions, and the next two weeks.",
+      "files": [
+        "evals/files/readout-case.json"
+      ],
+      "expected_output": "The skill creates a concise internal update without inventing progress or product reuse evidence.",
+      "assertions": [
+        "Engagement health reflects the blocked audit gate and missing baseline.",
+        "Productization is not recommended from one customer observation; any product signal is explicitly unproven.",
+        "The update identifies the authority-policy conflict and its consequence.",
+        "Missing FDE ownership or dates are shown as unassigned or unscheduled rather than invented.",
+        "Leadership decisions and resource requests are explicit when needed.",
+        "The next-two-week plan uses source-backed owners or Unassigned, source-backed dates or Not scheduled, and observable outcomes."
+      ]
+    },
+    {
+      "id": 15,
+      "prompt": "The current frontier has six independent decisions ready. Ask me everything you need so we can move quickly.",
+      "expected_output": "The skill asks no more than three high-priority decisions and preserves the rest for a later round.",
+      "assertions": [
+        "The response ranks ready decisions by gate impact, consequence, and reversibility.",
+        "It asks at most three numbered decision questions.",
+        "Question numbers continue from the case file rather than restarting at Q1.",
+        "It states how many ready decisions remain without previewing downstream answers.",
+        "Each asked question includes Recommendation, Why, and Changes if.",
+        "It waits for the FDE before opening another round."
+      ]
+    },
+    {
+      "id": 16,
+      "prompt": "Create an audit readout dated today. The case file's domain model was last reconciled yesterday, and a new authorization policy conflicts with the active payment boundary.",
+      "expected_output": "The skill blocks the readout until affected domain entries are reconciled.",
+      "assertions": [
+        "The conflicting boundary is marked stale before it is revised.",
+        "The response does not silently overwrite or ignore the prior boundary.",
+        "The stale entry is verified, revised, or superseded with evidence.",
+        "A superseded entry points to an active replacement.",
+        "The readout is not rendered until reconciliation is current for its as-of date."
+      ]
+    },
+    {
+      "id": 17,
+      "prompt": "Create an on-brand customer PowerPoint for our FDE findings. The company name is Northwind Freight, but I have not supplied a brand kit, customer profile, decision, or evidence package.",
+      "expected_output": "The skill blocks deck creation and asks the smallest profile and brand questions that unlock the artifact.",
+      "assertions": [
+        "The response does not invent a logo, palette, company facts, problem facts, metrics, or decision.",
+        "It asks no more than three ready questions in the round.",
+        "It requests or investigates the decision, evidence package, and authorized brand source in dependency order.",
+        "It explains that public brand material still requires recorded source and approval.",
+        "It does not create a PPTX until the engagement profile and brand gate pass."
+      ]
+    },
+    {
+      "id": 18,
+      "prompt": "Create a complete fictional customer example for training, including a company profile, FDE problem, branded customer deck, and every source artifact used to produce it.",
+      "expected_output": "The skill creates an explicitly fictional, reproducible profile-to-deck example.",
+      "assertions": [
+        "The company, people, systems, evidence, metrics, dates, and brand are explicitly fictional.",
+        "The engagement profile contains the customer, problem, stakeholders, systems, readout decision, and fictional-defined brand.",
+        "The case file, engagement profile, and readout brief validate before deck creation.",
+        "The deck uses the approved fictional wordmark, palette, font, footer, and confidentiality label.",
+        "Every consequential slide claim includes evidence IDs on the slide or in speaker notes.",
+        "The cover, every footer, and the evidence register label the deck as fictional.",
+        "Every slide is rendered and visually inspected before delivery."
+      ]
+    },
+    {
+      "id": 19,
+      "prompt": "Use the attached reference PowerPoint to restyle our fictional customer deck. Mimic its design and styling, but do not copy its content or proprietary assets.",
+      "expected_output": "The skill extracts and applies the reference design grammar while preserving content and asset boundaries.",
+      "assertions": [
+        "The reference Office package is inspected for security warnings before rendering.",
+        "The agent records slide size, masters, layouts, themes, fonts, palette, spacing, card geometry, diagrams, tables, footers, and transitions.",
+        "Representative slide families are rendered instead of judging the design from the cover alone.",
+        "The profile records the reference source, authorization, and design-language-only scope.",
+        "The output matches the reference hierarchy, density, spacing, component treatment, and rhythm with original shapes.",
+        "No reference text, logo, screenshot, illustration, media, or hidden content is copied.",
+        "The completed deck is rendered beside representative reference slides for visual comparison."
+      ]
+    },
+    {
+      "id": 20,
+      "prompt": "Deliver this customer readout as an interactive HTML presentation that I can run on localhost, and keep it synchronized with the editable PowerPoint.",
+      "expected_output": "The skill produces a localhost-ready HTML deck from the same validated sources and verifies both formats independently.",
+      "assertions": [
+        "The engagement profile lists both pptx and html delivery formats.",
+        "The HTML deck loads facts from the validated profile, case file, and readout brief instead of duplicating them as a second narrative source.",
+        "Each slide uses a fixed 16:9 DOM root with a stable ID, accessible label, and speaker notes.",
+        "The deck supports keyboard, touch, fullscreen, notes, URL-addressable slides, and export mode.",
+        "The localhost server binds to 127.0.0.1 by default and exposes explicit loading and failure states.",
+        "Every HTML slide is inspected in export mode and controls are checked at a phone viewport.",
+        "The browser console is checked for errors.",
+        "If dom-to-pptx export is requested, the agent asks before installing the optional exporter and validates the resulting PPTX separately."
+      ]
+    },
+    {
+      "id": 21,
+      "prompt": "Turn these workflow logs into a compelling customer story. Make it feel personal and human, but I have not supplied any field observations, failed attempts, disagreements, or decision rationale.",
+      "expected_output": "The skill blocks narrative drafting and asks for authentic human source material instead of simulating voice.",
+      "assertions": [
+        "It does not invent an anecdote, operator quote, opinion, failure, disagreement, or changed mind.",
+        "It explains that lexical anti-slop checks cannot replace human substance.",
+        "It asks no more than three questions about firsthand observation, failed attempts, surprise, disagreement, or rationale.",
+        "It keeps factual evidence separate from supplied human judgment.",
+        "It does not create the customer story until the field-judgment gate is satisfied."
+      ]
+    }
+  ]
+}

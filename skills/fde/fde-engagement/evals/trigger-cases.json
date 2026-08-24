@@ -1,0 +1,29 @@
+{
+  "skill_name": "fde-engagement",
+  "note": "Declared activation fixtures. Run them through each target agent and record whether this skill actually loads.",
+  "should_trigger": [
+    "Teach me how to practice FDE customer discovery.",
+    "Help me qualify whether this customer problem needs a forward deployed engineer.",
+    "Turn these workflow observations into an operating map.",
+    "Design evals and rollout gates for this customer-facing agent.",
+    "Review our FDE engagement plan before we deploy.",
+    "How should we hand this deployment to the customer and feed learning back to product?",
+    "Our FDE team keeps creating customer snowflakes. Diagnose the operating model.",
+    "Coach me through an FDE architecture tradeoff.",
+    "Build an evidence-based FDE case study from these artifacts.",
+    "Plan a bounded-autonomy rollout for a high-risk customer workflow.",
+    "Create a customer findings report and PowerPoint readout from this FDE case.",
+    "Prepare the weekly FDE leadership update with risks, product signals, and next steps."
+  ],
+  "should_not_trigger": [
+    "Show me how to call the OpenAI Responses API from TypeScript.",
+    "What is the average salary for a forward deployed engineer in New York?",
+    "Write a generic enterprise sales discovery script for our account executives.",
+    "Should I use LangGraph or CrewAI for my weekend chatbot?",
+    "Explain what a REST API is.",
+    "Create a project plan for our internal website redesign.",
+    "Write a cover letter for an FDE job.",
+    "Compare AWS and Azure pricing for Kubernetes.",
+    "Make a generic quarterly business review presentation for Sales."
+  ]
+}

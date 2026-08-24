@@ -1,0 +1,17 @@
+{
+  "skill_name": "fde-readout",
+  "should_trigger": [
+    "Create a customer FDE readout from this evidence as HTML and PowerPoint.",
+    "Turn this FDE case into a leadership decision deck.",
+    "Use this PPTX as a design reference for our customer readout.",
+    "Review this FDE presentation for evidence, alignment, and overflow.",
+    "Build an interactive localhost deck and editable PowerPoint from this plan."
+  ],
+  "should_not_trigger": [
+    "Make a generic presentation about AI trends.",
+    "Write code for a PowerPoint add-in.",
+    "Research FDE salaries.",
+    "Create a marketing pitch deck without customer evidence.",
+    "Summarize this meeting in plain text."
+  ]
+}

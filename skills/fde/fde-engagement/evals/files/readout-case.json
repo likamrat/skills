@@ -1,0 +1,243 @@
+{
+  "version": "1.0",
+  "mode": "engage",
+  "phase": "audit",
+  "gate": {
+    "status": "blocked",
+    "reason": "Design is blocked until the triage baseline and written authorization policy are available.",
+    "evidenceIds": [
+      "interview-002",
+      "log-001"
+    ]
+  },
+  "classification": {
+    "verdict": "FDE",
+    "reason": "Undocumented authority rules require embedded discovery and may inform a reusable control model.",
+    "alternativesConsidered": [
+      "standard implementation"
+    ]
+  },
+  "evidence": [
+    {
+      "id": "interview-001",
+      "statement": "The claims lead uses approve to describe the adjuster's role.",
+      "class": "stakeholder_report",
+      "source": "Claims lead interview",
+      "observedAt": "2026-08-20",
+      "confidence": "medium",
+      "disproof": "The claims lead confirms approve meant recommend only.",
+      "sensitivity": "internal",
+      "authorized": true
+    },
+    {
+      "id": "log-001",
+      "statement": "The system records adjuster recommendation and manager authorization as separate events above $25,000.",
+      "class": "system_record",
+      "source": "Claims workflow log",
+      "observedAt": "2026-08-21",
+      "confidence": "high",
+      "disproof": "The log schema or event mapping is shown to be incorrect.",
+      "sensitivity": "internal",
+      "authorized": true
+    },
+    {
+      "id": "interview-002",
+      "statement": "The claims lead cannot provide a reliable triage-time baseline.",
+      "class": "stakeholder_report",
+      "source": "Claims lead interview",
+      "observedAt": "2026-08-20",
+      "confidence": "high",
+      "disproof": "Historical workflow timestamps produce a reliable baseline.",
+      "sensitivity": "internal",
+      "authorized": true
+    }
+  ],
+  "outcomeContract": {
+    "outcome": "Reduce claim triage time without changing payment authority.",
+    "baseline": {
+      "value": "Baseline not yet measured",
+      "source": "Claims lead interview"
+    },
+    "target": "Establish a measured baseline before design.",
+    "sponsor": "VP Claims Operations",
+    "operator": "Claims adjuster",
+    "operatingOwner": "Claims operations lead",
+    "valueMechanism": "Shorter queue time with preserved financial controls",
+    "constraints": [
+      "Payment authority must remain auditable"
+    ],
+    "nonGoals": [
+      "Autonomous payment execution"
+    ],
+    "stopConditions": [
+      "Authorization policy remains unavailable"
+    ]
+  },
+  "decisionTree": {
+    "nextQuestionNumber": 2,
+    "nodes": [
+      {
+        "id": "approval-language",
+        "branch": "actors-and-authority",
+        "questionNumber": 1,
+        "question": "Does approve mean recommend disposition or authorize payment?",
+        "prerequisites": [],
+        "evidenceNeeded": [
+          "Interview and system event comparison"
+        ],
+        "evidenceReady": true,
+        "recommendation": "Use recommend and authorize as separate canonical terms.",
+        "status": "settled",
+        "answer": "Adjusters recommend; managers authorize above $25,000.",
+        "deferredReason": "",
+        "deferredOwner": "",
+        "evidenceIds": [
+          "interview-001",
+          "log-001"
+        ],
+        "reopenIf": "The written authorization policy contradicts the system events."
+      }
+    ],
+    "frontier": [],
+    "rounds": [
+      {
+        "id": "round-1",
+        "status": "answered",
+        "nodeIds": [
+          "approval-language"
+        ]
+      }
+    ]
+  },
+  "domainModel": {
+    "reconciliation": {
+      "status": "current",
+      "asOf": "2026-08-23",
+      "reason": "Reconciled after comparing the interview with workflow events.",
+      "evidenceIds": [
+        "interview-001",
+        "log-001"
+      ]
+    },
+    "terms": [
+      {
+        "id": "term-recommend-disposition",
+        "lifecycle": "active",
+        "lastVerifiedAt": "2026-08-23",
+        "lifecycleReason": "Verified against the interview and workflow log.",
+        "supersededBy": "",
+        "term": "Recommend disposition",
+        "definition": "An adjuster's proposed claim outcome without final payment authority.",
+        "avoid": [
+          "Approve"
+        ],
+        "examples": [
+          "Recommend payment"
+        ],
+        "evidenceIds": [
+          "interview-001",
+          "log-001"
+        ]
+      }
+    ],
+    "actors": [
+      {
+        "id": "actor-claims-adjuster",
+        "lifecycle": "active",
+        "lastVerifiedAt": "2026-08-23",
+        "lifecycleReason": "Verified against the interview and workflow log.",
+        "supersededBy": "",
+        "name": "Claims adjuster",
+        "responsibility": "Reviews claim evidence and recommends disposition.",
+        "authority": "Payment authority is not established below $25,000.",
+        "incentivesAndRisks": "Balances resolution speed against loss and compliance risk.",
+        "workflowParticipation": "Reviews evidence and records a recommendation.",
+        "evidenceIds": [
+          "interview-001",
+          "log-001"
+        ]
+      }
+    ],
+    "systems": [
+      {
+        "id": "system-claims-system",
+        "lifecycle": "active",
+        "lastVerifiedAt": "2026-08-23",
+        "lifecycleReason": "Verified against the workflow log.",
+        "supersededBy": "",
+        "name": "Claims system",
+        "role": "Records recommendations and authorization events.",
+        "sourceOfTruth": true,
+        "owner": "Claims operations",
+        "dataRead": [
+          "Claim evidence"
+        ],
+        "dataWritten": [
+          "Recommendation and authorization events"
+        ],
+        "knownDrift": [],
+        "evidenceIds": [
+          "log-001"
+        ]
+      }
+    ],
+    "boundaries": [
+      {
+        "id": "boundary-payment-authority",
+        "lifecycle": "active",
+        "lastVerifiedAt": "2026-08-23",
+        "lifecycleReason": "Verified against the workflow log.",
+        "supersededBy": "",
+        "name": "Payment authority",
+        "inside": "Triage and recommendation",
+        "outside": "Payment execution",
+        "owner": "Claims operations lead",
+        "crossingMechanism": "Recorded manager authorization",
+        "evidenceIds": [
+          "log-001"
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "id": "relationship-adjuster-recommends-disposition",
+        "lifecycle": "active",
+        "lastVerifiedAt": "2026-08-23",
+        "lifecycleReason": "Verified against the workflow log.",
+        "supersededBy": "",
+        "subject": "Claims adjuster",
+        "verb": "recommends",
+        "object": "Claim disposition",
+        "evidenceIds": [
+          "log-001"
+        ]
+      }
+    ],
+    "conflicts": []
+  },
+  "operatingMap": {
+    "steps": [
+      {
+        "name": "Recommend claim disposition",
+        "actor": "Claims adjuster",
+        "trigger": "Claim evidence is ready for review",
+        "system": "Claims system",
+        "exceptions": [
+          "Payment authority below $25,000 is not yet documented"
+        ],
+        "failures": [
+          "Recommendation is mistaken for authorization"
+        ],
+        "evidenceIds": [
+          "interview-001",
+          "log-001"
+        ]
+      }
+    ],
+    "unknowns": [
+      "Measured triage-time baseline",
+      "Written authorization policy below $25,000"
+    ]
+  },
+  "assignments": []
+}
