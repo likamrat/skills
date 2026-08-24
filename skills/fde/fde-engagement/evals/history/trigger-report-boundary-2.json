@@ -1,0 +1,75 @@
+{
+  "summary": {
+    "skill": "fde-engagement",
+    "model": "gpt-5.6-sol",
+    "runsPerCase": 3,
+    "generatedAt": "2026-08-24T20:11:00.213Z",
+    "cases": 1,
+    "trials": 3,
+    "passedCases": 1,
+    "casePassRate": 1,
+    "threshold": 0.5,
+    "positiveTriggerRate": null,
+    "negativeTriggerRate": 0,
+    "totalTokens": 30402,
+    "totalSessionDurationMs": 58769
+  },
+  "caseResults": [
+    {
+      "id": "should-not-trigger-10",
+      "query": "Turn this approved FDE case into synchronized HTML and PowerPoint slides.",
+      "shouldTrigger": false,
+      "runs": 3,
+      "triggerRate": 0,
+      "threshold": 0.5,
+      "passed": true
+    }
+  ],
+  "trials": [
+    {
+      "id": "should-not-trigger-10",
+      "query": "Turn this approved FDE case into synchronized HTML and PowerPoint slides.",
+      "shouldTrigger": false,
+      "trial": 1,
+      "matchedExpectation": true,
+      "exitCode": 0,
+      "startedAt": "2026-08-24T20:09:52.367Z",
+      "activated": false,
+      "totalTokens": 10018,
+      "apiDurationMs": 5927,
+      "sessionDurationMs": 16417,
+      "premiumRequests": 1,
+      "error": null
+    },
+    {
+      "id": "should-not-trigger-10",
+      "query": "Turn this approved FDE case into synchronized HTML and PowerPoint slides.",
+      "shouldTrigger": false,
+      "trial": 2,
+      "matchedExpectation": true,
+      "exitCode": 0,
+      "startedAt": "2026-08-24T20:10:10.968Z",
+      "activated": false,
+      "totalTokens": 10018,
+      "apiDurationMs": 7507,
+      "sessionDurationMs": 18216,
+      "premiumRequests": 1,
+      "error": null
+    },
+    {
+      "id": "should-not-trigger-10",
+      "query": "Turn this approved FDE case into synchronized HTML and PowerPoint slides.",
+      "shouldTrigger": false,
+      "trial": 3,
+      "matchedExpectation": true,
+      "exitCode": 0,
+      "startedAt": "2026-08-24T20:10:33.591Z",
+      "activated": false,
+      "totalTokens": 10366,
+      "apiDurationMs": 12076,
+      "sessionDurationMs": 24136,
+      "premiumRequests": 1,
+      "error": null
+    }
+  ]
+}

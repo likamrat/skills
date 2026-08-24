@@ -13,6 +13,8 @@ metadata:
 
 Turn an FDE decision and its approved evidence into a customer-safe or leadership-safe presentation whose HTML and PowerPoint versions share one validated plan.
 
+Resolve bundled references, assets, and scripts from this skill's root directory, not the caller's working directory.
+
 ## Operating rules
 
 1. **Support a decision.** A readout is not an activity log, success story, or case-file dump.
@@ -106,58 +108,26 @@ Use only the families required by the decision. The first slide is `cover`; the 
 
 Read [references/html-delivery.md](references/html-delivery.md).
 
-Render:
+Render and serve:
 
 ```text
 node scripts/render-html.mjs path/to/readout-plan.json path/to/output-directory
-```
-
-Serve:
-
-```text
 node scripts/serve.mjs path/to/output-directory --port 4173
 ```
 
-The HTML renderer is always available. It emits a self-contained `index.html` with:
-
-- fixed 1600×900 slides;
-- uniform viewport scaling;
-- keyboard, touch, fullscreen, notes, hash navigation, print, and export modes;
-- embedded plan data and no remote runtime assets.
-
-Inspect a presentation viewport, a phone viewport, and every slide in export mode. Check the browser console and failure state.
+The bundled renderer is dependency-free. Inspect desktop, phone, export mode, controls, console, and failure state before delivery.
 
 ## Build editable PowerPoint
 
 Read [references/powerpoint-delivery.md](references/powerpoint-delivery.md).
 
-Preferred paths:
-
-1. **Native Office presentation tool available:** build editable shapes, tables, charts, diagrams, and speaker notes directly from the plan.
-2. **Approved HTML conversion:** run `dom-to-pptx` against the validated HTML export mode after disclosing its Puppeteer/PptxGenJS dependencies and receiving approval.
-3. **No PPTX renderer:** deliver HTML and the validated plan; state that `.pptx` was not created.
-
-Do not silently substitute a screenshot-only deck for editable PowerPoint.
-
-After PPTX creation:
-
-- inspect package warnings, macros, OLE objects, external relationships, slide size, masters, and notes;
-- render every slide;
-- check overflow, overlap, chart/table fidelity, font substitution, notes, and audience-safe content;
-- compare PPTX and HTML against the plan, not against each other alone.
+Use the native Office path when available. Optional conversion requires approval after dependency disclosure. Never substitute a screenshot-only deck. Render and inspect the package and every slide against the plan.
 
 ## Restyle from a reference deck
 
 Read [references/reference-decks.md](references/reference-decks.md).
 
-1. Inspect the Office package before rendering.
-2. Render cover, section, comparison, process, architecture, data/table, decision, and closing families.
-3. Record slide size, safe margins, type hierarchy, palette roles, component geometry, diagrams, tables, image crops, footers, notes, and transitions.
-4. Set style-reference scope to `design-language-only` or `approved-asset-reuse`.
-5. Rebuild with original shapes and the readout's content.
-6. Compare representative output slides beside the reference.
-
-Never copy hidden content, notes, logos, screenshots, illustrations, or media under design-language-only scope.
+Inspect the package before rendering, set the authorized reuse scope, rebuild with original shapes, and compare representative slide families. Under `design-language-only`, never copy hidden content, notes, logos, screenshots, illustrations, or media.
 
 ## Quality gates
 

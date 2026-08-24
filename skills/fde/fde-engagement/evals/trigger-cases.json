@@ -12,8 +12,8 @@
     "Coach me through an FDE architecture tradeoff.",
     "Build an evidence-based FDE case study from these artifacts.",
     "Plan a bounded-autonomy rollout for a high-risk customer workflow.",
-    "Create a customer findings report and PowerPoint readout from this FDE case.",
-    "Prepare the weekly FDE leadership update with risks, product signals, and next steps."
+    "Create a customer findings report from this FDE case.",
+    "Prepare the weekly written FDE leadership update with risks, product signals, and next steps."
   ],
   "should_not_trigger": [
     "Show me how to call the OpenAI Responses API from TypeScript.",
@@ -24,6 +24,7 @@
     "Create a project plan for our internal website redesign.",
     "Write a cover letter for an FDE job.",
     "Compare AWS and Azure pricing for Kubernetes.",
-    "Make a generic quarterly business review presentation for Sales."
+    "Make a generic quarterly business review presentation for Sales.",
+    "Turn this approved FDE case into synchronized HTML and PowerPoint slides."
   ]
 }

@@ -114,10 +114,16 @@ A skill change can ship when:
 
 | Skill | Readiness | Empirical evidence | Core size | Trigger cases | Behavior cases |
 |---|---:|---|---|---:|---:|
-| `fde-engagement` | 94 | Not measured | 205 lines, about 3,364 tokens | 12 positive, 9 negative | 21 cases, 108 assertions |
-| `fde-readout` | 98 | Activation only | 205 lines, about 2,450 tokens | 10 positive, 10 negative | 5 cases, 19 assertions |
+| `fde-engagement` | 96 | Limited activation and behavior evidence | 208 lines, about 3,598 tokens | 12 positive, 10 negative | 21 cases, 108 assertions |
+| `fde-readout` | 98 | Activation evidence only | 175 lines, about 2,160 tokens | 10 positive, 10 negative | 5 cases, 19 assertions |
 
-The engagement core was reduced from about 4,900 to 3,364 tokens by removing detail already available through contextual references. The readout trigger set was expanded from 10 to 20 cases before description tuning.
+The engagement core was reduced from about 4,900 to 3,598 tokens by removing detail already available through contextual references, then adding explicit presentation routing and handoff triggers. The readout core was reduced from about 2,450 to 2,160 tokens by moving renderer procedures to conditional references. Its trigger set was expanded from 10 to 20 cases before description tuning.
+
+The latest readout smoke run loaded all 10 positive cases and skipped 9 of 10 negative cases. The remaining salary-research near miss loaded in one of three targeted trials, a `0.33` trigger rate below the `0.5` failure threshold. Treat the one-trial full run as a smoke check and the repeated targeted run as the stronger result for that case.
+
+The engagement report boundary loaded both written-report cases in all six trials. Its HTML and PowerPoint near miss initially loaded in two of three trials; after the description named `fde-readout` as the presentation route, it skipped in all three trials.
+
+For behavior evals 2, 3, and 7, the trimmed engagement candidate passed 11 of 12 assertions versus 9 of 12 for `fd01af7`. It preserved architecture gating and improved rollout safety and handoff coverage, but initially missed concrete re-engagement conditions. After that rule was added, eval 7 passed all four assertions in a fresh regression run. These are single behavior trials, so they are evidence of direction, not a reliability benchmark.
 
 ## Sources
 

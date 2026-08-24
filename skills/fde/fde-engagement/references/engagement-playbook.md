@@ -239,7 +239,8 @@ Transfer operations and decide which field work remains customer-specific, can b
 - maintenance and upgrade plan;
 - user and owner training;
 - open risks and decisions;
-- support and re-engagement conditions.
+- support and re-engagement conditions with observable triggers, responsible owner, and response;
+- next observe-and-improve decision with measurable reopen conditions.
 
 ### Reuse review
 

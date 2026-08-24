@@ -1,0 +1,40 @@
+{
+  "skill": "fde-engagement",
+  "model": "gpt-5.6-sol",
+  "evalId": 7,
+  "generatedAt": "2026-08-24",
+  "trials": 1,
+  "assertionsPassed": 4,
+  "assertions": 4,
+  "results": [
+    {
+      "assertion": "The handoff covers runbook, monitoring, incident path, permissions, evals, limitations, training, and owner acceptance.",
+      "passed": true,
+      "evidence": "The response included dashboards and alerts, incident severities, permissions, a versioned eval suite, limitations, training, and owner acceptance."
+    },
+    {
+      "assertion": "The response separates existing primitives, new reusable primitives, configuration, and customer-only work.",
+      "passed": true,
+      "evidence": "The response used separate existing shared primitive, new reusable primitive, customer configuration, and customer-only customization categories."
+    },
+    {
+      "assertion": "The response asks for repetition evidence before productization.",
+      "passed": true,
+      "evidence": "The response stated that one implementation is a hypothesis and required evidence from another distinct engagement."
+    },
+    {
+      "assertion": "The response records re-engagement and observe-and-improve conditions.",
+      "passed": true,
+      "evidence": "The response named eval regression, rollback failure, permission expansion, threshold breaches, and upgrades as re-engagement triggers, and reopened the decision when operations could not detect, contain, recover, and escalate."
+    }
+  ],
+  "usage": {
+    "inputTokens": 175785,
+    "outputTokens": 1462,
+    "reasoningTokens": 284,
+    "wallDurationSeconds": 64.239,
+    "apiDurationSeconds": 37.021
+  },
+  "releaseBlocker": null,
+  "rawTracesCommitted": false
+}

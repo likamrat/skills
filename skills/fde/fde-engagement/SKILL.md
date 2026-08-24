@@ -1,7 +1,7 @@
 ---
 name: fde-engagement
 description: >-
-  Guide, teach, review, or report on an end-to-end forward deployed engineering (FDE) customer engagement: qualify the work, audit the real workflow, define an outcome, assign human/rules/model responsibility, build and evaluate a production system, deploy safely, measure adoption, hand off operations, and record evidence for product reuse. Use when the user asks to run or practice an FDE engagement, conduct customer discovery, produce an operating map, plan evals or rollout, review engagement artifacts, diagnose a deployment, or create a customer report, leadership update, or readout deck. Do not use for generic AI app coding, generic consulting or sales advice, salary research, interview trivia, or project management without an embedded customer outcome.
+  Guide, teach, review, or report on an end-to-end forward deployed engineering (FDE) customer engagement: qualify the work, audit the real workflow, define an outcome, assign human/rules/model responsibility, build and evaluate a production system, deploy safely, measure adoption, hand off operations, and record evidence for product reuse. Use when the user asks to run or practice an FDE engagement, conduct customer discovery, produce an operating map, plan evals or rollout, review engagement artifacts, diagnose a deployment, or create a written findings, leadership, or handoff report. For any slide, deck, presentation, HTML, PowerPoint, or ReadoutPlan request, use `fde-readout` instead, even when the source is an FDE engagement. Do not use for generic AI app coding, consulting or sales advice, salary research, interview trivia, or project management without an embedded customer outcome.
 license: MIT
 compatibility: Works in conversational agents. File and shell tools are optional. Node.js 18+ is required only for the included validators. Real engagements require authorized customer evidence.
 metadata:
@@ -12,6 +12,8 @@ metadata:
 # Forward deployed engineering (FDE) engagement
 
 Determine whether a customer problem warrants FDE, carry qualified work through production and handoff, and record evidence that may apply beyond one customer.
+
+Resolve bundled references, assets, and scripts from this skill's root directory, not the caller's working directory.
 
 ## Operating rules
 
@@ -36,17 +38,17 @@ Choose one mode. State it in one line.
 | Learn, practice, role-play, or build a portfolio | `coach` | Establish the sub-skill and difficulty, then require an attempt before teaching |
 | Work on a real customer outcome | `engage` | Identify the current phase and the evidence needed for its gate |
 | Critique a plan, artifact, architecture, or deployment | `review` | Test claims and stage-gate evidence before suggesting edits |
-| Create a customer report, leadership update, handoff report, or presentation | `report` | Select the audience and decision, then build an evidence-approved readout brief |
+| Create a non-presentation customer report, leadership update, or handoff report | `report` | Select the audience and decision, then build an evidence-approved readout brief |
 
-If an output artifact is requested, prefer `report`. If an artifact is supplied for critique, prefer `review`. If the user is learning, prefer `coach`. Otherwise use `engage`.
+If a written lifecycle artifact is requested, prefer `report`. Route slides, decks, HTML, PowerPoint, and `ReadoutPlan` work to `fde-readout`. If an artifact is supplied for critique, prefer `review`. If the user is learning, prefer `coach`. Otherwise use `engage`.
 
 ## Question decisions and maintain the domain model
 
-For decision-bearing `coach`, `engage`, or `review` work, combine:
+Load only the reference needed for the current condition:
 
-- [references/grilling.md](references/grilling.md) to build a decision tree and question the current frontier;
-- [references/domain-modeling.md](references/domain-modeling.md) to sharpen language and update the shared domain model as answers resolve.
-- [references/human-judgment.md](references/human-judgment.md) to capture the human source material that evidence alone cannot provide.
+- read [references/grilling.md](references/grilling.md) when unresolved decisions require questioning;
+- read [references/domain-modeling.md](references/domain-modeling.md) when terminology, boundaries, or shared vocabulary must be reconciled;
+- read [references/human-judgment.md](references/human-judgment.md) before durable narrative, design rationale, retrospective, or review of the human layer.
 
 Ask at most three independent frontier questions whose prerequisites are settled. Each uses `Q#`, `Recommendation`, `Why`, and `Changes if`. Record each answer, reconcile the domain model, recompute the frontier, and wait. Terminology or boundary conflicts block dependent authority, architecture, and scope decisions.
 
@@ -80,7 +82,7 @@ Architecture and tool selection cannot begin before the audit and design gates. 
 
 ## Build a decision-sufficient engagement profile
 
-For substantial `engage`, `review`, or `report` work, read [references/engagement-profile.md](references/engagement-profile.md) and create `assets/engagement-profile.template.json`.
+For substantial `engage` or `report` work, read [references/engagement-profile.md](references/engagement-profile.md) and create `assets/engagement-profile.template.json`. For a supplied-artifact review, assess the artifact against available evidence and mark unavailable gate evidence; create persistent files only when the user is continuing an ongoing engagement.
 
 Investigate authorized facts before asking the FDE to repeat them. Put unresolved company, problem, authority, system, audience, and brand decisions on the same decision tree.
 
@@ -94,7 +96,7 @@ Do not produce a branded deck while profile questions remain open or brand use l
 
 ## Use one working case file
 
-For substantial work, copy [assets/case-file.template.json](assets/case-file.template.json) and update it as evidence changes.
+For substantial ongoing engagement work, copy [assets/case-file.template.json](assets/case-file.template.json) and update it as evidence changes. A supplied-artifact review is read-only unless the user asks to continue the engagement.
 
 Validate it with:
 
@@ -147,6 +149,7 @@ Do not certify job readiness. Human FDE review is required for stage transitions
 9. Surface conflicts among customer outcome, user workflow, product reuse, security, and delivery economics.
 10. Prefer a narrow end-to-end slice over a broad demo.
 11. Carry failures, limitations, ownership, and changed understanding forward; never reset context into a success-only summary.
+12. At handoff, state concrete re-engagement triggers and one next observe-and-improve decision with measurable reopen conditions; field names or disposition labels alone do not satisfy this gate.
 
 ## Review mode
 
@@ -164,7 +167,7 @@ Do not certify job readiness. Human FDE review is required for stage transitions
 
 Read [references/reporting.md](references/reporting.md).
 
-If `fde-readout` is installed, prefer it for interactive HTML, editable PowerPoint, reference-deck adaptation, and presentation QA. Otherwise use the bundled reporting workflow:
+Presentation design, interactive HTML, editable PowerPoint, reference-deck adaptation, and presentation QA belong to `fde-readout`. The bundled workflow here produces non-presentation reports and a Markdown slide outline only when the specialized skill is unavailable:
 
 1. Validate the engagement profile, case file, field judgment, audience, confidentiality, and as-of date.
 2. Use only named source material and approved evidence IDs. Reporting does not advance a phase gate.

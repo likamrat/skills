@@ -211,6 +211,9 @@ for (const declaredPath of manifest.skills ?? []) {
   const hasTriggerEvidence = historyFiles.some((file) =>
     file.startsWith("trigger-"),
   );
+  const hasBehaviorEvidence = historyFiles.some((file) =>
+    file.startsWith("behavior-"),
+  );
   const evolution =
     (version ? 2 : 0) +
     (positiveTriggers.length + negativeTriggers.length > 0 ? 2 : 0) +
@@ -227,10 +230,14 @@ for (const declaredPath of manifest.skills ?? []) {
     skill: skillName,
     readiness,
     empiricalEffectiveness: hasBenchmark
-      ? "recorded"
-      : hasTriggerEvidence
-        ? "activation only"
-        : "not measured",
+      ? "benchmark recorded"
+      : hasTriggerEvidence && hasBehaviorEvidence
+        ? "limited activation + behavior"
+        : hasBehaviorEvidence
+          ? "limited behavior"
+          : hasTriggerEvidence
+            ? "activation only"
+            : "not measured",
     core: {
       lines: coreLines,
       bytes: coreBytes,
