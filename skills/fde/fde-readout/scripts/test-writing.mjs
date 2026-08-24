@@ -81,6 +81,20 @@ check(
   "masking should preserve line numbers",
 );
 
+const sourceDump = [
+  "## Sources",
+  "",
+  "- [One](https://example.com/one)",
+  "- [Two](https://example.com/two)",
+  "- [Three](https://example.com/three)",
+].join("\n");
+check(
+  findWritingIssues(sourceDump, { profile: "docs" }).some(
+    (issue) => issue.rule === "bare-source-list",
+  ),
+  "bare source link dumps should be reported",
+);
+
 if (failures.length > 0) {
   console.error("Writing-style tests failed:");
   failures.forEach((failure, index) =>

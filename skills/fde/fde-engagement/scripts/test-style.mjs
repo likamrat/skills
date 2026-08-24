@@ -44,6 +44,17 @@ const cases = [
     ],
   },
   {
+    name: "rejects bare source link dumps",
+    text: [
+      "## Sources",
+      "",
+      "- [One](https://example.com/one)",
+      "- [Two](https://example.com/two)",
+      "- [Three](https://example.com/three)",
+    ].join("\n"),
+    expectedRules: ["bare-source-list"],
+  },
+  {
     name: "rejects chatbot residue",
     text: "Certainly! Great question, here is the report.",
     expectedMinimum: 2,

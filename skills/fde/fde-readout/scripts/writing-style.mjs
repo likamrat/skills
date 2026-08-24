@@ -107,6 +107,28 @@ function lineNumber(text, index) {
   return text.slice(0, index).split("\n").length;
 }
 
+function findBareSourceList(text) {
+  const lines = text.split(/\r?\n/);
+  let offset = 0;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^#{1,6}\s+(?:Sources|References|Further reading)\s*$/i.test(line)) {
+      let links = 0;
+      for (const candidate of lines.slice(index + 1)) {
+        if (/^#{1,6}\s+/.test(candidate)) break;
+        if (/^\s*[-*]\s+\[[^\]]+\]\([^)]+\)\s*$/.test(candidate)) {
+          links += 1;
+        }
+      }
+      if (links >= 3) return { index: offset, heading: line };
+    }
+    offset += line.length + 1;
+  }
+
+  return undefined;
+}
+
 function markRange(characters, start, end) {
   for (let index = start; index < end; index += 1) {
     if (characters[index] !== "\n" && characters[index] !== "\r") {
@@ -154,6 +176,17 @@ export function findWritingIssues(text, { profile = "report" } = {}) {
         line: lineNumber(text, match.index),
         excerpt: match[0],
         suggestion,
+      });
+    }
+
+    const bareSourceList = findBareSourceList(text);
+    if (bareSourceList) {
+      issues.push({
+        rule: "bare-source-list",
+        line: lineNumber(text, bareSourceList.index),
+        excerpt: bareSourceList.heading,
+        suggestion:
+          "Cite each source where it supports a claim or explain why each source belongs.",
       });
     }
   }

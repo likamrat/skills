@@ -1,6 +1,6 @@
 # Evaluating and evolving skills
 
-A skill can be valid, concise, and well tested on disk while still failing to improve an agent. This repository keeps readiness and effectiveness separate.
+A skill can be valid, concise, and well tested on disk while still failing to improve an agent. This repository keeps readiness and effectiveness separate, following the [Agent Skills specification](https://agentskills.io/specification.md) and its [authoring guidance](https://agentskills.io/skill-creation/best-practices.md).
 
 ## Two different scorecards
 
@@ -34,7 +34,7 @@ The token count is an approximation based on UTF-8 bytes. Use it to spot large c
 
 ## Trigger evaluation
 
-Trigger tests answer whether the skill loads for the right request.
+[Trigger tests](https://agentskills.io/skill-creation/optimizing-descriptions.md) answer whether the skill loads for the right request.
 
 1. Keep about 20 realistic cases with a balanced mix of positive cases and near-miss negatives.
 2. Run each case in a fresh session with only the target skill available.
@@ -60,7 +60,7 @@ The runner creates an isolated project and home directory, installs only the tar
 
 ## Output evaluation
 
-Activation is necessary but insufficient. Test the work produced after activation:
+Activation is necessary but insufficient. [Output evaluation](https://agentskills.io/skill-creation/evaluating-skills.md) compares the work produced after activation:
 
 1. Run each behavior case with the candidate skill in a fresh session.
 2. Run the same case with the previous skill version or with no skill.
@@ -77,7 +77,7 @@ Report these measures separately:
 - safety and hard-stop regressions;
 - human preference;
 - `pass@k` when one successful attempt is enough;
-- `pass^k` when every attempt must succeed;
+- `pass^k` when every attempt must succeed, following [Anthropic's distinction between capability and consistency](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents);
 - token and duration delta;
 - unresolved qualitative feedback.
 
@@ -124,11 +124,3 @@ The latest readout smoke run loaded all 10 positive cases and skipped 9 of 10 ne
 The engagement report boundary loaded both written-report cases in all six trials. Its HTML and PowerPoint near miss initially loaded in two of three trials; after the description named `fde-readout` as the presentation route, it skipped in all three trials.
 
 For behavior evals 2, 3, and 7, the trimmed engagement candidate passed 11 of 12 assertions versus 9 of 12 for `fd01af7`. It preserved architecture gating and improved rollout safety and handoff coverage, but initially missed concrete re-engagement conditions. After that rule was added, eval 7 passed all four assertions in a fresh regression run. These are single behavior trials, so they are evidence of direction, not a reliability benchmark.
-
-## Sources
-
-- [Agent Skills specification](https://agentskills.io/specification.md)
-- [Best practices for skill creators](https://agentskills.io/skill-creation/best-practices.md)
-- [Optimizing skill descriptions](https://agentskills.io/skill-creation/optimizing-descriptions.md)
-- [Evaluating skill output quality](https://agentskills.io/skill-creation/evaluating-skills.md)
-- [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
