@@ -1,6 +1,4 @@
-# AI on the job
-
-[![skills.sh](https://skills.sh/b/likamrat/skills)](https://skills.sh/likamrat/skills)
+# AI Agent Skills on the job
 
 Agent Skills for people who use AI in their work.
 
