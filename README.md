@@ -2,11 +2,13 @@
 
 [![skills.sh](https://skills.sh/b/likamrat/skills)](https://skills.sh/likamrat/skills)
 
-I am building this repository for AI-assisted work that has to survive contact with real people, systems, constraints, and consequences.
+I am building the Agent Skills I want beside me when a decision has an owner, a customer, and a cost of failure.
 
-Most AI examples stop when the demo works. Work starts earlier and ends later: understand the actual workflow, decide what software, models, and people should each own, test the ugly cases, deploy safely, earn adoption, and hand off something another person can operate.
+I have little use for output that only looks finished. A polished report can still hide a guessed workflow, missing evidence, unclear authority, and a system nobody knows how to operate.
 
-These skills turn that process into instructions an agent can follow without inventing experience or judgment. I use them to challenge my own thinking, keep evidence attached to decisions, and produce artifacts I can defend. Adapt them to your work, but keep a person accountable.
+These skills make the agent show its work: inspect source material, ask unresolved questions, keep judgment separate from evidence, test failure cases, and produce artifacts tied to a decision. I can read every instruction, disagree with it, and change it.
+
+Use them, challenge them, and adapt them to your work. Keep the person making the decision accountable.
 
 ## Installation (30-second setup)
 
@@ -34,6 +36,26 @@ Start by asking for the smallest evidence package that unlocks the decision.
 No additional project setup is required.
 
 Installation commands live in this section. Skill READMEs link here instead of copying commands that can drift.
+
+## Why these skills exist
+
+### The agent starts building before the workflow is understood
+
+A plausible architecture is easy to produce from a clean problem statement. Customer work rarely arrives that way. Operators disagree, systems record only part of the process, exceptions carry the risk, and the requested solution may solve the wrong problem.
+
+[`fde-engagement`](skills/fde/fde-engagement/README.md) starts with fit, outcome, baseline, operators, evidence, and constraints. It blocks architecture work until the current workflow and responsibility boundaries are explicit.
+
+### Polished prose fills gaps that a person should answer
+
+An agent can make weak evidence sound settled. It can also invent the opinion, rationale, or confidence that gives a report its voice.
+
+The FDE skills keep evidence and human judgment separate. Missing owners, dates, metrics, and decisions remain visible instead of being smoothed into a finished-looking artifact.
+
+### HTML and PowerPoint become different stories
+
+Separate presentation workflows drift. Numbers change, recommendations move, and one format receives fixes that the other never gets.
+
+[`fde-readout`](skills/fde/fde-readout/README.md) uses one validated plan for both formats. The plan carries the decision, evidence, human context, brand, slide structure, and speaker notes; each renderer still receives its own visual and package review.
 
 ## Skill catalog
 
