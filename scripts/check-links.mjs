@@ -236,7 +236,7 @@ console.log(
     checkExternal && !localOnly
       ? `, ${external.checked} external URLs${
           external.expectedUnavailable
-            ? ` (${external.expectedUnavailable} expected pre-publication target)`
+            ? ` (${external.expectedUnavailable} temporary external exception)`
             : ""
         }`
       : ""
