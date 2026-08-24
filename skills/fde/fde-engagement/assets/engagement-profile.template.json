@@ -1,0 +1,68 @@
+{
+  "version": "1.0",
+  "engagementId": "",
+  "fictional": false,
+  "asOf": "",
+  "customer": {
+    "displayName": "",
+    "legalName": "",
+    "industry": "",
+    "businessModel": "",
+    "customerSegments": [],
+    "operatingFootprint": [],
+    "businessUnit": "",
+    "website": "",
+    "evidenceIds": []
+  },
+  "problem": {
+    "title": "",
+    "decision": "",
+    "outcome": "",
+    "baseline": "",
+    "affectedWorkflow": "",
+    "failureModes": [],
+    "consequences": [],
+    "priorAttempts": [],
+    "constraints": [],
+    "nonGoals": [],
+    "fitHypothesis": "",
+    "alternativesConsidered": [],
+    "evidenceIds": []
+  },
+  "stakeholders": [],
+  "systems": [],
+  "brand": {
+    "source": "unbranded",
+    "authorized": false,
+    "wordmark": "",
+    "logoPath": "",
+    "primaryColor": "",
+    "secondaryColor": "",
+    "accentColor": "",
+    "riskColor": "",
+    "backgroundColor": "",
+    "textColor": "",
+    "fontFamily": "",
+    "tone": [],
+    "requiredFooter": "",
+    "confidentialityLabel": "",
+    "prohibitedUses": [],
+    "evidenceIds": [],
+    "styleReference": {
+      "source": "",
+      "authorized": false,
+      "scope": "none",
+      "reusedAssets": []
+    }
+  },
+  "readout": {
+    "audience": "customer",
+    "decision": "",
+    "format": "deck",
+    "deliveryFormats": [],
+    "asOf": "",
+    "confidentiality": ""
+  },
+  "openQuestions": [],
+  "profileEvidenceIds": []
+}

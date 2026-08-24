@@ -1,0 +1,27 @@
+{
+  "skill_name": "fde-readout",
+  "should_trigger": [
+    "Create a customer forward deployed engineering (FDE) readout from this evidence as HTML and PowerPoint.",
+    "Turn this FDE case into a leadership decision deck.",
+    "Use this PPTX as a design reference for our customer readout.",
+    "Review this FDE presentation for evidence, alignment, and overflow.",
+    "Build an interactive localhost deck and editable PowerPoint from this plan.",
+    "Our steering meeting is Friday. Turn the approved pilot evidence into a decision brief with editable slides and a browser version.",
+    "I have a ReadoutPlan JSON. Validate it, render both formats, and check them for drift.",
+    "Match the spacing and typography of this reference deck without reusing its logo, screenshots, or media.",
+    "The customer deck has overlapping arrows and clipped labels. Review every slide and fix the layout.",
+    "Create a technical handoff presentation from this approved FDE case and keep the HTML and PowerPoint versions synchronized."
+  ],
+  "should_not_trigger": [
+    "Make a generic presentation about AI trends.",
+    "Write code for a PowerPoint add-in.",
+    "Research FDE salaries.",
+    "Create a marketing pitch deck without customer evidence.",
+    "Summarize this meeting in plain text.",
+    "Repair the ZIP structure of this corrupted PPTX without changing its content.",
+    "Build a reusable React component for browser-based slides.",
+    "Help us qualify an FDE engagement and decide whether the workflow needs AI. We do not need a deck yet.",
+    "Extract every image from this reference PowerPoint into a folder.",
+    "Write the customer case file and rollout gates before we decide what the readout should say."
+  ]
+}

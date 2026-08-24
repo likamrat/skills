@@ -1,0 +1,264 @@
+#!/usr/bin/env node
+
+import { access, readFile, readdir, stat } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { basename, dirname, extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const skillRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const failures = [];
+
+function check(condition, message) {
+  if (!condition) failures.push(message);
+}
+
+async function walk(directory) {
+  const files = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...(await walk(path)));
+    else files.push(path);
+  }
+  return files;
+}
+
+const skillPath = join(skillRoot, "SKILL.md");
+const skill = await readFile(skillPath, "utf8");
+const frontmatter = skill.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+check(frontmatter, "SKILL.md requires YAML frontmatter");
+
+if (frontmatter) {
+  const lines = frontmatter[1].split(/\r?\n/);
+  const fields = lines
+    .filter((line) => line.length > 0 && !/^\s/.test(line))
+    .map((line) => line.slice(0, line.indexOf(":")));
+  const allowed = new Set([
+    "name",
+    "description",
+    "license",
+    "compatibility",
+    "metadata",
+    "allowed-tools",
+  ]);
+
+  function readField(key) {
+    const start = lines.findIndex((line) => line.startsWith(`${key}:`));
+    if (start < 0) return undefined;
+    const inline = lines[start].slice(key.length + 1).trim();
+    if (inline && !["|", "|-", ">", ">-"].includes(inline)) {
+      return inline.replace(/^['"]|['"]$/g, "");
+    }
+    const continuation = [];
+    for (const line of lines.slice(start + 1)) {
+      if (!line.startsWith("  ")) break;
+      continuation.push(line.trim());
+    }
+    return continuation.join(" ");
+  }
+
+  const name = readField("name");
+  const description = readField("description") ?? "";
+  const compatibility = readField("compatibility") ?? "";
+  check(name === basename(skillRoot), "frontmatter name must match directory");
+  check(
+    fields.every((field) => allowed.has(field)),
+    `unsupported frontmatter fields: ${fields
+      .filter((field) => !allowed.has(field))
+      .join(", ")}`,
+  );
+  check(
+    description.length >= 1 && description.length <= 1024,
+    "description must be 1-1024 characters",
+  );
+  check(
+    /\bUse (?:this skill )?when\b/.test(description),
+    "description must include triggers",
+  );
+  check(
+    description.includes("Do not use"),
+    "description must include anti-triggers",
+  );
+  check(compatibility.length <= 500, "compatibility must not exceed 500 characters");
+}
+
+check(skill.split(/\r?\n/).length <= 500, "SKILL.md must not exceed 500 lines");
+
+const files = await walk(skillRoot);
+const emDash = String.fromCodePoint(0x2014);
+const emDashEntities = [
+  `&${"mdash"};`,
+  `&#${"8212"};`,
+  `&#x${"2014"};`,
+  `&#X${"2014"};`,
+];
+const textExtensions = new Set([
+  ".html",
+  ".json",
+  ".md",
+  ".mjs",
+  ".txt",
+  ".yaml",
+  ".yml",
+]);
+for (const file of files.filter(
+  (candidate) =>
+    textExtensions.has(extname(candidate)) || basename(candidate) === "LICENSE",
+)) {
+  const content = await readFile(file, "utf8");
+  check(!content.includes(emDash), `${file} contains an em dash`);
+  for (const entity of emDashEntities) {
+    check(!content.includes(entity), `${file} contains an em dash entity`);
+  }
+}
+
+for (const file of files.filter((candidate) => extname(candidate) === ".json")) {
+  try {
+    JSON.parse(await readFile(file, "utf8"));
+  } catch (error) {
+    failures.push(`${file} is invalid JSON: ${error.message}`);
+  }
+}
+
+for (const file of files.filter((candidate) => extname(candidate) === ".md")) {
+  const content = await readFile(file, "utf8");
+  const links = [...content.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)].map(
+    (match) => match[1],
+  );
+  for (const link of links) {
+    if (/^(?:https?:|mailto:)/.test(link)) continue;
+    const target = decodeURIComponent(link.split("#")[0]);
+    if (!target) continue;
+    try {
+      await access(resolve(dirname(file), target));
+    } catch {
+      failures.push(`${file} has a broken local link: ${link}`);
+    }
+  }
+}
+
+const bannedPhrases = [
+  /\bin today'?s rapidly evolving landscape\b/i,
+  /\bunlock (?:the |your |its )?potential\b/i,
+  /\bleverage ai\b/i,
+  /\bgame[- ]changer\b/i,
+  /\bseamless integration\b/i,
+  /\btrusted production outcome\b/i,
+  /\bclose both loops\b/i,
+  /\bcompounding learning\b/i,
+];
+for (const file of files.filter((candidate) =>
+  [".md", ".json"].includes(extname(candidate)),
+)) {
+  const content = await readFile(file, "utf8");
+  for (const pattern of bannedPhrases) {
+    if (pattern.test(content.replace(/`[^`\n]+`/g, ""))) {
+      failures.push(`${file} contains stock language: ${pattern}`);
+    }
+  }
+}
+
+const requiredAssets = [
+  [join(skillRoot, "assets", "readout-plan.template.json"), "plan template"],
+  [
+    join(
+      skillRoot,
+      "assets",
+      "examples",
+      "lattice-harbor-readout-plan.json",
+    ),
+    "example plan",
+  ],
+  [
+    join(skillRoot, "assets", "examples", "lattice-harbor-html", "index.html"),
+    "example HTML deck",
+  ],
+  [
+    join(skillRoot, "assets", "examples", "lattice-harbor-readout.pptx"),
+    "example PowerPoint",
+  ],
+  [
+    join(skillRoot, "assets", "examples", "lattice-harbor-readout.png"),
+    "example montage",
+  ],
+];
+for (const [path, label] of requiredAssets) {
+  try {
+    const file = await stat(path);
+    check(file.size > 0, `${label} must not be empty`);
+  } catch {
+    failures.push(`${label} is missing`);
+  }
+
+  const htmlDelivery = await readFile(
+    join(skillRoot, "references", "html-delivery.md"),
+    "utf8",
+  );
+  check(
+    htmlDelivery.includes("dom-to-pptx-exporter@2.1.1"),
+    "optional dom-to-pptx exporter command must remain version-pinned",
+  );
+}
+
+const evals = JSON.parse(
+  await readFile(join(skillRoot, "evals", "evals.json"), "utf8"),
+);
+const triggers = JSON.parse(
+  await readFile(join(skillRoot, "evals", "trigger-cases.json"), "utf8"),
+);
+check(evals.skill_name === basename(skillRoot), "eval skill_name must match");
+check(triggers.skill_name === basename(skillRoot), "trigger skill_name must match");
+const evalIds = evals.evals.map((entry) => entry.id);
+check(new Set(evalIds).size === evalIds.length, "eval IDs must be unique");
+for (const entry of evals.evals) {
+  check(typeof entry.prompt === "string" && entry.prompt.length > 0, `eval ${entry.id} needs a prompt`);
+  check(
+    Array.isArray(entry.assertions) && entry.assertions.length > 0,
+    `eval ${entry.id} needs assertions`,
+  );
+}
+check(
+  Array.isArray(triggers.should_trigger) && triggers.should_trigger.length >= 3,
+  "trigger fixtures require at least three should-trigger cases",
+);
+check(
+  Array.isArray(triggers.should_not_trigger) &&
+    triggers.should_not_trigger.length >= 3,
+  "trigger fixtures require at least three should-not-trigger cases",
+);
+
+for (const script of ["test-plan.mjs", "test-html.mjs", "test-writing.mjs"]) {
+  const result = spawnSync(process.execPath, [join(skillRoot, "scripts", script)], {
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    failures.push(`${script} failed:\n${result.stdout}${result.stderr}`);
+  }
+}
+
+const docsLint = spawnSync(
+  process.execPath,
+  [
+    join(skillRoot, "scripts", "lint-writing.mjs"),
+    "--profile",
+    "docs",
+    skillRoot,
+  ],
+  { encoding: "utf8" },
+);
+if (docsLint.status !== 0) {
+  failures.push(
+    `skill documentation lint failed:\n${docsLint.stdout}${docsLint.stderr}`,
+  );
+}
+
+if (failures.length > 0) {
+  console.error("FDE readout package validation failed:");
+  failures.forEach((failure, index) =>
+    console.error(`${index + 1}. ${failure}`),
+  );
+  process.exit(1);
+}
+
+console.log(
+  `FDE readout package checks passed: ${evals.evals.length} evals and ${files.length} files.`,
+);

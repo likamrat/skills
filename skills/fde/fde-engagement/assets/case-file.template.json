@@ -1,0 +1,110 @@
+{
+  "version": "1.0",
+  "mode": "engage",
+  "phase": "qualify",
+  "gate": {
+    "status": "open",
+    "reason": "",
+    "evidenceIds": []
+  },
+  "classification": {
+    "verdict": "",
+    "reason": "",
+    "alternativesConsidered": []
+  },
+  "evidence": [],
+  "outcomeContract": {
+    "outcome": "",
+    "baseline": {
+      "value": "",
+      "source": ""
+    },
+    "target": "",
+    "sponsor": "",
+    "operator": "",
+    "operatingOwner": "",
+    "valueMechanism": "",
+    "constraints": [],
+    "nonGoals": [],
+    "stopConditions": []
+  },
+  "decisionTree": {
+    "nextQuestionNumber": 1,
+    "nodes": [],
+    "frontier": [],
+    "rounds": []
+  },
+  "domainModel": {
+    "reconciliation": {
+      "status": "pending",
+      "asOf": "",
+      "reason": "",
+      "evidenceIds": []
+    },
+    "terms": [],
+    "actors": [],
+    "systems": [],
+    "boundaries": [],
+    "relationships": [],
+    "conflicts": []
+  },
+  "fieldJudgment": {
+    "entries": [],
+    "retrospective": {
+      "status": "pending",
+      "reason": "",
+      "evidenceIds": []
+    }
+  },
+  "operatingMap": {
+    "steps": [],
+    "unknowns": []
+  },
+  "allocationMatrix": {
+    "steps": []
+  },
+  "architecture": {
+    "integrations": [],
+    "identityAndPermissions": [],
+    "securityControls": [],
+    "observability": [],
+    "recovery": [],
+    "rollback": []
+  },
+  "evalPlan": {
+    "riskBasis": "",
+    "cases": [],
+    "passCriteria": [],
+    "invariants": [],
+    "failureCategories": [],
+    "escalationRules": [],
+    "results": [],
+    "unresolvedSevereFailures": [],
+    "releaseRecommendation": ""
+  },
+  "deployment": {
+    "stage": "offline",
+    "stageEvidenceIds": [],
+    "owner": "",
+    "monitoring": [],
+    "humanReview": [],
+    "rollbackTested": false,
+    "adoptionMeasures": []
+  },
+  "handoff": {
+    "owner": "",
+    "runbook": "",
+    "training": [],
+    "knownLimitations": [],
+    "realizedOutcomes": [],
+    "nextLoopDecision": "",
+    "accepted": false
+  },
+  "productization": {
+    "reviewed": false,
+    "items": []
+  },
+  "assignments": [],
+  "decisions": [],
+  "unknowns": []
+}

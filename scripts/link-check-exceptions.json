@@ -1,0 +1,11 @@
+{
+  "external": [
+    {
+      "url": "https://skills.sh/likamrat/skills",
+      "allowedStatuses": [
+        404
+      ],
+      "reason": "Publication target; expected to resolve after the skills reach the public default branch and are indexed."
+    }
+  ]
+}

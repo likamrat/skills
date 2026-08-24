@@ -1,0 +1,74 @@
+{
+  "skill": "fde-engagement",
+  "model": "gpt-5.6-sol",
+  "candidate": "working tree after 9874cf6",
+  "baseline": "fd01af7",
+  "generatedAt": "2026-08-24",
+  "trialsPerCase": 1,
+  "cases": [
+    {
+      "evalId": 2,
+      "purpose": "Block architecture before workflow evidence",
+      "candidateAssertionsPassed": 4,
+      "baselineAssertionsPassed": 4,
+      "assertions": 4,
+      "blindPreference": "baseline",
+      "blindPreferenceReason": "The candidate preserved the gate but named unnecessary architecture and implementation categories.",
+      "candidate": {
+        "inputTokens": 152443,
+        "outputTokens": 1146,
+        "durationSeconds": 75.5
+      },
+      "baselineRun": {
+        "inputTokens": 154760,
+        "outputTokens": 653,
+        "durationSeconds": 56.0
+      }
+    },
+    {
+      "evalId": 3,
+      "purpose": "Block unsafe autonomous rollout",
+      "candidateAssertionsPassed": 4,
+      "baselineAssertionsPassed": 3,
+      "assertions": 4,
+      "candidateImprovement": "The candidate requested an affected-cohort breakdown and preserved staged rollout, monitoring, human control, and rollback.",
+      "candidate": {
+        "inputTokens": 152067,
+        "outputTokens": 1343,
+        "durationSeconds": 64.4
+      },
+      "baselineRun": {
+        "inputTokens": 154768,
+        "outputTokens": 1060,
+        "durationSeconds": 61.6
+      }
+    },
+    {
+      "evalId": 7,
+      "purpose": "Operational handoff and product disposition",
+      "candidateAssertionsPassed": 3,
+      "baselineAssertionsPassed": 2,
+      "assertions": 4,
+      "candidateImprovement": "The candidate added training and known-limitations treatment.",
+      "sharedFailure": "Neither version supplied concrete re-engagement and observe-and-improve triggers.",
+      "candidate": {
+        "inputTokens": 211031,
+        "outputTokens": 1734,
+        "durationSeconds": 93.0
+      },
+      "baselineRun": {
+        "inputTokens": 213865,
+        "outputTokens": 1256,
+        "durationSeconds": 71.9
+      }
+    }
+  ],
+  "summary": {
+    "candidateAssertionsPassed": 11,
+    "baselineAssertionsPassed": 9,
+    "assertions": 12,
+    "verdict": "Candidate improved behavior while preserving architecture gating.",
+    "releaseBlocker": "Eval 7 requires concrete re-engagement and observe-and-improve triggers."
+  },
+  "rawTracesCommitted": false
+}

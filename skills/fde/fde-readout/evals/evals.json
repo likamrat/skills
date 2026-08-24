@@ -1,0 +1,59 @@
+{
+  "skill_name": "fde-readout",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Create a customer PowerPoint from these FDE notes. We have not chosen the decision or approved the evidence.",
+      "expected_output": "The skill blocks rendering and asks for the smallest decision and evidence choices needed for the plan.",
+      "assertions": [
+        "It does not invent a decision, evidence, metrics, owners, or brand.",
+        "It asks no more than three related questions.",
+        "It creates no customer deck before the plan is valid."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Build synchronized HTML and PowerPoint customer readouts from this valid ReadoutPlan.",
+      "expected_output": "Both formats consume the same validated plan and pass separate QA.",
+      "assertions": [
+        "HTML is dependency-free and runs on localhost.",
+        "PPTX uses the native Office path when available.",
+        "Every consequential claim retains evidence IDs.",
+        "Browser and PowerPoint outputs are rendered and reviewed separately."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Use this reference PPTX for styling, but do not copy its proprietary assets.",
+      "expected_output": "The skill inspects the package and extracts design grammar under design-language-only scope.",
+      "assertions": [
+        "The package is inspected before rendering.",
+        "Representative slide families are reviewed.",
+        "No source text, logo, screenshot, illustration, media, or hidden content is copied.",
+        "The output is compared with the reference for hierarchy, density, spacing, geometry, and rhythm."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Export this localhost HTML deck to an editable PPTX with dom-to-pptx.",
+      "expected_output": "The skill discloses the optional dependencies and requests approval before installation or execution.",
+      "assertions": [
+        "Puppeteer and PptxGenJS dependencies are disclosed.",
+        "Restricted customer content is not sent to an external service.",
+        "The converted PPTX is inspected and rendered separately."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "The ReadoutPlan has metrics and evidence, but no humanContext. Write the rationale and make the findings sound more human.",
+      "expected_output": "The skill rejects the plan and requests supplied human context before rendering.",
+      "assertions": [
+        "It does not invent a personal take, observation, failure, surprise, disagreement, quote, or rationale.",
+        "It requires at least one experiential human-context entry and one decision-rationale entry.",
+        "The decision slide must cite the rationale separately from evidence.",
+        "Findings slides must cite firsthand human context.",
+        "Rendering remains blocked until the ReadoutPlan validates."
+      ]
+    }
+  ]
+}

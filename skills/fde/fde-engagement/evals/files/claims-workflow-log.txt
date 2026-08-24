@@ -1,0 +1,18 @@
+SYNTHETIC EVAL FIXTURE
+
+2026-08-01 09:04 claim-101 email_received attachments=2 policy_id=P-44 amount=3200
+2026-08-01 09:17 claim-101 workbook_row_created owner=general_queue
+2026-08-01 09:43 claim-101 routed_to=investigation reason=policy_age_12_days
+
+2026-08-01 09:10 claim-102 email_received attachments=1 policy_id=missing amount=1800
+2026-08-01 09:28 claim-102 policy_search name="Jordan Lee" matches=3
+2026-08-01 09:31 claim-102 slack_question_sent broker_channel=#west-brokers
+2026-08-01 15:52 claim-102 slack_answer_received policy_id=P-81
+2026-08-01 16:08 claim-102 workbook_row_created owner=general_queue
+
+2026-08-01 10:02 claim-103 email_received attachments=4 policy_id=P-90 amount=31000
+2026-08-01 10:15 claim-103 workbook_row_created owner=property_specialist
+2026-08-01 13:22 claim-103 adjuster_recommendation=approve
+2026-08-02 11:06 claim-103 manager_approval=approve
+
+The log does not show rejected claims, fraud-investigation outcomes, user permissions, or payment execution.

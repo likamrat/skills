@@ -1,0 +1,21 @@
+SYNTHETIC EVAL FIXTURE
+
+Interviewer: Walk me through a claim from arrival to payment.
+
+Claims lead: A claim reaches a shared inbox. One coordinator opens the email and copies the policy number, claimant name, and amount into the claims workbook. The coordinator sends medical claims to a specialist. Property claims under $5,000 usually stay with the general queue.
+
+Interviewer: Is that threshold always used?
+
+Claims lead: Not exactly. If the policy is less than 30 days old, even a small property claim goes to investigation. That rule is not in the SOP. Maria and Devon know it.
+
+Interviewer: What happens when the policy number is missing?
+
+Claims lead: The coordinator searches by name in the policy system. Duplicate names are common, so they message the broker in Slack. Nothing records that wait except the Slack thread.
+
+Interviewer: Who approves payment?
+
+Claims lead: An adjuster recommends it. Claims over $25,000 require a manager. Suspected fraud always goes to investigation regardless of amount.
+
+Interviewer: What is the current pain?
+
+Claims lead: We do not have a measured baseline yet. People complain about queue time, but I cannot give you a reliable number.
