@@ -13,7 +13,7 @@ skills/
         └── SKILL.md
 ```
 
-Use a short, recognizable category name. FDE skills belong under `skills/fde/` and use names such as `fde-engagement`, `fde-readout`, or `fde-evals`. Keep unrelated work in a sibling category instead of placing it under FDE.
+Use a short, recognizable category name. Forward deployed engineering (FDE) skills belong under `skills/fde/` and use names such as `fde-engagement`, `fde-readout`, or `fde-evals`. Keep unrelated work in a sibling category instead of placing it under FDE.
 
 ## Drafts
 
@@ -27,6 +27,22 @@ drafts/
 ```
 
 Do not place a file named `SKILL.md` under `drafts/`. The official CLI discovers that filename recursively.
+
+## Evaluate changes
+
+Use the [skill evolution guide](docs/skill-evolution.md) for trigger tests, output comparisons, human review, and release gates.
+
+Run the static readiness scorecard:
+
+```bash
+npm run score:skills
+```
+
+Run trigger trials in fresh Copilot sessions:
+
+```bash
+npm run eval:triggers -- --skill fde-readout --runs 3 --model gpt-5.6-sol
+```
 
 A draft can move under `skills/` after its trigger cases, behavior evals, package checks, and human documentation are complete. Rename `SKILL.draft.md` to `SKILL.md`, then register the package in `package.json` and the root catalog.
 

@@ -25,7 +25,13 @@ function normalized(path) {
 async function walk(directory) {
   const files = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if ([".git", "node_modules"].includes(entry.name)) continue;
+    if (
+      [".git", "node_modules"].includes(entry.name) ||
+      entry.name.startsWith(".trigger-eval-") ||
+      entry.name.startsWith(".cli-smoke-")
+    ) {
+      continue;
+    }
     const path = join(directory, entry.name);
     if (entry.isDirectory()) files.push(...(await walk(path)));
     else files.push(path);

@@ -1,4 +1,4 @@
-# FDE reporting and readouts
+# Forward deployed engineering (FDE) reporting and readouts
 
 Read this file in `report` mode.
 

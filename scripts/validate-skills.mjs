@@ -150,6 +150,7 @@ const rootDocsLint = spawnSync(
     "docs",
     join(root, "README.md"),
     join(root, "CONTRIBUTING.md"),
+    join(root, "docs"),
     join(root, "drafts", "README.md"),
     join(root, "THIRD_PARTY_NOTICES.md"),
     join(root, "package.json"),

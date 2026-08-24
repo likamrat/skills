@@ -6,7 +6,7 @@ Read this file when running or reviewing a real engagement. Each phase produces 
 
 ### Purpose
 
-Determine whether the outcome warrants embedded engineering and whether FDE is the right operating model.
+Determine whether the outcome warrants embedded engineering and whether forward deployed engineering (FDE) is the right operating model.
 
 ### Actions
 

@@ -49,7 +49,7 @@ A plausible architecture is easy to produce from a clean problem statement. Cust
 
 An agent can make weak evidence sound settled. It can also invent the opinion, rationale, or confidence that gives a report its voice.
 
-The FDE skills keep evidence and human judgment separate. Missing owners, dates, metrics, and decisions remain visible instead of being smoothed into a finished-looking artifact.
+The forward deployed engineering (FDE) skills keep evidence and human judgment separate. Missing owners, dates, metrics, and decisions remain visible instead of being smoothed into a finished-looking artifact.
 
 ### HTML and PowerPoint become different stories
 
@@ -59,12 +59,18 @@ Separate presentation workflows drift. Numbers change, recommendations move, and
 
 ## Skills
 
-### Forward deployed engineering
+### Forward deployed engineering (FDE)
 
 | Skill | Use it for |
 |---|---|
 | [`fde-engagement`](skills/fde/fde-engagement/README.md) | Run, teach, review, or report on an end-to-end FDE engagement |
 | [`fde-readout`](skills/fde/fde-readout/README.md) | Build evidence-bound FDE readouts as HTML, PowerPoint, or both |
+
+## How skills are tested
+
+Each change is checked for package validity, activation accuracy, output behavior, regressions, and instruction cost. Static readiness and actual effectiveness are reported separately.
+
+See [how skills are evaluated and evolved](docs/skill-evolution.md) for the scorecard, fresh-session test loop, and release gates.
 
 ## More install options
 
@@ -148,6 +154,7 @@ Every skill must:
 - keep end-user installation commands in this README only;
 - describe present behavior and inventory instead of promised additions or launch language;
 - name actors, evidence, actions, controls, and consequences instead of using branding metaphors;
+- expand domain-specific acronyms on first use;
 - use periods, commas, colons, or parentheses instead of em dashes;
 - avoid customer data, credentials, and proprietary examples;
 - distinguish observed evidence from inference and recommendation;

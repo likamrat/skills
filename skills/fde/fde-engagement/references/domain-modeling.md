@@ -1,4 +1,4 @@
-# Active FDE domain modeling
+# Active forward deployed engineering (FDE) domain modeling
 
 Read this file alongside `grilling.md`. The domain model is updated during the conversation, not reconstructed after it.
 

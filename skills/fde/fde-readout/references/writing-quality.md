@@ -4,7 +4,7 @@
 
 Use Peter Yang's 25/50/25 heuristic for substantial readouts:
 
-1. The FDE supplies rough observations, failures, surprises, disagreement, opinion, and source facts.
+1. The forward deployed engineer (FDE) supplies rough observations, failures, surprises, disagreement, opinion, and source facts.
 2. The agent organizes the material, checks gaps, tests alternatives, and drafts only from approved evidence and human context.
 3. The FDE verifies facts, restores natural voice, sharpens the opinion, and approves the artifact.
 

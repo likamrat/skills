@@ -1,4 +1,4 @@
-# {{Engagement name}}: FDE leadership update
+# {{Engagement name}}: Forward deployed engineering (FDE) leadership update
 
 > Reference structure only. Generate the final artifact with `scripts/render-readout.mjs`.
 

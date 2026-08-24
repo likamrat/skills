@@ -1,6 +1,6 @@
 # Evidence and safety
 
-Read this file when handling sources, customer data, production recommendations, or public FDE claims.
+Read this file when handling sources, customer data, production recommendations, or public forward deployed engineering (FDE) claims.
 
 ## Evidence classes
 

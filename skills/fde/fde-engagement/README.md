@@ -1,4 +1,4 @@
-# FDE Engagement Skill
+# Forward deployed engineering (FDE) engagement skill
 
 Use this Agent Skill to practice FDE judgment, conduct a customer engagement, review FDE work, or produce a decision-focused readout.
 

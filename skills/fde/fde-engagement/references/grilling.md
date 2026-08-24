@@ -1,4 +1,4 @@
-# FDE grilling protocol
+# Forward deployed engineering (FDE) grilling protocol
 
 Read this file for any decision-bearing coaching, engagement, or review conversation.
 

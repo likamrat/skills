@@ -47,7 +47,7 @@ Track stages per sub-skill, not as one global label.
 
 ### Qualification fork
 
-Give three superficially similar customer requests that require different delivery models: FDE, standard implementation, and process repair. Score classification and reasoning.
+Give three superficially similar customer requests that require different delivery models: forward deployed engineering, standard implementation, and process repair. Score classification and reasoning.
 
 ### Discovery role-play
 

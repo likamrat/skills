@@ -3,3 +3,5 @@ node_modules/
 *.tmp
 .agents/
 skills-lock.json
+.cli-smoke-*/
+.trigger-eval-*/

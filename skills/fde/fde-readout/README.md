@@ -1,4 +1,4 @@
-# FDE readout
+# Forward deployed engineering (FDE) readout
 
 Create evidence-bound customer and leadership readouts as interactive HTML, editable PowerPoint, or both.
 

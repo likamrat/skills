@@ -1,4 +1,4 @@
-# FDE operating model
+# Forward deployed engineering (FDE) operating model
 
 Read this file when qualifying an engagement, classifying a role, designing a team, or diagnosing role drift.
 

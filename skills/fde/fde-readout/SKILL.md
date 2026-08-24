@@ -1,7 +1,7 @@
 ---
 name: fde-readout
 description: >-
-  Plan, create, restyle, review, or deliver evidence-bound forward deployed engineering (FDE) customer and leadership readouts as interactive HTML, editable PowerPoint, or both. Use when the user asks for an FDE customer readout, leadership deck, decision briefing, branded presentation, localhost slide experience, PowerPoint export, HTML-to-PPTX conversion, presentation-template adaptation, or presentation quality review. Do not use for generic presentation topics, sales collateral without an FDE engagement decision, unsupported success stories, or reports whose source evidence is unavailable.
+  Use this skill when the requested artifact is a forward deployed engineering (FDE) customer, leadership, or handoff readout that supports an engagement decision. It plans, builds, restyles, reviews, or delivers synchronized localhost HTML and editable PowerPoint from a ReadoutPlan or source evidence; when the decision or evidence is missing, it blocks rendering and requests them. It also covers reference-deck design adaptation, HTML-to-PPTX conversion, and presentation QA for that readout. Do not use for salary or career research, marketing or sales decks, generic presentations, PowerPoint add-ins or OOXML repair, slide-framework development, or asset extraction.
 license: MIT
 compatibility: Works in conversational agents with file tools. Node.js 18+ is required for plan validation, HTML rendering, and localhost serving. Native PPTX authoring requires an Office presentation tool; optional dom-to-pptx conversion requires explicit approval before package installation.
 metadata:
@@ -9,7 +9,7 @@ metadata:
   version: "0.1.0"
 ---
 
-# FDE readout
+# Forward deployed engineering (FDE) readout
 
 Turn an FDE decision and its approved evidence into a customer-safe or leadership-safe presentation whose HTML and PowerPoint versions share one validated plan.
 

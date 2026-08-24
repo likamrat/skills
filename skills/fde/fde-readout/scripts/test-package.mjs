@@ -70,7 +70,10 @@ if (frontmatter) {
     description.length >= 1 && description.length <= 1024,
     "description must be 1-1024 characters",
   );
-  check(description.includes("Use when"), "description must include triggers");
+  check(
+    /\bUse (?:this skill )?when\b/.test(description),
+    "description must include triggers",
+  );
   check(
     description.includes("Do not use"),
     "description must include anti-triggers",

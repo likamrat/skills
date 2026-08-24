@@ -63,4 +63,4 @@
 
 ## Re-engagement conditions
 
-- {{Condition that requires the FDE team}}
+- {{Condition that requires the forward deployed engineering team}}

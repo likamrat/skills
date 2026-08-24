@@ -43,7 +43,14 @@ function lineNumber(text, index) {
 async function walk(directory) {
   const files = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (entry.isDirectory() && excludedDirectories.has(entry.name)) continue;
+    if (
+      entry.isDirectory() &&
+      (excludedDirectories.has(entry.name) ||
+        entry.name.startsWith(".trigger-eval-") ||
+        entry.name.startsWith(".cli-smoke-"))
+    ) {
+      continue;
+    }
 
     const path = join(directory, entry.name);
     if (entry.name.includes(emDash)) {

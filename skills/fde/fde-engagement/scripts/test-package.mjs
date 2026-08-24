@@ -79,7 +79,10 @@ if (frontmatter) {
   check(name === basename(skillRoot), "name must match the skill directory");
   check(description.length >= 1 && description.length <= 1024, "description must be 1-1024 characters");
   check(compatibility.length <= 500, "compatibility must not exceed 500 characters");
-  check(description.includes("Use when"), "description must state when to use the skill");
+  check(
+    /\bUse (?:this skill )?when\b/.test(description),
+    "description must state when to use the skill",
+  );
   check(description.includes("Do not use"), "description must include anti-triggers");
 }
 

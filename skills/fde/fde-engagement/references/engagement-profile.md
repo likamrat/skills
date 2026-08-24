@@ -12,7 +12,7 @@ node scripts/validate-engagement-profile.mjs path/to/case-file.json path/to/enga
 
 ## Build facts before asking for preferences
 
-When authorized access exists, inspect supplied files, customer systems, public first-party sources, and the case evidence before asking the FDE to repeat facts.
+When authorized access exists, inspect supplied files, customer systems, public first-party sources, and the case evidence before asking the forward deployed engineer (FDE) to repeat facts.
 
 Record:
 

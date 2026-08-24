@@ -1,4 +1,4 @@
-# FDE readout deck
+# Forward deployed engineering (FDE) readout deck
 
 > Reference structure only. Generate the final slide outline with `scripts/render-readout.mjs`.
 

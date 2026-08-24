@@ -9,7 +9,7 @@ metadata:
   version: "0.1.0"
 ---
 
-# FDE engagement
+# Forward deployed engineering (FDE) engagement
 
 Determine whether a customer problem warrants FDE, carry qualified work through production and handoff, and record evidence that may apply beyond one customer.
 
@@ -42,65 +42,23 @@ If an output artifact is requested, prefer `report`. If an artifact is supplied 
 
 ## Question decisions and maintain the domain model
 
-For any decision-bearing `coach`, `engage`, or `review` request, read and combine:
+For decision-bearing `coach`, `engage`, or `review` work, combine:
 
 - [references/grilling.md](references/grilling.md) to build a decision tree and question the current frontier;
 - [references/domain-modeling.md](references/domain-modeling.md) to sharpen language and update the shared domain model as answers resolve.
 - [references/human-judgment.md](references/human-judgment.md) to capture the human source material that evidence alone cannot provide.
 
-After each answer, record the decision, update the domain model, surface contradictions, and recompute the frontier.
-
-At a cold start with no workflow evidence, request one decisive evidence package rather than presenting a questionnaire. Once the tree is grounded, rank the independent frontier and ask at most three decisions in a numbered round. Include a recommendation with every decision question. Leave the remaining ready nodes on the frontier and wait for the FDE's answers before moving outward in the tree.
-
-An explicit stakeholder claim, system record, artifact, or conflict is enough to ground a frontier question. Never label a response `Frontier` without asking at least one `Q#` question. Every question must include `Recommendation`, `Why`, and `Changes if`. Persist the question number on its decision node and never reset numbering during an engagement.
-
-Every unresolved terminology or boundary conflict becomes a prerequisite frontier question. Do not group it with dependent design questions. The agent may recommend a canonical distinction, but the FDE must confirm it before authority, architecture, or scope decisions downstream are asked or marked settled.
-
-If one question joins a prerequisite and downstream decision with "and," split it and ask only the prerequisite now. In round mode, end after the last `Changes if` line and wait; do not append an artifact, conclusion, or next-gate action.
-
-Do not implement or declare shared understanding while required branches remain open.
+Ask at most three independent frontier questions whose prerequisites are settled. Each uses `Q#`, `Recommendation`, `Why`, and `Changes if`. Record each answer, reconcile the domain model, recompute the frontier, and wait. Terminology or boundary conflicts block dependent authority, architecture, and scope decisions.
 
 ## Establish only the context needed now
 
-Determine:
-
-- operating model or likely FDE variant;
-- current lifecycle phase;
-- decision or artifact needed this turn;
-- available customer evidence and authorization;
-- consequence if the recommendation is wrong.
-
-Do not begin with a long questionnaire. At a cold start, ask or investigate the single highest-value unknown that unlocks the current gate. In later rounds, ask at most three independent frontier questions whose prerequisites are settled. State how many ready decisions remain without previewing them.
-
-When qualification or audit evidence is missing, do not draft architecture, choose frameworks or vendors, or fill gaps with a "typical" workflow. A request for an agent is not evidence that AI or FDE fits.
-
-When the prompt supplies only a desired technology or feature and no observed workflow evidence, the preliminary verdict is `not qualified yet`. The response may contain only the verdict, its reason, one evidence request, and the artifact or decision that evidence unlocks. Do not preview architecture categories, components, responsibility allocation, or tools.
+Identify the likely delivery model, lifecycle phase, decision needed now, available authorized evidence, and consequence of a wrong recommendation. At a cold start, request one decisive evidence package. If the prompt supplies only a desired technology or feature, return `not qualified yet`, explain why, request one piece of workflow evidence, and do not preview architecture or tools.
 
 ## Run the FDE fit gate
 
 Before recommending an engagement, read [references/operating-model.md](references/operating-model.md).
 
-Test:
-
-1. Is there a named business outcome with a credible baseline?
-2. Is the product or problem technically complex relative to the customer's implementation capacity?
-3. Must engineers work inside the customer's real systems or workflow to deliver value?
-4. Is there a platform, reusable primitive, or product-learning loop beyond one-off labor?
-5. Are sponsor, operator, economic value, and eventual owner identifiable?
-
-Return one verdict:
-
-- `FDE`
-- `professional-services delivery`
-- `standard implementation`
-- `solutions architecture / sales engineering`
-- `product engineering`
-- `process change`
-- `not qualified yet`
-
-Say why. Do not force an FDE framing.
-
-If the verdict is not `FDE`, stop the FDE lifecycle. Route the work to the simpler operating model, name the appropriate owner and artifact, and ask only the next question needed to confirm that route. Do not emit the seven-phase FDE plan.
+Test outcome and baseline, relative technical complexity, need for embedded engineering, reusable value beyond one customer, and identifiable sponsor, operator, value, and owner. Return one verdict from the operating-model reference and explain it. If the verdict is not `FDE`, stop this lifecycle and route the work to the simpler owner and artifact.
 
 ## Work through seven gated phases
 
@@ -124,15 +82,7 @@ Architecture and tool selection cannot begin before the audit and design gates. 
 
 For substantial `engage`, `review`, or `report` work, read [references/engagement-profile.md](references/engagement-profile.md) and create `assets/engagement-profile.template.json`.
 
-Investigate authorized company and workflow facts before asking the FDE to repeat them. Add unresolved company, problem, authority, system, audience, and brand decisions to the same decision tree used by the grilling protocol. Ask no more than three ready profile decisions per round.
-
-The profile must name:
-
-- how the affected business unit creates value;
-- the decision, outcome, baseline, workflow, failures, and consequences;
-- sponsor, operator, technical owner, decision maker, and affected users;
-- systems, sources of truth, prior attempts, constraints, and non-goals;
-- readout audience, as-of date, confidentiality, and approved brand source.
+Investigate authorized facts before asking the FDE to repeat them. Put unresolved company, problem, authority, system, audience, and brand decisions on the same decision tree.
 
 Validate it against the case evidence:
 
@@ -140,7 +90,7 @@ Validate it against the case evidence:
 node scripts/validate-engagement-profile.mjs path/to/case-file.json path/to/engagement-profile.json
 ```
 
-Do not produce a branded deck while profile questions remain open. A request to "make it on brand" is not authorization to invent a logo, sample colors from an unrelated image, or use a public brand asset without recording its source and approval.
+Do not produce a branded deck while profile questions remain open or brand use lacks a recorded source and approval.
 
 ## Use one working case file
 
@@ -174,15 +124,7 @@ After a frontier closes or when presenting an artifact, structure responses as:
 
 Use the smallest artifact that moves the engagement forward. Do not bury decisions in a long report.
 
-For every consequential claim, record:
-
-- source;
-- evidence class;
-- confidence;
-- date or observation context;
-- what would disprove it.
-
-Read [references/evidence-and-safety.md](references/evidence-and-safety.md) for evidence classes, privacy rules, and production stops.
+Read [references/evidence-and-safety.md](references/evidence-and-safety.md) for evidence classes, consequential-claim provenance, privacy rules, and production stops.
 
 ## Coach mode
 
@@ -222,31 +164,15 @@ Do not certify job readiness. Human FDE review is required for stage transitions
 
 Read [references/reporting.md](references/reporting.md).
 
-If `fde-readout` is installed, prefer it for interactive HTML, editable PowerPoint, reference-deck adaptation, and presentation QA. Supply the validated engagement profile, case evidence, and readout decision; do not assume the specialized skill is installed and do not invoke it when unavailable. The bundled workflow below remains self-contained.
+If `fde-readout` is installed, prefer it for interactive HTML, editable PowerPoint, reference-deck adaptation, and presentation QA. Otherwise use the bundled reporting workflow:
 
-1. Build and validate the engagement profile. Use its problem decision as the readout decision.
-2. Validate the field-judgment ledger; do not fabricate the human layer during reporting.
-3. Name the audience, format, confidentiality, and as-of date.
-4. Use only the named profile, case file, and explicitly attached evidence as source material. Do not inspect or borrow sibling examples, eval fixtures, or other customer cases. Reporting does not advance a phase gate.
-5. Reconcile the domain model to the report's as-of date. Do not use stale entries; retain superseded entries only as history.
-6. Build `assets/readout-brief.template.json` and include only approved evidence IDs.
-7. Separate measured findings, inference, recommendations, decisions, and next steps.
-8. Apply the audience filter before rendering.
-9. Validate the brief with `scripts/validate-readout-brief.mjs`.
-10. Render the standardized Markdown report or slide outline with `scripts/render-readout.mjs`. Do not freehand the final structure.
-11. For PowerPoint, copy `assets/fde-readout-template.pptx` and apply only the brand treatment approved in the engagement profile. Customer brand leads unless co-branding is approved. Use assertion titles, evidence-bearing diagrams, the required footer, and the confidentiality label.
-12. If synchronized HTML and PPTX are requested and `fde-readout` is unavailable, state that the specialized renderer is unavailable. Do not invent a second presentation pipeline inside this engagement.
-13. If no presentation tool is available for PPTX delivery, produce the slide outline in `assets/templates/readout-deck.md` and state that no `.pptx` was created.
-14. Read [references/style-and-quality.md](references/style-and-quality.md). Separate pattern detection from editing; apply the minimum effective edit while preserving the FDE's vocabulary, cadence, bluntness, uncertainty, and specific facts.
-15. Run `scripts/lint-readout.mjs --profile report` on the rendered text, evaluate each finding in context, and rerun it after editing.
-16. Render every created slide and check connector alignment, overflow, text contrast, logo treatment, brand consistency, evidence IDs, fictional labeling when applicable, and internal-only content.
-17. Re-check every consequential claim and remove all unapproved or internal-only material before delivery. The accountable FDE performs the final human review and approval.
-
-Do not infer workflow steps, metrics, owners, dates, or product signals absent from the case. Use `Unknown`, `Unassigned`, or `Not yet measured`, and turn the gap into a decision or next step. Omit future-phase sections rather than filling them speculatively.
-
-At `audit`, do not present a target operating model, architecture, eval result, or deployment plan. Replace those sections with the blocked gate and evidence required. A single-customer observation is an unproven product hypothesis with disposition `hold`, not a productization recommendation. Every next step must use an owner and date from the source set or display `Unassigned` and `Not scheduled`.
-
-Before delivery, fail and revise the artifact if any consequential finding lacks a literal `[evidence-id]`, or if any next step lacks `Owner` and `Due`. Render next steps as a table, not ownerless prose. A sponsor or operating owner is not automatically the owner of a decision or action; use them only when the source set assigns that responsibility. Do not reopen a settled decision unless its recorded `reopenIf` condition has occurred.
+1. Validate the engagement profile, case file, field judgment, audience, confidentiality, and as-of date.
+2. Use only named source material and approved evidence IDs. Reporting does not advance a phase gate.
+3. Build `assets/readout-brief.template.json`; keep findings, inference, recommendations, decisions, and next steps separate.
+4. Validate with `scripts/validate-readout-brief.mjs`, then render with `scripts/render-readout.mjs`.
+5. Read [references/style-and-quality.md](references/style-and-quality.md), lint the rendered text, and inspect every slide.
+6. Use `Unknown`, `Unassigned`, or `Not yet measured` instead of inventing workflow, metrics, owners, or dates.
+7. Fail delivery when a consequential finding lacks `[evidence-id]`, a next step lacks `Owner` or `Due`, or customer output contains internal-only material.
 
 ## Hard stops
 
