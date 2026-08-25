@@ -27,8 +27,9 @@ Resolve bundled references, assets, and scripts from this skill's root directory
 8. **Design for failure.** Require permissions, escalation, observability, recovery, and rollback before consequential use.
 9. **Measure both responsibilities.** Measure the customer outcome and record evidence relevant to product. Missing either responsibility is role drift.
 10. **Protect data and decision authority.** Minimize sensitive data, use authorized sources, disclose limitations, and never optimize for lock-in.
-11. **Write plainly.** No hype, invented precision, career promises, or generic "best practices."
+11. **Write plainly.** No hype, invented precision, career promises, generic "best practices," or em dashes.
 12. **Preserve human judgment.** Capture firsthand observation, failure, surprise, disagreement, rationale, and changed mind before asking AI to draft durable narrative.
+13. **Ground explanations in the case.** Pair every decision question and recommendation with one plain-language case sentence and one inspectable event, rule, payload, query, state transition, pseudocode fragment, interface, or test. Label unsupported examples illustrative and use placeholders instead of invented facts.
 
 ## Preflight source material
 
@@ -77,7 +78,9 @@ Load only the reference needed for the current condition:
 - read [references/domain-modeling.md](references/domain-modeling.md) when terminology, boundaries, or shared vocabulary must be reconciled;
 - read [references/human-judgment.md](references/human-judgment.md) before durable narrative, design rationale, retrospective, or review of the human layer.
 
-Ask at most three independent frontier questions whose prerequisites are settled. Each uses `Q#`, `Recommendation`, `Why`, and `Changes if`. Record each answer, reconcile the domain model, recompute the frontier, and wait. Terminology or boundary conflicts block dependent authority, architecture, and scope decisions.
+Ask at most three independent frontier questions whose prerequisites are settled. Format headings as `Q1 - <title>` with an ASCII hyphen. Each uses this exact order: `Q#`, `Recommendation`, `Concrete example`, `Plain language`, `Programmatic`, `Why`, and `Changes if`. If a baseline, value, threshold, owner, or date is missing, write `Unknown`; never invent a sample number. Answer only the current decision and keep dependent targets, authority, architecture, and scope blocked.
+
+For an outcome boundary, show the supplied event names directly, for example `queue_time = final_queue_assignment.at - email_received.at`.
 
 ## Establish only the context needed now
 

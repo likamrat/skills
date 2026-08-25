@@ -68,14 +68,26 @@ Once grounded:
 4. Assign each asked node the next unused question number. Never reset numbering during the engagement.
 5. Explain why each decision is on the frontier now.
 6. Give a recommendation with rationale and tradeoff.
-7. Offer bounded choices when they clarify the decision.
-8. Name evidence or constraints that could change the recommendation.
-9. State how many ready decisions remain without previewing or answering them.
-10. Wait for all answers before recomputing the tree.
+7. Add one case-specific example with a plain-language sentence and the smallest useful programmatic form: event formula, rule, payload, query, state transition, pseudocode, interface, or test.
+8. Offer bounded choices when they clarify the decision.
+9. Name evidence or constraints that could change the recommendation.
+10. State how many ready decisions remain without previewing or answering them.
+11. Wait for all answers before recomputing the tree.
 
 Do not combine independent decisions to evade the three-question limit. Unasked ready nodes remain on the frontier for the next round.
 
-A frontier response without at least one explicit `Q#` question is invalid. Each question must include the labels `Recommendation`, `Why`, and `Changes if`.
+A frontier response without at least one explicit `Q#` question is invalid. Use `Q1 - <title>` with an ASCII hyphen, never an em dash. Each question must include the labels `Recommendation`, `Concrete example`, `Why`, and `Changes if`.
+
+Choose the example type that makes the decision observable:
+
+- outcome or metric: event pair, formula, query, or assertion;
+- workflow or responsibility: rule, state transition, payload, or invariant;
+- evaluation: input, expected result, and pass condition;
+- architecture after the design gate: interface or pseudocode.
+
+Before the design gate, do not use the example to choose a framework, vendor, component, or deployment pattern. If evidence does not supply a field, event, value, or threshold, mark the example `Illustrative` and use an explicit placeholder.
+
+Do not replace the current decision with a dependent one. Settle an event boundary before asking for a numeric target; settle authority language before asking what an agent may do.
 
 Do not join a prerequisite and its dependent decision with "and."
 
@@ -96,6 +108,9 @@ Q7 - <decision title>
 <question and only the context needed to answer it>
 
 Recommendation: <recommended answer>
+Concrete example (<kind>, <evidence-backed|illustrative>):
+Plain language: <what happens in this case>
+Programmatic: <one to five lines>
 Why: <evidence and tradeoff>
 Changes if: <fact or constraint that would change the recommendation>
 
@@ -103,6 +118,14 @@ Changes if: <fact or constraint that would change the recommendation>
 
 Q8 - <decision title>
 ...
+```
+
+Example:
+
+```text
+Concrete example (event, evidence-backed):
+Plain language: A claim leaves queue time when the final queue assignment event is recorded.
+Programmatic: queue_time_ms = final_queue_assignment.at - email_received.at; baseline_ms = Unknown
 ```
 
 Do not present recommendations as predetermined answers. Surface disagreement and update when the FDE provides better evidence.

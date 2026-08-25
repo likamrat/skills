@@ -86,6 +86,10 @@ const completeCase = {
         evidenceNeeded: ["Observed operator policy exceptions"],
         evidenceReady: true,
         recommendation: "Use FDE because the policy logic is embedded in operator practice",
+        exampleKind: "rule",
+        exampleStatus: "evidence-backed",
+        concreteExample:
+          "Plain language: Embedded delivery fits when policy exceptions require operator judgment. Programmatic: if policy_exception_requires_operator_judgment then delivery = FDE",
         status: "settled",
         answer: "FDE",
         deferredReason: "",
@@ -102,6 +106,10 @@ const completeCase = {
         evidenceNeeded: ["Incident resolution baseline"],
         evidenceReady: true,
         recommendation: "Use median resolution time",
+        exampleKind: "query",
+        exampleStatus: "evidence-backed",
+        concreteExample:
+          "Plain language: Measure the middle incident's elapsed resolution time. Programmatic: median_resolution_hours = median(resolved_at - opened_at)",
         status: "settled",
         answer: "Reduce median resolution time from 8 hours to 2 hours",
         deferredReason: "",
@@ -481,6 +489,23 @@ const tests = [
     },
     expectedStatus: 1,
     expectedText: "continuous sequence from 1",
+  },
+  {
+    name: "rejects an asked question without a concrete example",
+    mutate: (data) => {
+      delete data.decisionTree.nodes[0].concreteExample;
+    },
+    expectedStatus: 1,
+    expectedText: "concreteExample is required",
+  },
+  {
+    name: "rejects a concrete example without both forms",
+    mutate: (data) => {
+      data.decisionTree.nodes[0].concreteExample =
+        "Programmatic: if exception then delivery = FDE";
+    },
+    expectedStatus: 1,
+    expectedText: "must include Plain language and Programmatic",
   },
   {
     name: "rejects an incomplete domain model",
