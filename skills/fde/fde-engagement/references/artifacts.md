@@ -137,7 +137,7 @@ Separate projected value from realized value.
 
 ## Decision tree
 
-The tree records the decisions surfaced by the grilling protocol.
+The tree records the decisions surfaced through Challenge This.
 
 ```json
 {

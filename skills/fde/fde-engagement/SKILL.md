@@ -79,7 +79,7 @@ If a written lifecycle artifact is requested, prefer `report`. Route slides, dec
 
 Load only the reference needed for the current condition:
 
-- read [references/grilling.md](references/grilling.md) when unresolved decisions require questioning;
+- read [Challenge This](references/challenge-this.md) for unresolved decisions;
 - read [references/domain-modeling.md](references/domain-modeling.md) when terminology, boundaries, or shared vocabulary must be reconciled;
 - read [references/human-judgment.md](references/human-judgment.md) before durable narrative, design rationale, retrospective, or review of the human layer.
 
@@ -148,7 +148,7 @@ Read [references/artifacts.md](references/artifacts.md) when creating or reviewi
 
 ## Response protocol
 
-During an interview round, use the question format in `references/grilling.md`.
+During Challenge This, use the question format in `references/challenge-this.md`.
 
 After a frontier closes or when presenting an artifact, structure responses as:
 

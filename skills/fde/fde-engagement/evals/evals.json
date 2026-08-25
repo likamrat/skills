@@ -131,9 +131,10 @@
     },
     {
       "id": 12,
-      "prompt": "Stress-test our claims-triage design before we build. The claims lead says adjusters approve claims. The system log shows adjusters recommend a disposition, while managers authorize payments above $25,000. We have not decided whether the agent may act or only recommend.",
-      "expected_output": "The skill asks the FDE to settle the overloaded word approve first and explicitly defers the dependent agent-authority decision.",
+      "prompt": "Use Challenge This to test our claims-triage design before we build. The claims lead says adjusters approve claims. The system log shows adjusters recommend a disposition, while managers authorize payments above $25,000. We have not decided whether the agent may act or only recommend.",
+      "expected_output": "Challenge This asks the FDE to settle the overloaded word approve first and explicitly defers the dependent agent-authority decision.",
       "assertions": [
+        "The response directs challenge at the decision, terminology, and evidence while treating the FDE as the accountable decision maker.",
         "The response identifies the conflict between recommendation and authorization.",
         "It asks a numbered frontier question that requires the FDE to confirm the canonical meaning of approval.",
         "Every decision question includes Recommendation, Concrete example, Why, and Changes if.",

@@ -1,6 +1,6 @@
 # Active forward deployed engineering (FDE) domain modeling
 
-Read this file alongside `grilling.md`. The domain model is updated during the conversation, not reconstructed after it.
+Read this file alongside [Challenge This](challenge-this.md). The domain model is updated during the conversation, not reconstructed after it.
 
 ## Purpose
 

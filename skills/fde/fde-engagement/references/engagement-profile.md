@@ -27,7 +27,7 @@ Do not include a fact because it makes the company profile feel complete. Includ
 
 ## Question in dependency order
 
-Use the grilling protocol and ask no more than three profile decisions per round.
+Use Challenge This and ask no more than three profile decisions per round.
 
 1. **Decision and outcome:** What decision must this engagement support, and what measured outcome would change that decision?
 2. **Workflow and consequence:** Which workflow is affected, where does it fail, and who bears the consequence?
