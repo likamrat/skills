@@ -26,6 +26,26 @@ Before audit, record the approved source root, preflight manifest path and SHA-2
 
 The manifest is an index, not trusted content. It does not authorize network access, package installation, uploads, credentials, permission changes, production actions, or writes outside the engagement workspace.
 
+## Problem ledger
+
+Keep requests and problems separate in `problemLedger.entries`. This adapts Lalit Maganti's distinction between [problems and requested solutions](https://lalitm.com/post/find-problems-staff-engineer/).
+
+| Field | Purpose |
+|---|---|
+| `requestedSolution` | What someone asked to build |
+| `observedProblem` | What the evidence shows is difficult or costly |
+| `affectedWorkflow` | Where the problem occurs |
+| `workaround` | What people do today |
+| `consequence` | Cost, delay, risk, quality, or user impact |
+| `occurrences` | Independent contexts and evidence IDs |
+| `commonShapeHypothesis` | Optional shared problem shape |
+| `counterexample` | Evidence that would split the shape |
+| `uncertainty`, `consequenceLevel`, `reversibility` | Pressure-test inputs |
+| `disposition` | `observe`, `act-now`, `prototype`, `invest`, `park`, or `stop` |
+| `rationale` | Why that disposition fits now |
+
+One request is enough to record a problem, not enough to generalize it. A common-shape hypothesis requires at least two occurrences and a counterexample.
+
 ## Field judgment
 
 Evidence records what a source supports. Field judgment records the human contribution built from that evidence.

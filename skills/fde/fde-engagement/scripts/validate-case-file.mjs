@@ -28,6 +28,15 @@ const exampleKinds = new Set([
   "test",
 ]);
 const exampleStatuses = new Set(["evidence-backed", "illustrative"]);
+const pressureLevels = new Set(["low", "medium", "high"]);
+const problemDispositions = new Set([
+  "observe",
+  "act-now",
+  "prototype",
+  "invest",
+  "park",
+  "stop",
+]);
 const roundStatuses = new Set(["active", "answered"]);
 const gateStatuses = new Set(["open", "blocked", "ready", "passed"]);
 const sourceIntakeStatuses = new Set(["clear", "reviewed"]);
@@ -354,6 +363,114 @@ async function validateSourceIntake(data) {
   );
 }
 
+function validateProblemLedger(data, evidenceById) {
+  const entries = data.problemLedger?.entries;
+  requireValue(
+    nonEmptyArray(entries),
+    "problemLedger.entries requires at least one observed problem",
+  );
+  if (!Array.isArray(entries)) return;
+
+  const ids = new Set();
+  for (const [index, entry] of entries.entries()) {
+    const prefix = `problemLedger.entries[${index}]`;
+    requireValue(nonEmpty(entry?.id), `${prefix}.id is required`);
+    requireValue(
+      nonEmpty(entry?.requestedSolution),
+      `${prefix}.requestedSolution is required`,
+    );
+    requireValue(
+      nonEmpty(entry?.observedProblem),
+      `${prefix}.observedProblem is required`,
+    );
+    requireValue(
+      nonEmpty(entry?.affectedWorkflow),
+      `${prefix}.affectedWorkflow is required`,
+    );
+    requireValue(nonEmpty(entry?.workaround), `${prefix}.workaround is required`);
+    requireValue(
+      nonEmpty(entry?.consequence),
+      `${prefix}.consequence is required`,
+    );
+    requireValue(
+      nonEmpty(entry?.firstSeenAt),
+      `${prefix}.firstSeenAt is required`,
+    );
+    requireValue(
+      nonEmptyArray(entry?.occurrences),
+      `${prefix}.occurrences requires at least one context`,
+    );
+    for (const [occurrenceIndex, occurrence] of (
+      entry?.occurrences ?? []
+    ).entries()) {
+      const occurrencePrefix = `${prefix}.occurrences[${occurrenceIndex}]`;
+      requireValue(
+        nonEmpty(occurrence?.context),
+        `${occurrencePrefix}.context is required`,
+      );
+      validateEvidenceReferences(
+        occurrence?.evidenceIds,
+        `${occurrencePrefix}.evidenceIds`,
+        evidenceById,
+        data.mode === "engage",
+      );
+    }
+    validateEvidenceReferences(
+      entry?.evidenceIds,
+      `${prefix}.evidenceIds`,
+      evidenceById,
+      data.mode === "engage",
+    );
+    requireValue(
+      pressureLevels.has(entry?.uncertainty),
+      `${prefix}.uncertainty must be low, medium, or high`,
+    );
+    requireValue(
+      pressureLevels.has(entry?.consequenceLevel),
+      `${prefix}.consequenceLevel must be low, medium, or high`,
+    );
+    requireValue(
+      pressureLevels.has(entry?.reversibility),
+      `${prefix}.reversibility must be low, medium, or high`,
+    );
+    requireValue(
+      problemDispositions.has(entry?.disposition),
+      `${prefix}.disposition must be one of: ${[
+        ...problemDispositions,
+      ].join(", ")}`,
+    );
+    requireValue(nonEmpty(entry?.rationale), `${prefix}.rationale is required`);
+
+    if (nonEmpty(entry?.commonShapeHypothesis)) {
+      requireValue(
+        (entry.occurrences ?? []).length >= 2,
+        `${prefix}.commonShapeHypothesis requires at least two occurrences`,
+      );
+      requireValue(
+        nonEmpty(entry?.counterexample),
+        `${prefix}.counterexample is required for a common-shape hypothesis`,
+      );
+    }
+    if (entry?.disposition === "invest") {
+      requireValue(
+        (entry.occurrences ?? []).length >= 2,
+        `${prefix}.invest requires at least two occurrences`,
+      );
+      requireValue(
+        nonEmpty(entry?.commonShapeHypothesis) &&
+          nonEmpty(entry?.counterexample),
+        `${prefix}.invest requires a common-shape hypothesis and counterexample`,
+      );
+    }
+    ids.add(entry?.id);
+  }
+
+  requireValue(
+    ids.size === entries.length,
+    "problemLedger entry IDs must be unique",
+  );
+}
+
 function validateFieldJudgment(data, { requireObservation = false } = {}) {
   const evidenceById = new Map(
     (data.evidence ?? []).map((item) => [item.id, item]),
@@ -430,6 +547,7 @@ function validateQualify(data) {
   const evidenceById = new Map(
     (data.evidence ?? []).map((item) => [item.id, item]),
   );
+  validateProblemLedger(data, evidenceById);
   requireValue(
     verdicts.has(data.classification?.verdict),
     `classification.verdict must be one of: ${[...verdicts].join(", ")}`,

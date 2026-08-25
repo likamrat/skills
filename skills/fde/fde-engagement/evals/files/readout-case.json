@@ -35,6 +35,44 @@
       }
     ]
   },
+  "problemLedger": {
+    "entries": [
+      {
+        "id": "problem-claims-routing-authority",
+        "requestedSolution": "Automate claims triage",
+        "observedProblem": "Recommendation and authorization use overlapping language while system events record different actions.",
+        "affectedWorkflow": "Claims intake and payment authorization",
+        "workaround": "Operators rely on undocumented role knowledge",
+        "consequence": "An automation could treat a recommendation as payment authority.",
+        "firstSeenAt": "2026-08-20",
+        "occurrences": [
+          {
+            "context": "Claims lead interview",
+            "evidenceIds": [
+              "interview-001"
+            ]
+          },
+          {
+            "context": "Claims workflow event log",
+            "evidenceIds": [
+              "log-001"
+            ]
+          }
+        ],
+        "commonShapeHypothesis": "Approval language hides distinct recommendation and authorization boundaries.",
+        "counterexample": "A written policy could define approve consistently across people and systems.",
+        "uncertainty": "high",
+        "consequenceLevel": "high",
+        "reversibility": "high",
+        "disposition": "observe",
+        "rationale": "Reconcile authority evidence before proposing automation.",
+        "evidenceIds": [
+          "interview-001",
+          "log-001"
+        ]
+      }
+    ]
+  },
   "evidence": [
     {
       "id": "interview-001",

@@ -38,6 +38,41 @@ const completeCase = {
     reviewedBy: "eval fixture author",
     sources: [{ sourceId: "source-001", path: "source.txt" }],
   },
+  problemLedger: {
+    entries: [
+      {
+        id: "problem-failed-record-triage",
+        requestedSolution: "Build an AI failure classifier",
+        observedProblem:
+          "Operators manually reconcile failed records before they can route them.",
+        affectedWorkflow: "Failed-record triage",
+        workaround: "Analysts inspect and classify each record manually",
+        consequence: "Median resolution time is 8 hours",
+        firstSeenAt: "2026-08-23",
+        occurrences: [
+          {
+            context: "Operator shadowing",
+            evidenceIds: ["obs-001"],
+          },
+          {
+            context: "Supervised pilot telemetry",
+            evidenceIds: ["pilot-001"],
+          },
+        ],
+        commonShapeHypothesis:
+          "Unknown failure records need recommendation with human ownership",
+        counterexample:
+          "Known failure codes can remain deterministic routing rules",
+        uncertainty: "medium",
+        consequenceLevel: "high",
+        reversibility: "high",
+        disposition: "prototype",
+        rationale:
+          "A throwaway classifier can test coverage without changing queue ownership",
+        evidenceIds: ["obs-001", "pilot-001"],
+      },
+    ],
+  },
   evidence: [
     {
       id: "obs-001",
@@ -632,6 +667,40 @@ const tests = [
     },
     expectedStatus: 1,
     expectedText: "cannot be read",
+  },
+  {
+    name: "rejects qualification without a problem ledger",
+    mutate: (data) => {
+      data.problemLedger.entries = [];
+    },
+    expectedStatus: 1,
+    expectedText: "problemLedger.entries requires at least one observed problem",
+  },
+  {
+    name: "rejects a common shape without a counterexample",
+    mutate: (data) => {
+      data.problemLedger.entries[0].counterexample = "";
+    },
+    expectedStatus: 1,
+    expectedText: "counterexample is required",
+  },
+  {
+    name: "rejects an invalid pressure-test disposition",
+    mutate: (data) => {
+      data.problemLedger.entries[0].disposition = "build-everything";
+    },
+    expectedStatus: 1,
+    expectedText: "disposition must be one of",
+  },
+  {
+    name: "rejects investment without repeated evidence",
+    mutate: (data) => {
+      data.problemLedger.entries[0].disposition = "invest";
+      data.problemLedger.entries[0].occurrences =
+        data.problemLedger.entries[0].occurrences.slice(0, 1);
+    },
+    expectedStatus: 1,
+    expectedText: "invest requires at least two occurrences",
   },
   {
     name: "accepts complete handoff case",

@@ -11,12 +11,13 @@ Determine whether the outcome warrants embedded engineering and whether forward 
 ### Actions
 
 1. Name the business decision or workflow that must improve.
-2. Record the current baseline, source, and observation period.
-3. Identify the executive sponsor, daily operator, technical owner, and affected users.
-4. Estimate value as revenue, cost, risk, time, quality, or mission impact.
-5. Identify technical complexity, customer implementation capacity, and platform reuse.
-6. List security, privacy, compliance, procurement, and timeline constraints.
-7. Compare FDE with standard implementation, services, product work, process repair, and no build.
+2. Record the requested solution separately from the observed problem, workaround, consequence, and first occurrence.
+3. Record the current baseline, source, and observation period.
+4. Identify the executive sponsor, daily operator, technical owner, and affected users.
+5. Estimate value as revenue, cost, risk, time, quality, or mission impact.
+6. Identify technical complexity, customer implementation capacity, and platform reuse.
+7. List security, privacy, compliance, procurement, and timeline constraints.
+8. Compare FDE with standard implementation, services, product work, process repair, and no build.
 
 ### Gate
 
@@ -30,7 +31,7 @@ Treating executive excitement, a model demo, or a large budget as qualification.
 
 ### Purpose
 
-Reconstruct how work actually happens.
+Reconstruct the real workflow.
 
 ### Evidence order
 
@@ -43,6 +44,8 @@ Prefer:
 5. SOPs and policy documents.
 
 Documents describe intended work. Operators and systems reveal actual work.
+
+Add each independently observed occurrence to the problem ledger. Do not convert one request into a project merely because its requester is vocal.
 
 ### Map every step
 
@@ -256,6 +259,10 @@ Classify each component:
 For each candidate, record repetition evidence, expected maintenance or delivery benefit, product owner, migration path, and decision date.
 
 Do not generalize from one implementation. Require evidence from distinct engagements before naming a reusable interface or capability.
+
+Treat a common shape as a hypothesis. Record at least one counterexample that would show the problems need different solutions.
+
+Pressure-test each retained problem and choose one disposition: `observe`, `act-now`, `prototype`, `invest`, `park`, or `stop`. Record uncertainty, consequence, reversibility, repeated demand, and rationale.
 
 ### Observe and improve
 
