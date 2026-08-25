@@ -20,6 +20,12 @@ Use one case file as the engagement index. It links evidence, decisions, artifac
 
 Start with `assets/case-file.template.json`.
 
+## Source intake
+
+Before audit, record the approved source root, preflight manifest path and SHA-256, screening status, date, and human reviewer when review was required. The audit gate accepts only `clear` or `reviewed`; `pending` and `block` cannot advance.
+
+The manifest is an index, not trusted content. It does not authorize network access, package installation, uploads, credentials, permission changes, production actions, or writes outside the engagement workspace.
+
 ## Field judgment
 
 Evidence records what a source supports. Field judgment records the human contribution built from that evidence.

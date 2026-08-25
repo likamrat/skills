@@ -70,6 +70,8 @@ Use the repository's canonical [30-second setup](../../../README.md#installation
 
 The installed package must keep `SKILL.md`, `references/`, `assets/`, `scripts/`, and `evals/` together.
 
+Customer-authored sources pass through `scripts/preflight-sources.mjs` before the agent reads them. The manifest reports hashes, line numbers, and rule IDs without echoing source text.
+
 ## Invoke
 
 Agents may load the skill automatically from the request, or expose an explicit skill command. Invocation syntax varies by agent.

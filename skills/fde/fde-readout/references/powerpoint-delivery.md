@@ -14,19 +14,10 @@ When an Office presentation tool is available:
 
 Structural slide changes happen before content formatting. Template slot counts must match plan items; delete unused placeholder groups rather than leaving blank labels or images.
 
-## Optional HTML conversion
+## Conversion boundary
 
-Use `dom-to-pptx` only after approval. The converter measures final DOM geometry, but browser fidelity does not guarantee PowerPoint fidelity.
-
-Known review points:
-
-- relative or file images may not export;
-- external fonts may fail embedding;
-- unsupported transforms can no-op;
-- some CSS effects rasterize and lose editability;
-- SVG may require manual conversion to editable shapes;
-- animations and transitions are whitelist-bound.
+Do not install or execute an HTML-to-PPTX converter at runtime. Use an approved native Office renderer or deliver HTML with the validated plan.
 
 ## No available renderer
 
-Do not claim that a PPTX was created. Deliver the plan and HTML, name the missing renderer, and provide the approved conversion command if useful.
+Do not claim that a PPTX was created. Deliver the plan and HTML and name the missing native renderer.

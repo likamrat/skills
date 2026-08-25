@@ -256,6 +256,18 @@ if (styleTests.status !== 0) {
   );
 }
 
+const sourcePreflightTests = spawnSync(
+  process.execPath,
+  [join(skillRoot, "scripts", "test-source-preflight.mjs")],
+  { encoding: "utf8" },
+);
+
+if (sourcePreflightTests.status !== 0) {
+  failures.push(
+    `source preflight tests failed:\n${sourcePreflightTests.stdout}${sourcePreflightTests.stderr}`,
+  );
+}
+
 const docsLint = spawnSync(
   process.execPath,
   [

@@ -12,6 +12,15 @@
     "reason": "",
     "alternativesConsidered": []
   },
+  "sourceIntake": {
+    "approvedRoot": "",
+    "manifestPath": "",
+    "manifestSha256": "",
+    "status": "pending",
+    "screenedAt": "",
+    "reviewedBy": "",
+    "sources": []
+  },
   "evidence": [],
   "outcomeContract": {
     "outcome": "",

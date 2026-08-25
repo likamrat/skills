@@ -87,8 +87,20 @@ try {
     );
     try {
       await access(join(cwd, ".agents", "skills", skill, "SKILL.md"));
+      await access(
+        join(
+          cwd,
+          ".agents",
+          "skills",
+          skill,
+          "scripts",
+          "preflight-sources.mjs",
+        ),
+      );
     } catch {
-      failures.push(`${skill} project install did not create SKILL.md`);
+      failures.push(
+        `${skill} project install is missing SKILL.md or source preflight`,
+      );
     }
     if (skill === "fde-readout") {
       try {

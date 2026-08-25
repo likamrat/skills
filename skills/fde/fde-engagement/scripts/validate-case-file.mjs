@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { validateDomainModelLifecycle } from "./domain-model-lifecycle.mjs";
 
 const phases = [
@@ -18,6 +19,7 @@ const assignments = new Set(["deterministic", "model", "human", "hybrid"]);
 const decisionStatuses = new Set(["open", "settled", "deferred"]);
 const roundStatuses = new Set(["active", "answered"]);
 const gateStatuses = new Set(["open", "blocked", "ready", "passed"]);
+const sourceIntakeStatuses = new Set(["clear", "reviewed"]);
 const verdicts = new Set([
   "FDE",
   "professional-services delivery",
@@ -205,6 +207,139 @@ function validateEvidence(evidence) {
   requireValue(
     new Set(ids).size === ids.length,
     "evidence IDs must be unique",
+  );
+}
+
+function insideRoot(root, path) {
+  const candidate = relative(root, path);
+  return (
+    candidate === "" ||
+    (!candidate.startsWith("..") &&
+      !candidate.startsWith("/") &&
+      !candidate.includes(":"))
+  );
+}
+
+async function validateSourceIntake(data) {
+  const intake = data.sourceIntake;
+  requireValue(
+    intake && typeof intake === "object",
+    "sourceIntake is required from audit onward",
+  );
+  if (!intake || typeof intake !== "object") return;
+  requireValue(
+    nonEmpty(intake.approvedRoot),
+    "sourceIntake.approvedRoot is required",
+  );
+  requireValue(
+    nonEmpty(intake.manifestPath),
+    "sourceIntake.manifestPath is required",
+  );
+  requireValue(
+    /^[a-f0-9]{64}$/.test(intake.manifestSha256 ?? ""),
+    "sourceIntake.manifestSha256 must be a SHA-256 digest",
+  );
+  requireValue(
+    sourceIntakeStatuses.has(intake.status),
+    "sourceIntake.status must be clear or reviewed",
+  );
+  requireValue(
+    nonEmpty(intake.screenedAt),
+    "sourceIntake.screenedAt is required",
+  );
+  if (intake.status === "reviewed") {
+    requireValue(
+      nonEmpty(intake.reviewedBy),
+      "sourceIntake.reviewedBy is required after review",
+    );
+  }
+
+  const caseDirectory = dirname(resolve(path));
+  const approvedRoot = resolve(caseDirectory, intake.approvedRoot ?? "");
+  const manifestPath = resolve(caseDirectory, intake.manifestPath ?? "");
+  requireValue(
+    insideRoot(caseDirectory, approvedRoot),
+    "sourceIntake.approvedRoot must stay inside the case directory",
+  );
+  requireValue(
+    insideRoot(caseDirectory, manifestPath),
+    "sourceIntake.manifestPath must stay inside the case directory",
+  );
+  if (
+    !insideRoot(caseDirectory, approvedRoot) ||
+    !insideRoot(caseDirectory, manifestPath)
+  ) {
+    return;
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  } catch (error) {
+    requireValue(false, `sourceIntake manifest cannot be read: ${error.message}`);
+    return;
+  }
+
+  const { manifestSha256, ...manifestBody } = manifest;
+  const computedManifestSha256 = createHash("sha256")
+    .update(JSON.stringify(manifestBody))
+    .digest("hex");
+  requireValue(
+    manifestSha256 === computedManifestSha256,
+    "sourceIntake manifest self-hash is invalid",
+  );
+  requireValue(
+    intake.manifestSha256 === computedManifestSha256,
+    "sourceIntake.manifestSha256 does not match the manifest",
+  );
+  requireValue(
+    intake.status === manifest.status,
+    "sourceIntake.status does not match the manifest",
+  );
+  requireValue(
+    intake.screenedAt === manifest.generatedAt,
+    "sourceIntake.screenedAt does not match the manifest",
+  );
+
+  const manifestSources = new Map(
+    (manifest.sources ?? []).map((source) => [source.sourceId, source]),
+  );
+  const mappings = intake.sources;
+  requireValue(
+    Array.isArray(mappings) && mappings.length === manifestSources.size,
+    "sourceIntake.sources must map every manifest source",
+  );
+  if (!Array.isArray(mappings)) return;
+
+  const mappedIds = new Set();
+  for (const [index, mapping] of mappings.entries()) {
+    const prefix = `sourceIntake.sources[${index}]`;
+    requireValue(nonEmpty(mapping?.sourceId), `${prefix}.sourceId is required`);
+    requireValue(nonEmpty(mapping?.path), `${prefix}.path is required`);
+    const source = manifestSources.get(mapping?.sourceId);
+    requireValue(Boolean(source), `${prefix}.sourceId is absent from the manifest`);
+    const sourcePath = resolve(approvedRoot, mapping?.path ?? "");
+    requireValue(
+      insideRoot(approvedRoot, sourcePath),
+      `${prefix}.path must stay inside sourceIntake.approvedRoot`,
+    );
+    if (!source || !insideRoot(approvedRoot, sourcePath)) continue;
+
+    try {
+      const bytes = await readFile(sourcePath);
+      const currentSha256 = createHash("sha256").update(bytes).digest("hex");
+      requireValue(
+        source.sha256 === currentSha256,
+        `${prefix}.path no longer matches its preflight hash`,
+      );
+    } catch (error) {
+      requireValue(false, `${prefix}.path cannot be read: ${error.message}`);
+    }
+    mappedIds.add(mapping.sourceId);
+  }
+  requireValue(
+    mappedIds.size === mappings.length,
+    "sourceIntake.sources contains duplicate source IDs",
   );
 }
 
@@ -1019,6 +1154,7 @@ if (phaseIndex > 0) {
     data.classification?.verdict === "FDE",
     "only an FDE verdict can advance beyond qualification",
   );
+  await validateSourceIntake(data);
 }
 
 for (const validator of validators.slice(0, phaseIndex + 1)) {

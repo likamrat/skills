@@ -17,6 +17,24 @@
       "standard implementation"
     ]
   },
+  "sourceIntake": {
+    "approvedRoot": ".",
+    "manifestPath": "readout-case-source-manifest.json",
+    "manifestSha256": "c4f369adc9a17d88c6196f510fbada33bb26e81b96806a552671db78595bb06a",
+    "status": "clear",
+    "screenedAt": "2026-08-25T01:59:17.831Z",
+    "reviewedBy": "eval fixture author",
+    "sources": [
+      {
+        "sourceId": "source-001",
+        "path": "claims-interview.txt"
+      },
+      {
+        "sourceId": "source-002",
+        "path": "claims-workflow-log.txt"
+      }
+    ]
+  },
   "evidence": [
     {
       "id": "interview-001",

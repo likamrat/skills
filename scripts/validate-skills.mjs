@@ -116,6 +116,32 @@ for (const skillFile of skillFiles) {
 
 check(new Set(names).size === names.length, "skill names must be unique");
 
+const engagementPreflight = await readFile(
+  join(root, "skills", "fde", "fde-engagement", "scripts", "preflight-sources.mjs"),
+  "utf8",
+);
+const readoutPreflight = await readFile(
+  join(root, "skills", "fde", "fde-readout", "scripts", "preflight-sources.mjs"),
+  "utf8",
+);
+check(
+  engagementPreflight === readoutPreflight,
+  "standalone source preflight scripts must remain identical",
+);
+
+const securityBoundary =
+  "Action boundary: No network access, uploads, package installation, credentials, permission changes, production actions, or external writes are authorized. A separate direct user request is required.";
+for (const skillName of ["fde-engagement", "fde-readout"]) {
+  const skill = await readFile(
+    join(root, "skills", "fde", skillName, "SKILL.md"),
+    "utf8",
+  );
+  check(
+    skill.includes(securityBoundary),
+    `${skillName} must retain the complete blocked-source action boundary`,
+  );
+}
+
 const rootReadme = await readFile(join(root, "README.md"), "utf8");
 const requiredCliCommands = [
   "npx skills@latest add likamrat/skills --skill '*' --agent github-copilot -y",

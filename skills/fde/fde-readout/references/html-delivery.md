@@ -27,15 +27,6 @@ node scripts/serve.mjs output-directory --port 4173
 
 The server binds to `127.0.0.1`.
 
-## Optional conversion
+## PowerPoint boundary
 
-`dom-to-pptx` is MIT licensed and can convert the fixed DOM geometry to editable PowerPoint shapes. Its headless exporter downloads/uses Puppeteer and PptxGenJS, so disclose that dependency and obtain approval before running:
-
-```text
-npx --yes dom-to-pptx-exporter@2.1.1 \
-  "http://127.0.0.1:4173/deck/?export=1" \
-  --selector ".slide" \
-  --output readout.pptx
-```
-
-Local images must be data URIs or otherwise export-safe. Unsupported transforms, gradients, filters, and animation classes may silently degrade. Validate the resulting PPTX separately.
+Do not install or execute an HTML-to-PPTX package at runtime. Deliver the HTML and validated plan when an approved native Office renderer is unavailable.

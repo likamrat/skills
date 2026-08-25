@@ -189,13 +189,15 @@ for (const [path, label] of requiredAssets) {
     failures.push(`${label} is missing`);
   }
 
-  const htmlDelivery = await readFile(
-    join(skillRoot, "references", "html-delivery.md"),
-    "utf8",
-  );
+}
+
+for (const file of files.filter(
+  (candidate) => extname(candidate) === ".md",
+)) {
+  const content = await readFile(file, "utf8");
   check(
-    htmlDelivery.includes("dom-to-pptx-exporter@2.1.1"),
-    "optional dom-to-pptx exporter command must remain version-pinned",
+    !/\bnpx\b[^\r\n]*dom-to-pptx/i.test(content),
+    `${file} must not offer runtime dom-to-pptx installation`,
   );
 }
 
@@ -226,7 +228,12 @@ check(
   "trigger fixtures require at least three should-not-trigger cases",
 );
 
-for (const script of ["test-plan.mjs", "test-html.mjs", "test-writing.mjs"]) {
+for (const script of [
+  "test-plan.mjs",
+  "test-html.mjs",
+  "test-writing.mjs",
+  "test-source-preflight.mjs",
+]) {
   const result = spawnSync(process.execPath, [join(skillRoot, "scripts", script)], {
     encoding: "utf8",
   });

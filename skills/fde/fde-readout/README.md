@@ -21,6 +21,8 @@ Use a human-first 25/50/25 editing loop: the FDE supplies rough source notes, th
 
 Use the repository's canonical [30-second setup](../../../README.md#installation-30-second-setup) and select `fde-readout`.
 
+Customer-authored sources pass through `scripts/preflight-sources.mjs` before the agent reads them. The manifest reports hashes, line numbers, and rule IDs without echoing source text.
+
 ## Use
 
 ### Plan a customer readout
@@ -111,7 +113,7 @@ fde-readout/
 - Every consequential claim requires evidence IDs.
 - Narrative slides require supplied human-context IDs.
 - HTML playback has no remote runtime dependency.
-- External converters and hosted services are opt-in.
+- Runtime converters and hosted services are not used.
 - Reference-deck asset reuse requires named authorization.
 - Rendered-slide review remains required after plan and Office-package validation.
 

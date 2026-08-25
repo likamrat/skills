@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "generatedAt": "2026-08-25T01:59:17.831Z",
+  "status": "clear",
+  "limits": {
+    "maxFileBytes": 2097152,
+    "maxTotalBytes": 10485760
+  },
+  "note": "A clear result means no known pattern matched. It does not make source content trusted or authorize actions.",
+  "sources": [
+    {
+      "sourceId": "source-001",
+      "bytes": 1203,
+      "sha256": "a7a7fac9ad7e1ab48cb4567a422ec7eba52247cc5f0d6f3392a6432e6178bd86",
+      "trust": "untrusted-data",
+      "status": "clear",
+      "findings": []
+    },
+    {
+      "sourceId": "source-002",
+      "bytes": 1014,
+      "sha256": "587d51a7063d63bc4671a43a7b953eb4025fefa836fea281034661fcf486713d",
+      "trust": "untrusted-data",
+      "status": "clear",
+      "findings": []
+    }
+  ],
+  "manifestSha256": "c4f369adc9a17d88c6196f510fbada33bb26e81b96806a552671db78595bb06a"
+}
