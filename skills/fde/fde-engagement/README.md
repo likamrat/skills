@@ -17,7 +17,7 @@ The skill supports four modes:
 
 It covers:
 
-1. qualification;
+1. qualification and problem ledger;
 2. workflow audit;
 3. responsibility and system design;
 4. production-shaped implementation;

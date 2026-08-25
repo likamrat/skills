@@ -1,0 +1,34 @@
+{
+  "skill": "fde-engagement",
+  "model": "gpt-5.6-sol",
+  "evalId": 5,
+  "generatedAt": "2026-08-25",
+  "trials": 1,
+  "assertionsPassed": 7,
+  "assertions": 7,
+  "result": {
+    "requestSeparatedFromProblem": true,
+    "allLedgerFieldsPrinted": true,
+    "unsupportedValues": "Unknown",
+    "commonShape": "unproven",
+    "disposition": "observe",
+    "prematureOperatingModel": false,
+    "evidenceRequested": [
+      "occurrences",
+      "consequence",
+      "reversibility",
+      "maintenance owner",
+      "reuse evidence",
+      "split-case counterexample"
+    ]
+  },
+  "usage": {
+    "modelCalls": 2,
+    "inputTokens": 15635,
+    "outputTokens": 508,
+    "apiDurationMs": 14359,
+    "premiumRequests": 1
+  },
+  "releaseBlocker": null,
+  "rawTracesCommitted": false
+}
