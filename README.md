@@ -11,6 +11,9 @@ These skills make the agent show its work: inspect source material, ask unresolv
 
 Use them, challenge them, and adapt them to your work. Keep the person making the decision accountable.
 
+> [!NOTE]
+> With thanks to Matt Pocock, whose [Skills for Real Engineers](https://github.com/mattpocock/skills) inspired this project. Matt turns software engineering practice into small, composable skills; I am applying that idea to role-specific work such as customer discovery, judgment, delivery, and handoff.
+
 ## Installation (30-second setup)
 
 Install a named skill with the open [`skills`](https://github.com/vercel-labs/skills) CLI. This example installs `fde-engagement`:
