@@ -129,6 +129,9 @@ The tree records the decisions surfaced by the grilling protocol.
   "evidenceNeeded": ["Observed policy exceptions"],
   "evidenceReady": true,
   "recommendation": "Use standard implementation unless hidden workflow complexity is evidenced",
+  "exampleKind": "rule",
+  "exampleStatus": "evidence-backed",
+  "concreteExample": "Plain language: Standard implementation fits when operators use no undocumented policy exceptions. Programmatic: if undocumented_policy_exceptions == 0 then route = standard_implementation",
   "status": "settled",
   "answer": "FDE is required because policy decisions exist only in operator practice",
   "deferredReason": "",
@@ -138,7 +141,7 @@ The tree records the decisions surfaced by the grilling protocol.
 }
 ```
 
-`status` is `open`, `settled`, or `deferred`. `questionNumber` is assigned when the question is first asked and never reused. `nextQuestionNumber` is the next unused integer.
+`status` is `open`, `settled`, or `deferred`. `questionNumber` is assigned when the question is first asked and never reused. `nextQuestionNumber` is the next unused integer. Asked nodes also record `exampleKind`, `exampleStatus`, and `concreteExample`. The example contains labeled `Plain language` and `Programmatic` forms. Illustrative examples use placeholders and remain visibly illustrative.
 
 The `frontier` array contains every currently answerable node, including nodes held for a later round. A round records one to three asked nodes:
 

@@ -1,0 +1,27 @@
+{
+  "skill": "fde-engagement",
+  "model": "gpt-5.6-sol",
+  "evalId": 23,
+  "generatedAt": "2026-08-25",
+  "trials": 1,
+  "assertionsPassed": 8,
+  "assertions": 8,
+  "result": {
+    "question": "Q1 - Which event ends queue time?",
+    "recommendation": "Use final_queue_assignment when final ownership ends queue time.",
+    "plainLanguage": "The question asks which operational event means the claim has left the queue.",
+    "programmatic": "queue_time = final_queue_assignment.at - email_received.at",
+    "baseline": "Unknown",
+    "architectureSelected": false,
+    "emDashes": 0
+  },
+  "usage": {
+    "modelCalls": 2,
+    "totalTokens": 17294,
+    "apiDurationMs": 9210,
+    "sessionDurationMs": 22727,
+    "premiumRequests": 1
+  },
+  "releaseBlocker": null,
+  "rawTracesCommitted": false
+}

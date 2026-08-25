@@ -17,6 +17,17 @@ const phases = [
 
 const assignments = new Set(["deterministic", "model", "human", "hybrid"]);
 const decisionStatuses = new Set(["open", "settled", "deferred"]);
+const exampleKinds = new Set([
+  "event",
+  "rule",
+  "payload",
+  "query",
+  "state-transition",
+  "pseudocode",
+  "interface",
+  "test",
+]);
+const exampleStatuses = new Set(["evidence-backed", "illustrative"]);
 const roundStatuses = new Set(["active", "answered"]);
 const gateStatuses = new Set(["open", "blocked", "ready", "passed"]);
 const sourceIntakeStatuses = new Set(["clear", "reviewed"]);
@@ -492,6 +503,25 @@ function validateQualify(data) {
       nonEmpty(node?.recommendation),
       `${prefix}.recommendation is required`,
     );
+    if (positiveInteger(node?.questionNumber)) {
+      requireValue(
+        exampleKinds.has(node?.exampleKind),
+        `${prefix}.exampleKind must be one of: ${[...exampleKinds].join(", ")}`,
+      );
+      requireValue(
+        exampleStatuses.has(node?.exampleStatus),
+        `${prefix}.exampleStatus must be evidence-backed or illustrative`,
+      );
+      requireValue(
+        nonEmpty(node?.concreteExample),
+        `${prefix}.concreteExample is required for an asked question`,
+      );
+      requireValue(
+        /Plain language:/i.test(node?.concreteExample ?? "") &&
+          /Programmatic:/i.test(node?.concreteExample ?? ""),
+        `${prefix}.concreteExample must include Plain language and Programmatic forms`,
+      );
+    }
     requireValue(
       decisionStatuses.has(node?.status),
       `${prefix}.status must be open, settled, or deferred`,

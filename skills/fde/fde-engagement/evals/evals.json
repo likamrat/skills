@@ -133,7 +133,8 @@
       "assertions": [
         "The response identifies the conflict between recommendation and authorization.",
         "It asks a numbered frontier question that requires the FDE to confirm the canonical meaning of approval.",
-        "Every decision question includes a recommendation, rationale, and condition that could change it.",
+        "Every decision question includes Recommendation, Concrete example, Why, and Changes if.",
+        "The concrete example uses the case's separate recommendation and authorization events without selecting architecture.",
         "It explicitly leaves agent action authority for a later round because that decision depends on the terminology boundary.",
         "It does not ask downstream architecture, tool, or model questions.",
         "It waits for the FDE's answers before advancing."
@@ -183,8 +184,23 @@
         "It asks at most three numbered decision questions.",
         "Question numbers continue from the case file rather than restarting at Q1.",
         "It states how many ready decisions remain without previewing downstream answers.",
-        "Each asked question includes Recommendation, Why, and Changes if.",
+        "Each asked question includes Recommendation, Concrete example, Why, and Changes if.",
         "It waits for the FDE before opening another round."
+      ]
+    },
+    {
+      "id": 23,
+      "prompt": "Use fde-engagement. We need to reduce claims queue time. The unresolved decision is which event ends queue time. Ask that question. The log has email_received and final_queue_assignment events, but no measured baseline.",
+      "expected_output": "The skill asks which event ends queue time and grounds the recommendation with an event formula without inventing a baseline.",
+      "assertions": [
+        "It asks one numbered decision question about the queue-time end event.",
+        "It recommends a specific end-event boundary from the supplied case.",
+        "It includes a Concrete example using the supplied event names.",
+        "The example explains the event boundary in plain language before or alongside the programmatic form.",
+        "The example expresses queue time as an event difference or equivalent assertion.",
+        "It marks the baseline unknown and does not invent a duration or target.",
+        "It does not select architecture, frameworks, vendors, or deployment components.",
+        "It uses an ASCII hyphen in the Q1 heading and no em dash anywhere."
       ]
     },
     {

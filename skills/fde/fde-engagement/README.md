@@ -25,6 +25,10 @@ It covers:
 6. deployment and adoption;
 7. handoff, productization, and improvement.
 
+## Concrete examples
+
+Every decision question pairs a plain-language case sentence with a programmatic event, rule, payload, query, state transition, pseudocode fragment, interface, or test. Examples use case evidence or explicit placeholders; they do not invent metrics or choose architecture before the design gate.
+
 ## Human judgment is source material
 
 Good writing requires more than the removal of AI tells. Removing em dashes, stock transitions, or tidy phrasing can improve hygiene while leaving the underlying artifact empty.
