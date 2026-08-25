@@ -114,10 +114,10 @@ A skill change can ship when:
 
 | Skill | Readiness | Empirical evidence | Core size | Trigger cases | Behavior cases |
 |---|---:|---|---|---:|---:|
-| `fde-engagement` | 96 | Limited activation and behavior evidence | 209 lines, about 3,475 tokens | 12 positive, 10 negative | 22 cases, 112 assertions |
-| `fde-readout` | 98 | Activation evidence only | 176 lines, about 2,089 tokens | 10 positive, 10 negative | 5 cases, 19 assertions |
+| `fde-engagement` | 96 | Limited activation and behavior evidence | 235 lines, about 3,838 tokens | 12 positive, 10 negative | 22 cases, 113 assertions |
+| `fde-readout` | 98 | Limited activation and behavior evidence | 202 lines, about 2,396 tokens | 10 positive, 10 negative | 6 cases, 23 assertions |
 
-The engagement core was reduced from about 4,900 to 3,475 tokens by removing detail already available through contextual references. The readout core was reduced from about 2,450 to 2,089 tokens by moving renderer procedures to conditional references. Both descriptions use two sentences and stay under 400 characters.
+The engagement core was reduced from about 4,900 to 3,838 tokens while adding source preflight and action boundaries. The readout core is about 2,396 tokens after adding the same controls and removing runtime conversion packages. Both descriptions use two sentences and stay under 400 characters.
 
 The current descriptions loaded all six representative positive cases used in the final smoke check. Adjacent career, project-planning, sales, and presentation prompts can still cause a related skill to load before its body rejects or reroutes the request. Treat activation as a routing signal, not proof of correct behavior, and do not add negative keywords solely to improve a trigger score.
 

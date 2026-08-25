@@ -52,6 +52,6 @@ Validation checks:
 
 ## 5. Render and inspect
 
-Render HTML first when precise layout is the primary requirement. Use native PowerPoint authoring when PowerPoint editability or an approved template is primary. Convert HTML to PPTX only when the user approves the optional toolchain.
+Render HTML first when precise layout is the primary requirement. Use approved native PowerPoint authoring when PowerPoint editability or a template is primary. Do not install a conversion toolchain at runtime.
 
 Each renderer has its own QA. Never approve one format because the other looks correct.

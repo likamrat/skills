@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -9,6 +9,10 @@ import { fileURLToPath } from "node:url";
 const validator = resolve(
   fileURLToPath(new URL(".", import.meta.url)),
   "validate-case-file.mjs",
+);
+const sourcePreflight = resolve(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "preflight-sources.mjs",
 );
 
 const completeCase = {
@@ -24,6 +28,15 @@ const completeCase = {
     verdict: "FDE",
     reason: "The outcome requires embedded engineering and can create reusable primitives.",
     alternativesConsidered: ["standard implementation"],
+  },
+  sourceIntake: {
+    approvedRoot: ".",
+    manifestPath: "source-manifest.json",
+    manifestSha256: "",
+    status: "clear",
+    screenedAt: "",
+    reviewedBy: "eval fixture author",
+    sources: [{ sourceId: "source-001", path: "source.txt" }],
   },
   evidence: [
     {
@@ -560,6 +573,42 @@ const tests = [
     expectedText: "domainModel.conflicts[0].owner",
   },
   {
+    name: "rejects audit without source preflight",
+    mutate: (data) => {
+      data.phase = "audit";
+      delete data.sourceIntake;
+    },
+    expectedStatus: 1,
+    expectedText: "sourceIntake is required",
+  },
+  {
+    name: "rejects fabricated source manifest hash",
+    mutate: (data) => {
+      data.phase = "audit";
+      data.sourceIntake.manifestSha256 = "a".repeat(64);
+    },
+    expectedStatus: 1,
+    expectedText: "does not match the manifest",
+  },
+  {
+    name: "rejects missing preflight source mapping",
+    mutate: (data) => {
+      data.phase = "audit";
+      data.sourceIntake.sources = [];
+    },
+    expectedStatus: 1,
+    expectedText: "must map every manifest source",
+  },
+  {
+    name: "rejects missing preflighted source file",
+    mutate: (data) => {
+      data.phase = "audit";
+      data.sourceIntake.sources[0].path = "missing-source.txt";
+    },
+    expectedStatus: 1,
+    expectedText: "cannot be read",
+  },
+  {
     name: "accepts complete handoff case",
     mutate: (data) => {
       data.phase = "handoff";
@@ -603,6 +652,32 @@ const directory = await mkdtemp(join(tmpdir(), "fde-validator-"));
 let failed = false;
 
 try {
+  const sourcePath = join(directory, "source.txt");
+  const manifestPath = join(directory, "source-manifest.json");
+  await writeFile(
+    sourcePath,
+    "Operators manually reconcile failed records before authorization.\n",
+  );
+  const preflight = spawnSync(
+    process.execPath,
+    [
+      sourcePreflight,
+      "--root",
+      directory,
+      "--output",
+      manifestPath,
+      sourcePath,
+    ],
+    { cwd: directory, encoding: "utf8" },
+  );
+  if (preflight.status !== 0) {
+    console.error(`${preflight.stdout}${preflight.stderr}`);
+    process.exit(1);
+  }
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  completeCase.sourceIntake.manifestSha256 = manifest.manifestSha256;
+  completeCase.sourceIntake.screenedAt = manifest.generatedAt;
+
   for (const test of tests) {
     const data = structuredClone(completeCase);
     test.mutate(data);
