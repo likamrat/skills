@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "fixtureId": "hill-0-observed-failure-v1",
+  "evaluationMode": "frozen-replay",
   "task": {
     "id": "fde-full-simulation",
     "class": "full-fde-dual-format",
@@ -103,7 +104,7 @@
       "id": "reliability",
       "kind": "reliability",
       "path": "reliability.json",
-      "sha256": "cdef52516c0fc6929e9b5dba54376ef1d0596857581a1688ba38ac08bfc74ef9"
+      "sha256": "657722adcd25a8467f415c58149f4998c96945f3ee60f1ce0b6575a83be42d61"
     }
   ],
   "agentClaim": {

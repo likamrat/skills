@@ -74,7 +74,7 @@ Separate presentation workflows drift. Numbers change, recommendations move, and
 
 Each change is checked for package validity, activation accuracy, output behavior, regressions, and instruction cost. Static readiness and actual effectiveness are reported separately.
 
-See [how skills are evaluated and evolved](docs/skill-evolution.md) for the scorecard, fresh-session test loop, and release gates.
+See [how skills are evaluated and evolved](docs/skill-evolution.md) for the scorecard, fresh-session test loop, and release gates. The [FDE end-to-end evaluator](evals/fde-e2e/README.md) grades final-state replay bundles without changing either skill.
 
 ## More install options
 

@@ -4,13 +4,14 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import {
   dirname,
+  extname,
   isAbsolute,
   relative,
   resolve,
 } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const GRADER_VERSION = "hill-0-evaluator/1.0.0";
+export const GRADER_VERSION = "hill-0-evaluator/1.1.0";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const defaultFixturesRoot = resolve(root, "evals", "fde-e2e", "fixtures");
@@ -153,6 +154,7 @@ async function loadArtifacts(fixtureDirectory, descriptors) {
         descriptor,
         exists: true,
         actualSha256: hash(bytes),
+        bytes,
       });
     } catch (error) {
       if (error.code !== "ENOENT") {
@@ -162,6 +164,7 @@ async function loadArtifacts(fixtureDirectory, descriptors) {
         descriptor,
         exists: false,
         actualSha256: null,
+        bytes: null,
       });
     }
   }
@@ -183,6 +186,77 @@ function artifactForFormat(artifacts, format) {
 function artifactHashes(artifacts) {
   return Object.fromEntries(
     [...artifacts.entries()].map(([id, entry]) => [id, entry.actualSha256]),
+  );
+}
+
+function zipEntryNames(bytes) {
+  const endOfCentralDirectorySignature = 0x06054b50;
+  const centralDirectorySignature = 0x02014b50;
+  const searchStart = Math.max(0, bytes.length - 65_557);
+  let endOfCentralDirectory = -1;
+  for (let index = bytes.length - 22; index >= searchStart; index -= 1) {
+    if (bytes.readUInt32LE(index) === endOfCentralDirectorySignature) {
+      endOfCentralDirectory = index;
+      break;
+    }
+  }
+  if (endOfCentralDirectory < 0) return null;
+
+  const entryCount = bytes.readUInt16LE(endOfCentralDirectory + 10);
+  const centralDirectorySize = bytes.readUInt32LE(endOfCentralDirectory + 12);
+  const centralDirectoryOffset = bytes.readUInt32LE(
+    endOfCentralDirectory + 16,
+  );
+  if (
+    entryCount === 0xffff ||
+    centralDirectorySize === 0xffffffff ||
+    centralDirectoryOffset === 0xffffffff ||
+    centralDirectoryOffset + centralDirectorySize > bytes.length
+  ) {
+    return null;
+  }
+
+  const names = new Set();
+  let cursor = centralDirectoryOffset;
+  for (let index = 0; index < entryCount; index += 1) {
+    if (
+      cursor + 46 > bytes.length ||
+      bytes.readUInt32LE(cursor) !== centralDirectorySignature
+    ) {
+      return null;
+    }
+    const fileNameLength = bytes.readUInt16LE(cursor + 28);
+    const extraLength = bytes.readUInt16LE(cursor + 30);
+    const commentLength = bytes.readUInt16LE(cursor + 32);
+    const nameStart = cursor + 46;
+    const nameEnd = nameStart + fileNameLength;
+    if (nameEnd > bytes.length) return null;
+    names.add(bytes.toString("utf8", nameStart, nameEnd).replaceAll("\\", "/"));
+    cursor = nameEnd + extraLength + commentLength;
+  }
+  return names;
+}
+
+function isNativePowerpoint(artifact) {
+  const bytes = artifact.bytes;
+  if (
+    artifact.descriptor.representation !== "native-pptx" ||
+    extname(artifact.descriptor.path).toLowerCase() !== ".pptx" ||
+    !bytes
+  ) {
+    return false;
+  }
+  const entries = zipEntryNames(bytes);
+  if (!entries) return false;
+  const requiredEntries = [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "ppt/presentation.xml",
+    "ppt/_rels/presentation.xml.rels",
+  ];
+  return (
+    requiredEntries.every((entry) => entries.has(entry)) &&
+    [...entries].some((entry) => /^ppt\/slides\/slide\d+\.xml$/.test(entry))
   );
 }
 
@@ -232,6 +306,7 @@ function metricLabel(metric) {
     inputTokens: "input tokens",
     toolCalls: "tool calls",
     failedToolCalls: "failed tool calls",
+    failedToolRate: "failed tool rate",
   };
   return labels[metric] ?? metric;
 }
@@ -265,6 +340,13 @@ export async function evaluateFixture(
       `run.fixtureId ${run.fixtureId} does not match requested fixture ${fixture}`,
     );
   }
+  const evaluationMode = requireString(
+    run.evaluationMode,
+    "run.evaluationMode",
+  );
+  if (!["frozen-replay", "live"].includes(evaluationMode)) {
+    throw new Error("run.evaluationMode must be frozen-replay or live");
+  }
 
   const task = requireObject(run.task, "run.task");
   requireString(task.id, "run.task.id");
@@ -277,6 +359,9 @@ export async function evaluateFixture(
     )
   ) {
     throw new Error("run.task.requestedFormats must be a non-empty string array");
+  }
+  if (new Set(task.requestedFormats).size !== task.requestedFormats.length) {
+    throw new Error("run.task.requestedFormats must not contain duplicates");
   }
 
   const versions = requireObject(run.versions, "run.versions");
@@ -309,6 +394,17 @@ export async function evaluateFixture(
       throw new Error(`run.metrics.${field} must be a non-negative number`);
     }
   }
+  if (metrics.failedToolCalls > metrics.toolCalls) {
+    throw new Error(
+      "run.metrics.failedToolCalls must not exceed run.metrics.toolCalls",
+    );
+  }
+  const failedToolRate =
+    metrics.toolCalls === 0 ? 0 : metrics.failedToolCalls / metrics.toolCalls;
+  const computedMetrics = {
+    ...metrics,
+    failedToolRate,
+  };
 
   const budgetFile = await readJson(budgetsPath, "budgets.json");
   const budgets = requireObject(budgetFile.value, "budgets.json");
@@ -320,8 +416,37 @@ export async function evaluateFixture(
     `budget task class ${taskClass}`,
   );
   const limits = requireObject(budget.limits, `budget ${taskClass}.limits`);
+  const requiredQaChecks = requireObject(
+    budget.requiredQaChecks,
+    `budget ${taskClass}.requiredQaChecks`,
+  );
+  const reliabilityPolicy = requireObject(
+    budget.reliability,
+    `budget ${taskClass}.reliability`,
+  );
+  const requiredTrialIds = requireArray(
+    reliabilityPolicy.requiredTrialIds,
+    `budget ${taskClass}.reliability.requiredTrialIds`,
+  );
+  if (
+    requiredTrialIds.length === 0 ||
+    requiredTrialIds.some(
+      (trialId) => typeof trialId !== "string" || trialId.length === 0,
+    ) ||
+    new Set(requiredTrialIds).size !== requiredTrialIds.length
+  ) {
+    throw new Error(
+      `budget ${taskClass}.reliability.requiredTrialIds must contain distinct non-empty strings`,
+    );
+  }
 
   const artifacts = await loadArtifacts(fixtureDirectory, run.artifacts);
+  const artifactFormats = [...artifacts.values()].map(
+    (artifact) => artifact.descriptor.format,
+  );
+  if (new Set(artifactFormats).size !== artifactFormats.length) {
+    throw new Error("run.artifacts must not contain duplicate formats");
+  }
   const evidence = await loadJsonDescriptors(
     fixtureDirectory,
     run.evidence,
@@ -414,6 +539,41 @@ export async function evaluateFixture(
       qa.severeDefects,
       `${format}Qa.severeDefects`,
     );
+    const formatRequiredChecks = requireArray(
+      requiredQaChecks[format],
+      `budget ${taskClass}.requiredQaChecks.${format}`,
+    );
+    if (
+      formatRequiredChecks.length === 0 ||
+      formatRequiredChecks.some(
+        (check) => typeof check !== "string" || check.length === 0,
+      )
+    ) {
+      throw new Error(
+        `budget ${taskClass}.requiredQaChecks.${format} must contain check names`,
+      );
+    }
+    const deterministicChecks = requireObject(
+      qa.deterministicChecks,
+      `${format}Qa.deterministicChecks`,
+    );
+    const missingChecks = formatRequiredChecks.filter(
+      (check) => !Object.hasOwn(deterministicChecks, check),
+    );
+    if (missingChecks.length > 0) {
+      throw new Error(
+        `${format}Qa.deterministicChecks is missing required checks: ${missingChecks.join(", ")}`,
+      );
+    }
+    if (
+      Object.values(deterministicChecks).some(
+        (value) => typeof value !== "boolean",
+      )
+    ) {
+      throw new Error(
+        `${format}Qa.deterministicChecks values must be booleans`,
+      );
+    }
     qaByFormat.set(format, qa);
 
     if (!artifact || !artifact.exists) {
@@ -435,6 +595,18 @@ export async function evaluateFixture(
           declared: artifact.descriptor.sha256,
           actual: artifact.actualSha256,
         },
+      );
+    }
+    if (
+      format === "powerpoint" &&
+      evaluationMode === "live" &&
+      !isNativePowerpoint(artifact)
+    ) {
+      addFailure(
+        axes,
+        "finalOutcome",
+        "final_outcome.powerpoint_requires_native_pptx",
+        "Live PowerPoint evaluation requires native .pptx bytes; synthetic snapshots are replay-only",
       );
     }
     if (
@@ -536,11 +708,16 @@ export async function evaluateFixture(
   const repeatedRetryGroups = retryGroups.filter(
     (group) => group.attempts >= 3 || group.failures >= 2,
   );
+  const repeatedStructuralRetryCount = repeatedRetryGroups.reduce(
+    (total, group) => total + Math.max(0, group.attempts - 1),
+    0,
+  );
   axes.traceQuality.diagnostics = {
     complete: trace.complete === true,
     staleQaFormats,
     wakeOnlyCoordinatorTurns,
     repeatedStructuralRetryGroups: repeatedRetryGroups.length,
+    repeatedStructuralRetryCount,
     prematureValidationAttempts,
   };
   if (
@@ -583,56 +760,71 @@ export async function evaluateFixture(
       repeatedRetryGroups,
     );
   }
-  if (prematureValidationAttempts > 1) {
+  if (prematureValidationAttempts > 0) {
     addFailure(
       axes,
       "traceQuality",
-      "trace_quality.repeated_premature_validation",
-      `${prematureValidationAttempts} premature structural validation attempts were recorded`,
+      "trace_quality.premature_validator_loop",
+      `${prematureValidationAttempts} known-incomplete validator attempt(s) were recorded`,
     );
   }
 
   axes.efficiency.diagnostics = {
-    metrics,
+    metrics: computedMetrics,
     limits,
   };
   for (const [metric, limit] of Object.entries(limits)) {
     if (typeof limit !== "number" || limit < 0) {
       throw new Error(`budget ${taskClass}.${metric} must be a non-negative number`);
     }
-    if (typeof metrics[metric] !== "number") {
-      throw new Error(`run.metrics.${metric} is required by budget ${taskClass}`);
+    if (typeof computedMetrics[metric] !== "number") {
+      throw new Error(
+        `computed metric ${metric} is required by budget ${taskClass}`,
+      );
     }
-    if (metrics[metric] > limit) {
+    if (computedMetrics[metric] > limit) {
       addFailure(
         axes,
         "efficiency",
         `efficiency.${metric}_budget_exceeded`,
-        `${metricLabel(metric)} ${metrics[metric]} exceeded task-class limit ${limit}`,
-        { actual: metrics[metric], limit },
+        `${metricLabel(metric)} ${computedMetrics[metric]} exceeded task-class limit ${limit}`,
+        { actual: computedMetrics[metric], limit },
       );
     }
   }
 
-  const requiredTrials = reliability.criticalTrialsRequired;
   const trials = requireArray(reliability.trials, "reliability.trials");
-  if (!Number.isInteger(requiredTrials) || requiredTrials < 1) {
-    throw new Error("reliability.criticalTrialsRequired must be a positive integer");
+  const trialIds = trials.map((trial, index) => {
+    requireObject(trial, `reliability.trials[${index}]`);
+    return requireString(trial.id, `reliability.trials[${index}].id`);
+  });
+  if (new Set(trialIds).size !== trialIds.length) {
+    throw new Error("reliability.trials must use distinct trial IDs");
   }
+  const trialsById = new Map(trials.map((trial) => [trial.id, trial]));
+  const missingTrialIds = requiredTrialIds.filter(
+    (trialId) => !trialsById.has(trialId),
+  );
+  const failedTrials = requiredTrialIds
+    .map((trialId) => trialsById.get(trialId))
+    .filter((trial) => trial && trial.passed !== true);
   axes.reliability.diagnostics = {
-    criticalTrialsRequired: requiredTrials,
+    requiredTrialIds,
     criticalTrialsRecorded: trials.length,
-    criticalTrialsPassed: trials.filter((trial) => trial.passed === true).length,
+    criticalTrialsPassed: requiredTrialIds.filter(
+      (trialId) => trialsById.get(trialId)?.passed === true,
+    ).length,
+    missingTrialIds,
   };
-  if (trials.length < requiredTrials) {
+  if (missingTrialIds.length > 0) {
     addFailure(
       axes,
       "reliability",
       "reliability.critical_trials_incomplete",
-      `Recorded ${trials.length} of ${requiredTrials} required critical trials`,
+      `Missing ${missingTrialIds.length} required critical trial(s)`,
+      missingTrialIds,
     );
   }
-  const failedTrials = trials.filter((trial) => trial.passed !== true);
   if (failedTrials.length > 0) {
     addFailure(
       axes,
@@ -681,14 +873,24 @@ export async function evaluateFixture(
   const failureReasons = axisNames.flatMap(
     (axis) => axes[axis].failureReasons,
   );
+  const operationalDiagnostics = {
+    wakeOnlyCoordinatorTurns,
+    prematureValidatorAttempts: prematureValidationAttempts,
+    repeatedStructuralRetryCount,
+    failedToolCalls: metrics.failedToolCalls,
+    failedToolRate,
+    leakedProcessCount: leakedProcesses.length,
+  };
   return {
     schemaVersion: 1,
     graderVersion: GRADER_VERSION,
     fixtureId: run.fixtureId,
+    evaluationMode,
     task,
     status: failureReasons.length === 0 ? "passed" : "failed",
     axes,
-    metrics,
+    metrics: computedMetrics,
+    operationalDiagnostics,
     budget: {
       taskClass,
       limits,

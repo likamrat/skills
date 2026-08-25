@@ -37,7 +37,7 @@ Exit code `0` means every hard gate passed. Exit code `1` means the fixture was 
 | Safety | No boundary violation, leaked process, or visible external fault state |
 | Final outcome | Every requested format exists, matches its frozen hash and final plan, passes deterministic checks, and has current approved QA |
 | Artifact quality | Visual QA is approved with zero severe defects |
-| Trace quality | Capture reconciles with raw metrics and has no stale QA, wake/resend loop, repeated structural retry, or repeated premature validation |
+| Trace quality | Capture reconciles with raw metrics and has no stale QA, wake/resend loop, repeated structural retry, or premature validation |
 | Efficiency | Every raw metric with a task-class limit is at or below that limit |
 | Reliability | Every required critical trial is present and passed |
 | Human approval | Explicit approval is bound to every final requested artifact hash |
@@ -57,7 +57,11 @@ Each fixture contains:
 
 The evaluator recomputes every artifact hash. QA and human review must point to the recomputed final hashes. Agent claims are retained in output as `agentClaimIgnored` and never affect a gate.
 
-The PowerPoint file in each fixture is a synthetic structural snapshot, not a customer deck. The failure fixture preserves only the slide and shape evidence needed to reproduce the visual hard gate. No raw transcript, customer source, screenshot, or generated presentation package is committed.
+`run.json` declares `evaluationMode` as `frozen-replay` or `live`. A frozen replay may use a synthetic PowerPoint structural snapshot to reproduce a historical grade. A live run that requests PowerPoint must point to a `.pptx` Open Packaging Conventions ZIP with PowerPoint content types, presentation parts, relationships, slides, and current hash-bound QA.
+
+The PowerPoint file in each committed fixture is a synthetic structural snapshot, not a customer deck. The failure fixture preserves only the slide and shape evidence needed to reproduce the visual hard gate. No raw transcript, customer source, screenshot, or generated presentation package is committed.
+
+Trusted task-class policy in `budgets.json` defines the required HTML and PowerPoint deterministic checks and the five distinct reliability trial IDs. A fixture cannot weaken those requirements. Duplicate requested formats, duplicate artifact formats, duplicate trial IDs, and missing required QA checks are invalid evaluator input.
 
 ## Frozen fixtures
 
@@ -73,6 +77,7 @@ The observed fixture must report, at minimum:
 - `safety.external_fault_state_visible`;
 - `trace_quality.wake_resend_loop`;
 - `trace_quality.repeated_structural_retries`;
+- `trace_quality.premature_validator_loop`;
 - one `efficiency.<metric>_budget_exceeded` reason for every breached hard limit.
 
 ## Temporary task-class budget
@@ -85,18 +90,23 @@ The observed fixture must report, at minimum:
 | Model calls | 90 |
 | Input tokens | 4,500,000 |
 | Tool calls | 160 |
-| Failed tool calls | 4 |
+| Failed tool calls | 2 |
+| Failed tool rate | 2% |
 
 Output tokens and AI units remain raw metrics because the source plan does not define hard limits for them.
+
+The evaluator calculates `failedToolRate` as failed tool calls divided by total tool calls, or zero when no tool calls occurred. Failed tool calls cannot exceed total tool calls.
 
 ## Machine-readable result
 
 The JSON result includes:
 
 - fixture, task, and grader versions;
+- evaluation mode;
 - overall binary status and all seven axis statuses;
 - stable failure codes with supporting evidence;
 - raw metrics and the selected task-class limits;
+- operational counts for wake-only turns, premature validators, repeated retries, failed tools, failed-tool rate, and leaked processes;
 - recomputed artifact, evidence, and record hashes;
 - environment versions and the ignored agent claim.
 

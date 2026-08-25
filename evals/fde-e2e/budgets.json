@@ -8,7 +8,31 @@
         "modelCalls": 90,
         "inputTokens": 4500000,
         "toolCalls": 160,
-        "failedToolCalls": 4
+        "failedToolCalls": 2,
+        "failedToolRate": 0.02
+      },
+      "requiredQaChecks": {
+        "html": [
+          "opens",
+          "desktopComplete",
+          "phoneUsable",
+          "exportComplete",
+          "consoleClean"
+        ],
+        "powerpoint": [
+          "opens",
+          "packageValid",
+          "editable"
+        ]
+      },
+      "reliability": {
+        "requiredTrialIds": [
+          "trial-1",
+          "trial-2",
+          "trial-3",
+          "trial-4",
+          "trial-5"
+        ]
       }
     }
   }

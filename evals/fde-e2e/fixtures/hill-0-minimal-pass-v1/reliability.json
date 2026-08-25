@@ -1,6 +1,5 @@
 {
   "schemaVersion": 1,
-  "criticalTrialsRequired": 5,
   "trials": [
     {
       "id": "trial-1",

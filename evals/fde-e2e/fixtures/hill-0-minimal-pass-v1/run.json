@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "fixtureId": "hill-0-minimal-pass-v1",
+  "evaluationMode": "frozen-replay",
   "task": {
     "id": "fde-full-simulation",
     "class": "full-fde-dual-format",
@@ -103,7 +104,7 @@
       "id": "reliability",
       "kind": "reliability",
       "path": "reliability.json",
-      "sha256": "f8afc79b8076ece8ff62c7f33feca232109f4560d9ebef66f3ec36251408c9e7"
+      "sha256": "16f99294fa019b1a76e9751cb49d430789f55c368da03b565f38ca117f66709c"
     }
   ],
   "agentClaim": {

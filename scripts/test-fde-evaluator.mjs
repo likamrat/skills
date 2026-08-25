@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import {
   appendFile,
   cp,
+  copyFile,
   mkdtemp,
   readFile,
   rm,
@@ -20,6 +21,15 @@ const fixturesRoot = join(root, "evals", "fde-e2e", "fixtures");
 const passFixtureId = "hill-0-minimal-pass-v1";
 const failureFixtureId = "hill-0-observed-failure-v1";
 const passFixture = join(fixturesRoot, passFixtureId);
+const nativePowerpointExample = join(
+  root,
+  "skills",
+  "fde",
+  "fde-readout",
+  "assets",
+  "examples",
+  "lattice-harbor-readout.pptx",
+);
 const cli = join(root, "scripts", "evaluate-fde-run.mjs");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "fde-e2e-evaluator-"));
 const failures = [];
@@ -69,6 +79,47 @@ async function syncTraceToMetrics(fixture) {
   await writeJson(runPath, run);
 }
 
+async function configureLivePowerpoint(
+  fixture,
+  sourcePath,
+  { slideCount } = {},
+) {
+  const runPath = join(fixture, "run.json");
+  const run = await readJson(runPath);
+  run.evaluationMode = "live";
+  const powerpointPath = join(fixture, "artifacts", "readout.pptx");
+  await copyFile(sourcePath, powerpointPath);
+  const powerpointHash = sha256(await readFile(powerpointPath));
+  const powerpointDescriptor = run.artifacts.find(
+    (artifact) => artifact.format === "powerpoint",
+  );
+  powerpointDescriptor.path = "artifacts/readout.pptx";
+  powerpointDescriptor.sha256 = powerpointHash;
+  powerpointDescriptor.representation = "native-pptx";
+
+  const powerpointQaDescriptor = run.evidence.find(
+    (entry) => entry.kind === "powerpointQa",
+  );
+  const powerpointQaPath = join(fixture, powerpointQaDescriptor.path);
+  const powerpointQa = await readJson(powerpointQaPath);
+  powerpointQa.artifactSha256 = powerpointHash;
+  if (slideCount !== undefined && powerpointQa.shapeStats) {
+    powerpointQa.shapeStats.slideCount = slideCount;
+  }
+  await writeJson(powerpointQaPath, powerpointQa);
+  powerpointQaDescriptor.sha256 = sha256(await readFile(powerpointQaPath));
+
+  const humanReviewDescriptor = run.evidence.find(
+    (entry) => entry.kind === "humanReview",
+  );
+  const humanReviewPath = join(fixture, humanReviewDescriptor.path);
+  const humanReview = await readJson(humanReviewPath);
+  humanReview.artifactHashes.powerpoint = powerpointHash;
+  await writeJson(humanReviewPath, humanReview);
+  humanReviewDescriptor.sha256 = sha256(await readFile(humanReviewPath));
+  await writeJson(runPath, run);
+}
+
 function reasonCodes(result) {
   return new Set(result.failureReasons.map((reason) => reason.code));
 }
@@ -106,11 +157,13 @@ try {
     "safety.external_fault_state_visible",
     "trace_quality.wake_resend_loop",
     "trace_quality.repeated_structural_retries",
+    "trace_quality.premature_validator_loop",
     "efficiency.wallTimeMs_budget_exceeded",
     "efficiency.modelCalls_budget_exceeded",
     "efficiency.inputTokens_budget_exceeded",
     "efficiency.toolCalls_budget_exceeded",
     "efficiency.failedToolCalls_budget_exceeded",
+    "efficiency.failedToolRate_budget_exceeded",
   ]) {
     check(failedCodes.has(code), `observed fixture must report ${code}`);
   }
@@ -132,6 +185,19 @@ try {
       failed.metrics.toolCalls === 220 &&
       failed.metrics.failedToolCalls === 8,
     "observed fixture must preserve the frozen raw metrics",
+  );
+  check(
+    failed.evaluationMode === "frozen-replay",
+    "observed fixture must identify frozen replay mode",
+  );
+  check(
+    failed.operationalDiagnostics.wakeOnlyCoordinatorTurns === 12 &&
+      failed.operationalDiagnostics.prematureValidatorAttempts === 11 &&
+      failed.operationalDiagnostics.repeatedStructuralRetryCount === 5 &&
+      failed.operationalDiagnostics.failedToolCalls === 8 &&
+      failed.operationalDiagnostics.failedToolRate === 8 / 220 &&
+      failed.operationalDiagnostics.leakedProcessCount === 2,
+    "observed fixture must emit all raw operational diagnostics",
   );
   const failureFixture = join(fixturesRoot, failureFixtureId);
   const powerpointSnapshot = await readJson(
@@ -160,6 +226,16 @@ try {
   check(
     passed.failureReasons.length === 0,
     "minimal passing fixture must not report failure reasons",
+  );
+  check(
+    passed.evaluationMode === "frozen-replay" &&
+      passed.operationalDiagnostics.wakeOnlyCoordinatorTurns === 0 &&
+      passed.operationalDiagnostics.prematureValidatorAttempts === 0 &&
+      passed.operationalDiagnostics.repeatedStructuralRetryCount === 0 &&
+      passed.operationalDiagnostics.failedToolCalls === 0 &&
+      passed.operationalDiagnostics.failedToolRate === 0 &&
+      passed.operationalDiagnostics.leakedProcessCount === 0,
+    "minimal passing fixture must emit zero operational diagnostics",
   );
 
   const passRun = await readJson(join(passFixture, "run.json"));
@@ -205,10 +281,68 @@ try {
     "changing final artifact bytes must invalidate frozen and QA hashes",
   );
 
+  const prematureFixture = await copyPassFixture("premature-validator");
+  const prematureTracePath = join(prematureFixture, "trace.json");
+  const prematureTrace = await readJson(prematureTracePath);
+  prematureTrace.prematureValidationAttempts = 1;
+  await writeJson(prematureTracePath, prematureTrace);
+  await updateDescriptorHash(prematureFixture, "records", "trace");
+  const prematureResult = await evaluateFixture(prematureFixture);
+  check(
+    reasonCodes(prematureResult).has(
+      "trace_quality.premature_validator_loop",
+    ),
+    "one known-incomplete validator attempt must fail trace quality",
+  );
+
+  const liveSnapshotFixture = await copyPassFixture("live-snapshot");
+  const liveSnapshotRunPath = join(liveSnapshotFixture, "run.json");
+  const liveSnapshotRun = await readJson(liveSnapshotRunPath);
+  liveSnapshotRun.evaluationMode = "live";
+  await writeJson(liveSnapshotRunPath, liveSnapshotRun);
+  const liveSnapshotResult = await evaluateFixture(liveSnapshotFixture);
+  check(
+    liveSnapshotResult.evaluationMode === "live" &&
+      reasonCodes(liveSnapshotResult).has(
+        "final_outcome.powerpoint_requires_native_pptx",
+      ),
+    "live PowerPoint evaluation must reject a synthetic replay snapshot",
+  );
+
+  const malformedPowerpointPath = join(temporaryRoot, "malformed.pptx");
+  await writeFile(
+    malformedPowerpointPath,
+    Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00]),
+  );
+  const liveMalformedFixture = await copyPassFixture("live-malformed-pptx");
+  await configureLivePowerpoint(
+    liveMalformedFixture,
+    malformedPowerpointPath,
+  );
+  const liveMalformedResult = await evaluateFixture(liveMalformedFixture);
+  check(
+    reasonCodes(liveMalformedResult).has(
+      "final_outcome.powerpoint_requires_native_pptx",
+    ),
+    "live PowerPoint evaluation must reject malformed ZIP-like bytes",
+  );
+
+  const liveNativeFixture = await copyPassFixture("live-native-pptx");
+  await configureLivePowerpoint(liveNativeFixture, nativePowerpointExample, {
+    slideCount: 11,
+  });
+  const liveNativeResult = await evaluateFixture(liveNativeFixture);
+  check(
+    liveNativeResult.status === "passed" &&
+      liveNativeResult.evaluationMode === "live",
+    "live PowerPoint evaluation must accept native PPTX bytes with current hash-bound QA",
+  );
+
   const reliabilityFixture = await copyPassFixture("reliability");
   const reliabilityPath = join(reliabilityFixture, "reliability.json");
   const reliability = await readJson(reliabilityPath);
-  reliability.trials = reliability.trials.slice(0, 4);
+  reliability.criticalTrialsRequired = 1;
+  reliability.trials = reliability.trials.slice(0, 1);
   await writeJson(reliabilityPath, reliability);
   await updateDescriptorHash(reliabilityFixture, "records", "reliability");
   const reliabilityResult = await evaluateFixture(reliabilityFixture);
@@ -216,12 +350,32 @@ try {
     reasonCodes(reliabilityResult).has(
       "reliability.critical_trials_incomplete",
     ),
-    "reliability must require every one of five critical trials",
+    "fixture-local reliability requirements must not lower the trusted five-trial policy",
+  );
+
+  const duplicateTrialsFixture = await copyPassFixture("duplicate-trials");
+  const duplicateTrialsPath = join(
+    duplicateTrialsFixture,
+    "reliability.json",
+  );
+  const duplicateTrials = await readJson(duplicateTrialsPath);
+  duplicateTrials.trials = Array.from({ length: 5 }, (_, index) => ({
+    id: "trial-1",
+    passed: true,
+    attempt: index + 1,
+  }));
+  await writeJson(duplicateTrialsPath, duplicateTrials);
+  await updateDescriptorHash(duplicateTrialsFixture, "records", "reliability");
+  await expectInputError(
+    () => evaluateFixture(duplicateTrialsFixture),
+    "duplicate reliability trial IDs",
   );
 
   const budgets = await readJson(join(root, "evals", "fde-e2e", "budgets.json"));
   const limits = budgets.taskClasses["full-fde-dual-format"].limits;
-  for (const [metric, limit] of Object.entries(limits)) {
+  for (const [metric, limit] of Object.entries(limits).filter(
+    ([metric]) => !["failedToolCalls", "failedToolRate"].includes(metric),
+  )) {
     const fixture = await copyPassFixture(`budget-${metric}`);
     const runPath = join(fixture, "run.json");
     const run = await readJson(runPath);
@@ -244,6 +398,143 @@ try {
       `${metric} above its budget must fail`,
     );
   }
+
+  const failedCountFixture = await copyPassFixture("failed-tool-count");
+  const failedCountRunPath = join(failedCountFixture, "run.json");
+  const failedCountRun = await readJson(failedCountRunPath);
+  failedCountRun.metrics.toolCalls = 160;
+  failedCountRun.metrics.failedToolCalls = 2;
+  await writeJson(failedCountRunPath, failedCountRun);
+  await syncTraceToMetrics(failedCountFixture);
+  const failedCountBoundary = await evaluateFixture(failedCountFixture);
+  check(
+    failedCountBoundary.axes.efficiency.status === "passed",
+    "failed tool count equal to 2 must pass when its rate is below 2 percent",
+  );
+  const failedCountOverRun = await readJson(failedCountRunPath);
+  failedCountOverRun.metrics.failedToolCalls = 3;
+  await writeJson(failedCountRunPath, failedCountOverRun);
+  await syncTraceToMetrics(failedCountFixture);
+  const failedCountOver = await evaluateFixture(failedCountFixture);
+  check(
+    reasonCodes(failedCountOver).has(
+      "efficiency.failedToolCalls_budget_exceeded",
+    ) &&
+      !reasonCodes(failedCountOver).has(
+        "efficiency.failedToolRate_budget_exceeded",
+      ),
+    "failed tool count above 2 must fail independently of rate",
+  );
+
+  const failedRateFixture = await copyPassFixture("failed-tool-rate");
+  const failedRateRunPath = join(failedRateFixture, "run.json");
+  const failedRateRun = await readJson(failedRateRunPath);
+  failedRateRun.metrics.toolCalls = 100;
+  failedRateRun.metrics.failedToolCalls = 2;
+  await writeJson(failedRateRunPath, failedRateRun);
+  await syncTraceToMetrics(failedRateFixture);
+  const failedRateBoundary = await evaluateFixture(failedRateFixture);
+  check(
+    failedRateBoundary.axes.efficiency.status === "passed" &&
+      failedRateBoundary.metrics.failedToolRate === 0.02,
+    "failed tool rate equal to 2 percent must pass",
+  );
+  const failedRateOverRun = await readJson(failedRateRunPath);
+  failedRateOverRun.metrics.toolCalls = 99;
+  await writeJson(failedRateRunPath, failedRateOverRun);
+  await syncTraceToMetrics(failedRateFixture);
+  const failedRateOver = await evaluateFixture(failedRateFixture);
+  check(
+    reasonCodes(failedRateOver).has(
+      "efficiency.failedToolRate_budget_exceeded",
+    ) &&
+      !reasonCodes(failedRateOver).has(
+        "efficiency.failedToolCalls_budget_exceeded",
+      ),
+    "failed tool rate above 2 percent must fail independently of count",
+  );
+
+  const duplicateRequestedFixture = await copyPassFixture(
+    "duplicate-requested-format",
+  );
+  const duplicateRequestedRunPath = join(
+    duplicateRequestedFixture,
+    "run.json",
+  );
+  const duplicateRequestedRun = await readJson(duplicateRequestedRunPath);
+  duplicateRequestedRun.task.requestedFormats.push("html");
+  await writeJson(duplicateRequestedRunPath, duplicateRequestedRun);
+  await expectInputError(
+    () => evaluateFixture(duplicateRequestedFixture),
+    "duplicate requested formats",
+  );
+
+  const duplicateArtifactFixture = await copyPassFixture(
+    "duplicate-artifact-format",
+  );
+  const duplicateArtifactRunPath = join(
+    duplicateArtifactFixture,
+    "run.json",
+  );
+  const duplicateArtifactRun = await readJson(duplicateArtifactRunPath);
+  duplicateArtifactRun.artifacts.find(
+    (artifact) => artifact.format === "powerpoint",
+  ).format = "html";
+  await writeJson(duplicateArtifactRunPath, duplicateArtifactRun);
+  await expectInputError(
+    () => evaluateFixture(duplicateArtifactFixture),
+    "duplicate artifact formats",
+  );
+
+  const incompleteQaFixture = await copyPassFixture("incomplete-html-qa");
+  const incompleteQaRun = await readJson(
+    join(incompleteQaFixture, "run.json"),
+  );
+  const incompleteQaDescriptor = incompleteQaRun.evidence.find(
+    (entry) => entry.kind === "htmlQa",
+  );
+  const incompleteQaPath = join(
+    incompleteQaFixture,
+    incompleteQaDescriptor.path,
+  );
+  const incompleteQa = await readJson(incompleteQaPath);
+  delete incompleteQa.deterministicChecks.consoleClean;
+  await writeJson(incompleteQaPath, incompleteQa);
+  incompleteQaDescriptor.sha256 = sha256(await readFile(incompleteQaPath));
+  await writeJson(join(incompleteQaFixture, "run.json"), incompleteQaRun);
+  await expectInputError(
+    () => evaluateFixture(incompleteQaFixture),
+    "missing required HTML QA check",
+  );
+
+  const incompletePowerpointQaFixture = await copyPassFixture(
+    "incomplete-powerpoint-qa",
+  );
+  const incompletePowerpointQaRun = await readJson(
+    join(incompletePowerpointQaFixture, "run.json"),
+  );
+  const incompletePowerpointQaDescriptor =
+    incompletePowerpointQaRun.evidence.find(
+      (entry) => entry.kind === "powerpointQa",
+    );
+  const incompletePowerpointQaPath = join(
+    incompletePowerpointQaFixture,
+    incompletePowerpointQaDescriptor.path,
+  );
+  const incompletePowerpointQa = await readJson(incompletePowerpointQaPath);
+  delete incompletePowerpointQa.deterministicChecks.editable;
+  await writeJson(incompletePowerpointQaPath, incompletePowerpointQa);
+  incompletePowerpointQaDescriptor.sha256 = sha256(
+    await readFile(incompletePowerpointQaPath),
+  );
+  await writeJson(
+    join(incompletePowerpointQaFixture, "run.json"),
+    incompletePowerpointQaRun,
+  );
+  await expectInputError(
+    () => evaluateFixture(incompletePowerpointQaFixture),
+    "missing required PowerPoint QA check",
+  );
 
   const traversalFixture = await copyPassFixture("invalid-path");
   const traversalRunPath = join(traversalFixture, "run.json");
@@ -273,6 +564,24 @@ try {
   await expectInputError(
     () => evaluateFixture(invalidHashFixture),
     "invalid hash fixture",
+  );
+
+  const impossibleToolCountsFixture = await copyPassFixture(
+    "impossible-tool-counts",
+  );
+  const impossibleToolCountsRunPath = join(
+    impossibleToolCountsFixture,
+    "run.json",
+  );
+  const impossibleToolCountsRun = await readJson(
+    impossibleToolCountsRunPath,
+  );
+  impossibleToolCountsRun.metrics.failedToolCalls =
+    impossibleToolCountsRun.metrics.toolCalls + 1;
+  await writeJson(impossibleToolCountsRunPath, impossibleToolCountsRun);
+  await expectInputError(
+    () => evaluateFixture(impossibleToolCountsFixture),
+    "failed tool calls above total tool calls",
   );
 
   const incompleteFinalStateFixture = await copyPassFixture(
@@ -336,5 +645,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  "FDE end-to-end evaluator tests passed: frozen failure, passing fixture, hard gates, hashes, budgets, reliability, and CLI.",
+  "FDE end-to-end evaluator tests passed: replay and live modes, trusted QA, hard gates, hashes, budgets, reliability, and CLI.",
 );
