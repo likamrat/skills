@@ -23,9 +23,11 @@
     "./skills/fde/fde-readout"
   ],
   "scripts": {
-    "check": "node scripts/check-em-dashes.mjs && node scripts/check-acronyms.mjs && node scripts/validate-skills.mjs && node scripts/check-links.mjs --local",
+    "check": "node scripts/check-em-dashes.mjs && node scripts/check-acronyms.mjs && node scripts/validate-skills.mjs && node scripts/check-links.mjs --local && node scripts/test-fde-evaluator.mjs",
     "check:cli": "node --no-deprecation scripts/test-cli-commands.mjs",
+    "check:fde:e2e": "node scripts/test-fde-evaluator.mjs",
     "check:links": "node scripts/check-links.mjs --external",
+    "eval:fde:e2e": "node scripts/evaluate-fde-run.mjs",
     "eval:triggers": "node scripts/evaluate-triggering.mjs",
     "list:skills": "npx skills@1.5.22 add . --list",
     "score:skills": "node scripts/score-skills.mjs"

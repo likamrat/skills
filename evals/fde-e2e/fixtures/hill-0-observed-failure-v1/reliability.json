@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "criticalTrialsRequired": 5,
+  "trials": [
+    {
+      "id": "observed-run",
+      "passed": false
+    }
+  ]
+}

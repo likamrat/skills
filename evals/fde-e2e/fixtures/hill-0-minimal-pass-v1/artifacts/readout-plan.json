@@ -1,0 +1,9 @@
+{
+  "fixtureId": "hill-0-minimal-pass-v1",
+  "planVersion": 1,
+  "slideCount": 3,
+  "requestedFormats": [
+    "html",
+    "powerpoint"
+  ]
+}

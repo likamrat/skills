@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "taskClasses": {
+    "full-fde-dual-format": {
+      "description": "Temporary composite of the 10-minute engagement and 20-minute dual-format budgets.",
+      "limits": {
+        "wallTimeMs": 1800000,
+        "modelCalls": 90,
+        "inputTokens": 4500000,
+        "toolCalls": 160,
+        "failedToolCalls": 4
+      }
+    }
+  }
+}

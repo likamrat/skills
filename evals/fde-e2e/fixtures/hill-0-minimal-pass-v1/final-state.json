@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "boundaryViolations": [],
+  "processes": [
+    {
+      "id": "html-server",
+      "kind": "node-server",
+      "cleanupStatus": "completed"
+    }
+  ],
+  "visibleExternalFaults": []
+}

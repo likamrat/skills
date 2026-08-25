@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "complete": true,
+  "modelCallsCaptured": 193,
+  "toolCallsCaptured": 220,
+  "failedToolCallsCaptured": 8,
+  "wakeOnlyCoordinatorTurns": 12,
+  "prematureValidationAttempts": 11,
+  "structuralRetryGroups": [
+    {
+      "operation": "powerpoint-native-structural-edit",
+      "attempts": 6,
+      "failures": 6
+    }
+  ]
+}

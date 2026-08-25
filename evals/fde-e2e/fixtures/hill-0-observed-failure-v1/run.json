@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "hill-0-observed-failure-v1",
+  "task": {
+    "id": "fde-full-simulation",
+    "class": "full-fde-dual-format",
+    "requestedFormats": [
+      "html",
+      "powerpoint"
+    ]
+  },
+  "versions": {
+    "model": "gpt-5.6-sol",
+    "skills": {
+      "fde-engagement": "main-observed-2026-08-25",
+      "fde-readout": "main-observed-2026-08-25"
+    },
+    "tools": {
+      "copilotCli": "observed-run",
+      "playwright": "observed-run",
+      "powerpointCanvas": "observed-run"
+    },
+    "browser": "external-chrome-observed-run",
+    "office": "powerpoint-observed-run",
+    "fonts": [
+      "Aptos"
+    ],
+    "viewports": {
+      "desktop": "1600x900",
+      "phone": "390x844"
+    }
+  },
+  "metrics": {
+    "wallTimeMs": 2853000,
+    "modelCalls": 193,
+    "inputTokens": 29645256,
+    "outputTokens": 131740,
+    "nanoAiUnits": 815191200000,
+    "aiUnits": 815.1912,
+    "toolCalls": 220,
+    "failedToolCalls": 8
+  },
+  "artifacts": [
+    {
+      "id": "plan",
+      "format": "plan",
+      "path": "artifacts/readout-plan.json",
+      "sha256": "627339e3a1f12a12dc926a56a7dfcf596669607e287847c2b5033f3ff6bf3ce1",
+      "required": true
+    },
+    {
+      "id": "html",
+      "format": "html",
+      "path": "artifacts/readout.html",
+      "sha256": "51aa8e6cc2d732c9874f1d64c2114dfdcb894a2466620e0d5d86337a6be22369",
+      "sourcePlanSha256": "627339e3a1f12a12dc926a56a7dfcf596669607e287847c2b5033f3ff6bf3ce1",
+      "required": true
+    },
+    {
+      "id": "powerpoint",
+      "format": "powerpoint",
+      "path": "artifacts/powerpoint-snapshot.json",
+      "sha256": "57f6fc65780e49b7e00d41b54ed4a253b8ecc8e25868150811d145f788c220e8",
+      "sourcePlanSha256": "627339e3a1f12a12dc926a56a7dfcf596669607e287847c2b5033f3ff6bf3ce1",
+      "representation": "synthetic-snapshot",
+      "required": true
+    }
+  ],
+  "evidence": [
+    {
+      "id": "html-qa",
+      "kind": "htmlQa",
+      "path": "evidence/html-qa.json",
+      "sha256": "d3f3c1c4d8ad169ad2ecd3453d4f977ba0ab0c2676e5d9446cd4eb40cf325cf0"
+    },
+    {
+      "id": "powerpoint-qa",
+      "kind": "powerpointQa",
+      "path": "evidence/powerpoint-qa.json",
+      "sha256": "5bd5b6fe2ab79eeac29686f88dd5c91ea7bec82d65aafd12de1878203519c9d2"
+    },
+    {
+      "id": "human-review",
+      "kind": "humanReview",
+      "path": "evidence/human-review.json",
+      "sha256": "205543c0812aeddb0e5acca2342c77210b7f80c673cde33497bcbc3ed5a6c936"
+    }
+  ],
+  "records": [
+    {
+      "id": "final-state",
+      "kind": "finalState",
+      "path": "final-state.json",
+      "sha256": "f64bd23cdf3cbf3596b80e51ae54908c12d9ffe3dbd05fd68f97a8821b594f98"
+    },
+    {
+      "id": "trace",
+      "kind": "trace",
+      "path": "trace.json",
+      "sha256": "8a257aee63d6bc15cacd3eeda8c3181c8cfe042a8fca15eb1eda7fedc8a6337c"
+    },
+    {
+      "id": "reliability",
+      "kind": "reliability",
+      "path": "reliability.json",
+      "sha256": "cdef52516c0fc6929e9b5dba54376ef1d0596857581a1688ba38ac08bfc74ef9"
+    }
+  ],
+  "agentClaim": {
+    "status": "passed",
+    "message": "All requested formats were delivered."
+  }
+}

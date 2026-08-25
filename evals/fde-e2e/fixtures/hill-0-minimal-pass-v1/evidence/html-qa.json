@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "html",
+  "artifactSha256": "2f34b4fa7308014b0726d070aa5c39952bb044c816cfe89914ed8a2e0bdf6e2a",
+  "planSha256": "3dc7b135c600fe266aecf4fb95f4117c985dae07fb973ebdd23f4c534de68938",
+  "deliveryApproved": true,
+  "visualApproved": true,
+  "deterministicChecks": {
+    "opens": true,
+    "desktopComplete": true,
+    "phoneUsable": true,
+    "exportComplete": true,
+    "consoleClean": true
+  },
+  "severeDefects": []
+}
