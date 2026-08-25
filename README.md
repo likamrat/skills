@@ -1,6 +1,7 @@
 # Skills To Do Work
 
-[![skills.sh](https://skills.sh/b/likamrat/skills?v=1)](https://skills.sh/likamrat/skills)
+[![skills.sh installs](https://skills.sh/b/likamrat/skills?label=installs&style=flat-square&v=2)](https://skills.sh/likamrat/skills)
+[![Validate skills](https://github.com/likamrat/skills/actions/workflows/validate-skills.yml/badge.svg?branch=main)](https://github.com/likamrat/skills/actions/workflows/validate-skills.yml)
 
 I am building the Agent Skills I want beside me when a decision has an owner, a customer, and a cost of failure.
 
