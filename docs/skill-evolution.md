@@ -114,7 +114,7 @@ A skill change can ship when:
 
 | Skill | Readiness | Empirical evidence | Core size | Trigger cases | Behavior cases |
 |---|---:|---|---|---:|---:|
-| `fde-engagement` | 96 | Limited activation and behavior evidence | 239 lines, about 3,999 tokens | 12 positive, 10 negative | 24 cases, 132 assertions |
+| `fde-engagement` | 96 | Limited activation and behavior evidence | 239 lines, about 3,994 tokens | 12 positive, 10 negative | 24 cases, 133 assertions |
 | `fde-readout` | 98 | Limited activation and behavior evidence | 202 lines, about 2,396 tokens | 10 positive, 10 negative | 6 cases, 23 assertions |
 
 The engagement core stays below 4,000 tokens while carrying source preflight, action boundaries, grounded examples, and the problem ledger. The readout core is about 2,396 tokens after adding the same security controls and removing runtime conversion packages. Both descriptions use two sentences and stay under 400 characters.

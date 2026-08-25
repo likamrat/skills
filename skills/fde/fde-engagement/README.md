@@ -142,7 +142,7 @@ Use the standalone `fde-readout` skill for synchronized interactive HTML and edi
 
 ## Conversation protocol
 
-The skill combines a grilling protocol with active domain modeling.
+The skill uses Challenge This with active domain modeling.
 
 At a cold start, it asks for one decisive evidence package rather than presenting a long questionnaire. Once grounded, it builds a decision tree and asks at most three currently answerable **frontier** decisions per round.
 
@@ -279,7 +279,7 @@ fde-engagement/
 │   ├── human-judgment.md
 │   ├── engagement-playbook.md
 │   ├── evidence-and-safety.md
-│   ├── grilling.md
+│   ├── challenge-this.md
 │   ├── operating-model.md
 │   ├── reporting.md
 │   └── style-and-quality.md

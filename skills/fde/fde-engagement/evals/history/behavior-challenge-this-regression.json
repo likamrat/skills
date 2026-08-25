@@ -1,0 +1,24 @@
+{
+  "skill": "fde-engagement",
+  "model": "gpt-5.6-sol",
+  "evalId": 12,
+  "generatedAt": "2026-08-25",
+  "trials": 1,
+  "assertionsPassed": 8,
+  "assertions": 8,
+  "result": {
+    "mode": "review",
+    "question": "Q1 - What does \"approve\" mean?",
+    "challengeTarget": "Decision, terminology, and evidence",
+    "recommendation": "Separate disposition recommendation from payment authorization.",
+    "dependentAuthorityDecision": "blocked",
+    "architectureSelected": false,
+    "emDashes": 0
+  },
+  "usage": {
+    "modelCalls": 3,
+    "premiumRequests": 1
+  },
+  "releaseBlocker": null,
+  "rawTracesCommitted": false
+}

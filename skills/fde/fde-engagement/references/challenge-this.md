@@ -1,8 +1,8 @@
-# Forward deployed engineering (FDE) grilling protocol
+# Challenge This for forward deployed engineering (FDE)
 
 Read this file for any decision-bearing coaching, engagement, or review conversation.
 
-The purpose is not to ask many questions. It is to expose every decision that would otherwise remain an assumption, in the order those decisions become answerable.
+Challenge This sharpens the FDE's judgment by testing assumptions against evidence. Expose each decision that would otherwise remain an assumption, in the order it becomes answerable.
 
 ## Build a design tree
 

@@ -26,7 +26,7 @@ Before asking AI to write a finding, recommendation, retrospective, or customer 
 7. What evidence changed your mind?
 8. Which part could only come from this engagement?
 
-Do not ask all eight at once. Add unresolved questions to the grilling frontier and ask no more than three per round.
+Do not ask all eight at once. Add unresolved questions to the decision frontier and ask no more than three per round.
 
 ## Ledger kinds
 
