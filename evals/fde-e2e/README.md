@@ -57,11 +57,11 @@ Each fixture contains:
 
 The evaluator requires the frozen plan file to exist and match its declared hash before evaluating any format binding. It recomputes every artifact hash. QA and human review must point to the recomputed final hashes. Agent claims are retained in output as `agentClaimIgnored` and never affect a gate.
 
-`run.json` must declare `evaluationMode` as `frozen-replay`. Any `live` value is invalid evaluator input and exits with code `2`. Trusted live acquisition, native Office open/render/editability checks, and the PowerPoint smoke gate belong to Hill 2.
+`run.json` must declare `evaluationMode` as `frozen-replay`. Any `live` value is invalid evaluator input and exits with code `2`. Native Office acquires Hill 2 smoke evidence, but this evaluator grades only its sanitized replay.
 
 The PowerPoint file in each committed fixture is a synthetic structural snapshot, not a customer deck. Structural snapshots are replay evidence only; Hill 0 never certifies a live artifact. The failure fixture preserves only the slide and shape evidence needed to reproduce the visual hard gate. No raw transcript, customer source, screenshot, or generated presentation package is committed.
 
-Trusted task-class policy in `budgets.json` requires exactly HTML and PowerPoint, defines their deterministic checks, and defines the five distinct reliability trial IDs. A fixture cannot weaken those requirements. Missing, extra, or duplicate requested formats, duplicate artifact formats, duplicate trial IDs, and missing required QA checks are invalid evaluator input. Requested format order does not matter.
+Trusted task-class policy in `budgets.json` defines required formats, deterministic checks, reliability trials, and hard limits. A fixture cannot weaken those requirements. Missing, extra, or duplicate requested formats, duplicate artifact formats, duplicate trial IDs, and missing required QA checks are invalid evaluator input. Requested format order does not matter.
 
 ## Frozen fixtures
 
@@ -69,6 +69,7 @@ Trusted task-class policy in `budgets.json` requires exactly HTML and PowerPoint
 |---|---|---|
 | `hill-0-observed-failure-v1` | `failed` | Reproduces the 2026-08-25 observed failure |
 | `hill-0-minimal-pass-v1` | `passed` | Proves the evaluator is capable of passing a clean run |
+| `hill-2-pptx-smoke-attempt-2-v1` | `failed` | Preserves visual success while reproducing shared notes, orphaned parts, overwritten note evidence, and model/token overruns |
 
 The observed fixture must report, at minimum:
 
@@ -96,6 +97,21 @@ The observed fixture must report, at minimum:
 Output tokens and AI units remain raw metrics because the source plan does not define hard limits for them.
 
 The evaluator calculates `failedToolRate` as failed tool calls divided by total tool calls, or zero when no tool calls occurred. Failed tool calls cannot exceed total tool calls.
+
+## PowerPoint smoke policy
+
+`readout-pptx-smoke` requires PowerPoint only and checks native open/package/editability, exactly three active slides, isolated notes, no orphaned customer slide or notes parts, plan/evidence binding, deleted legacy content, and dense-slide readability.
+
+| Metric | Hard limit |
+|---|---:|
+| Wall time | 900,000 ms |
+| Model calls | 32 |
+| Input tokens | 3,000,000 |
+| `invoke_canvas_action` calls | 10 |
+| Failed tool calls | 1 |
+| Failed tool rate | 2% |
+
+The replay binds the plan, structural candidate, sanitized contact sheet, active slide IDs, shape/table counts, notes relationships and evidence IDs, active/package part inventory, canvas usage, elapsed time, model usage, and human decision. It contains no PPTX, package bytes, or raw session trace. Package inspection remains owned by the native Office canvas; the evaluator does not parse ZIP, XML, or OPC.
 
 ## Machine-readable result
 

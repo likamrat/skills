@@ -50,6 +50,7 @@ Check:
 
 Check:
 
+- the three-slide smoke contact sheet before full-deck authoring;
 - package warnings, content types, relationships, macros, OLE, and external links;
 - slide size, masters, layouts, themes, notes, and hidden slides;
 - every rendered slide;
@@ -57,6 +58,8 @@ Check:
 - chart, table, SVG, image, connector, and z-order fidelity;
 - leftover placeholders;
 - equality with the plan version and decision.
+
+For the smoke gate, visual approval requires readable cover and decision hierarchy plus a readable densest-family slide at presentation size. Structural approval separately requires exactly three active slides, one notes relationship and part per slide, no orphaned customer slide or notes parts, no retained legacy content beneath replacements, and evidence IDs in notes that match the plan.
 
 ## Bounded review
 

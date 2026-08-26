@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "powerpoint",
+  "artifactSha256": "57043535c78493ba780e35a6551596e934f804ff48183972241d501933573a58",
+  "planSha256": "9379c7c78a3d0bbd1c7c0f33a961d65de76c6437580fc7dca80c950e5df533db",
+  "deliveryApproved": true,
+  "visualApproved": true,
+  "deterministicChecks": {
+    "opens": true,
+    "packageValid": true,
+    "editable": true,
+    "exactlyThreeActiveSlides": true,
+    "notesIsolated": false,
+    "noOrphanedCustomerParts": false,
+    "planEvidenceBound": false,
+    "legacyContentRemoved": true,
+    "denseContentReadable": true
+  },
+  "smokeEvidence": {
+    "planSha256": "9379c7c78a3d0bbd1c7c0f33a961d65de76c6437580fc7dca80c950e5df533db",
+    "candidateSha256": "57043535c78493ba780e35a6551596e934f804ff48183972241d501933573a58",
+    "contactSheet": {
+      "artifactId": "contact-sheet",
+      "sha256": "689871be619584df8a074e1952e4725807b7e5b96525251a9384d0c723f0dc7a"
+    },
+    "activeSlides": [
+      {
+        "slideId": "256",
+        "planId": "cover",
+        "family": "cover",
+        "denseRepresentative": false,
+        "shapeCount": 18,
+        "tableCount": 0,
+        "notesRelationshipId": "rId2",
+        "notesPart": "ppt/notesSlides/notesSlide1.xml",
+        "expectedEvidenceIds": [],
+        "evidenceIdsInNotes": [],
+        "legacyContentRemaining": false
+      },
+      {
+        "slideId": "257",
+        "planId": "decision",
+        "family": "decision",
+        "denseRepresentative": false,
+        "shapeCount": 18,
+        "tableCount": 0,
+        "notesRelationshipId": "rId2",
+        "notesPart": "ppt/notesSlides/notesSlide2.xml",
+        "expectedEvidenceIds": [
+          "EV-DEC-01",
+          "HC-DEC-01"
+        ],
+        "evidenceIdsInNotes": [
+          "EV-OWN-01"
+        ],
+        "legacyContentRemaining": false
+      },
+      {
+        "slideId": "267",
+        "planId": "owners",
+        "family": "responsibility",
+        "denseRepresentative": true,
+        "shapeCount": 10,
+        "tableCount": 1,
+        "notesRelationshipId": "rId2",
+        "notesPart": "ppt/notesSlides/notesSlide2.xml",
+        "expectedEvidenceIds": [
+          "EV-OWN-01"
+        ],
+        "evidenceIdsInNotes": [
+          "EV-OWN-01"
+        ],
+        "legacyContentRemaining": false
+      }
+    ],
+    "packageInventory": {
+      "activeSlideCount": 3,
+      "activeNotesPartCount": 2,
+      "packageSlidePartCount": 12,
+      "packageNotesPartCount": 11,
+      "orphanedCustomerSlidePartCount": 9,
+      "orphanedCustomerNotesPartCount": 9
+    },
+    "canvas": {
+      "invokeCalls": 8,
+      "getModelCalls": 3,
+      "getModelFailures": 0,
+      "actionCount": 49,
+      "failures": 0,
+      "otherToolCalls": 0,
+      "otherToolFailures": 0
+    },
+    "nativeTable": {
+      "slideId": "267",
+      "rows": 6,
+      "columns": 3
+    },
+    "usage": {
+      "elapsedTimeMs": 337328,
+      "modelCalls": 37,
+      "inputTokens": 3735253
+    },
+    "humanDecision": "approved",
+    "denseContentReadable": true
+  },
+  "shapeStats": {
+    "slideCount": 3,
+    "totalShapes": 46,
+    "medianShapesPerSlide": 18,
+    "nativeTables": 1
+  },
+  "severeDefects": []
+}

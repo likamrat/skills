@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "hill-2-pptx-smoke-attempt-2-v1",
+  "evaluationMode": "frozen-replay",
+  "task": {
+    "id": "fde-readout-powerpoint-smoke",
+    "class": "readout-pptx-smoke",
+    "requestedFormats": [
+      "powerpoint"
+    ]
+  },
+  "versions": {
+    "model": "gpt-5.6-sol",
+    "skills": {
+      "fde-readout": "hill-2-smoke-attempt-2"
+    },
+    "tools": {
+      "copilotCli": "sanitized-replay",
+      "powerpointCanvas": "native-office-canvas"
+    },
+    "browser": "not-used",
+    "office": "native-powerpoint-canvas",
+    "fonts": [
+      "Aptos"
+    ],
+    "viewports": {
+      "contactSheet": "three-slide-16:9"
+    }
+  },
+  "metrics": {
+    "wallTimeMs": 337328,
+    "modelCalls": 37,
+    "inputTokens": 3735253,
+    "outputTokens": 0,
+    "nanoAiUnits": 0,
+    "aiUnits": 0,
+    "toolCalls": 11,
+    "canvasCalls": 8,
+    "failedToolCalls": 0
+  },
+  "artifacts": [
+    {
+      "id": "plan",
+      "format": "plan",
+      "path": "artifacts/readout-plan.json",
+      "sha256": "9379c7c78a3d0bbd1c7c0f33a961d65de76c6437580fc7dca80c950e5df533db",
+      "required": true
+    },
+    {
+      "id": "powerpoint",
+      "format": "powerpoint",
+      "path": "artifacts/powerpoint-snapshot.json",
+      "sha256": "57043535c78493ba780e35a6551596e934f804ff48183972241d501933573a58",
+      "sourcePlanSha256": "9379c7c78a3d0bbd1c7c0f33a961d65de76c6437580fc7dca80c950e5df533db",
+      "representation": "synthetic-snapshot",
+      "required": true
+    },
+    {
+      "id": "contact-sheet",
+      "format": "contact-sheet",
+      "path": "artifacts/contact-sheet.svg",
+      "sha256": "689871be619584df8a074e1952e4725807b7e5b96525251a9384d0c723f0dc7a",
+      "sourcePlanSha256": "9379c7c78a3d0bbd1c7c0f33a961d65de76c6437580fc7dca80c950e5df533db",
+      "required": true
+    }
+  ],
+  "evidence": [
+    {
+      "id": "powerpoint-qa",
+      "kind": "powerpointQa",
+      "path": "evidence/powerpoint-qa.json",
+      "sha256": "0fc2cd51c25bd049a007637f9c1b72fdb2d3bf50687e33ac133a7234e9804084"
+    },
+    {
+      "id": "human-review",
+      "kind": "humanReview",
+      "path": "evidence/human-review.json",
+      "sha256": "746ee0820798c372e5e9a8755ce5b24e8cdd40d5cbcb1ad488a825080a87571b"
+    }
+  ],
+  "records": [
+    {
+      "id": "final-state",
+      "kind": "finalState",
+      "path": "final-state.json",
+      "sha256": "d0df5e2e98579869c72059681089a53e1ee50135b8faa624770c5d5595b96c16"
+    },
+    {
+      "id": "trace",
+      "kind": "trace",
+      "path": "trace.json",
+      "sha256": "831cb8c07b367194a34074a0a30f7d416456d034a20b4be0670b7affdea0ba68"
+    },
+    {
+      "id": "reliability",
+      "kind": "reliability",
+      "path": "reliability.json",
+      "sha256": "fdda9a70b3f2d5b64838b21745cb692109359b1cfee3084559c6c0b879d24e9e"
+    }
+  ],
+  "agentClaim": {
+    "status": "passed",
+    "message": "The three-slide smoke deck is visually strong."
+  }
+}

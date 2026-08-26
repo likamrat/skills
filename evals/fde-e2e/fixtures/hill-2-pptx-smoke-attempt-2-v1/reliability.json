@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "trials": [
+    {
+      "id": "native-authoring",
+      "passed": true
+    },
+    {
+      "id": "contact-sheet-render",
+      "passed": true
+    },
+    {
+      "id": "native-package-inspection",
+      "passed": true
+    }
+  ]
+}

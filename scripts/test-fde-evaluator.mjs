@@ -20,7 +20,9 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const fixturesRoot = join(root, "evals", "fde-e2e", "fixtures");
 const passFixtureId = "hill-0-minimal-pass-v1";
 const failureFixtureId = "hill-0-observed-failure-v1";
+const smokeFixtureId = "hill-2-pptx-smoke-attempt-2-v1";
 const passFixture = join(fixturesRoot, passFixtureId);
+const smokeFixture = join(fixturesRoot, smokeFixtureId);
 const cli = join(root, "scripts", "evaluate-fde-run.mjs");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "fde-e2e-evaluator-"));
 const failures = [];
@@ -57,6 +59,12 @@ async function copyPassFixture(name) {
   return target;
 }
 
+async function copySmokeFixture(name) {
+  const target = join(temporaryRoot, name);
+  await cp(smokeFixture, target, { recursive: true });
+  return target;
+}
+
 async function updateDescriptorHash(fixture, collection, kind) {
   const runPath = join(fixture, "run.json");
   const run = await readJson(runPath);
@@ -77,6 +85,141 @@ async function syncTraceToMetrics(fixture) {
   trace.failedToolCallsCaptured = run.metrics.failedToolCalls;
   await writeJson(tracePath, trace);
   traceDescriptor.sha256 = sha256(await readFile(tracePath));
+  await writeJson(runPath, run);
+}
+
+async function makeCleanSmokeFixture(name) {
+  const fixture = await copySmokeFixture(name);
+  const runPath = join(fixture, "run.json");
+  const run = await readJson(runPath);
+  run.metrics.modelCalls = 32;
+  run.metrics.inputTokens = 3000000;
+
+  const candidateDescriptor = run.artifacts.find(
+    (entry) => entry.format === "powerpoint",
+  );
+  const candidatePath = join(fixture, candidateDescriptor.path);
+  const candidate = await readJson(candidatePath);
+  const [, candidateDecision, candidateDense] = candidate.activeSlides;
+  candidateDecision.notesRelationshipId = "rId3";
+  candidateDecision.notesPart = "ppt/notesSlides/notesSlide3.xml";
+  candidateDecision.evidenceIdsInNotes = ["EV-DEC-01", "HC-DEC-01"];
+  candidateDense.notesRelationshipId = "rId4";
+  candidateDense.notesPart = "ppt/notesSlides/notesSlide4.xml";
+  Object.assign(candidate.packageInventory, {
+    activeNotesPartCount: 3,
+    packageSlidePartCount: 3,
+    packageNotesPartCount: 3,
+    orphanedCustomerSlidePartCount: 0,
+    orphanedCustomerNotesPartCount: 0,
+  });
+  await writeJson(candidatePath, candidate);
+  const candidateSha256 = sha256(await readFile(candidatePath));
+  candidateDescriptor.sha256 = candidateSha256;
+
+  const qaDescriptor = run.evidence.find(
+    (entry) => entry.kind === "powerpointQa",
+  );
+  const qaPath = join(fixture, qaDescriptor.path);
+  const qa = await readJson(qaPath);
+  const [, decision, dense] = qa.smokeEvidence.activeSlides;
+  decision.notesRelationshipId = "rId3";
+  decision.notesPart = "ppt/notesSlides/notesSlide3.xml";
+  decision.evidenceIdsInNotes = [...decision.expectedEvidenceIds];
+  dense.notesRelationshipId = "rId4";
+  dense.notesPart = "ppt/notesSlides/notesSlide4.xml";
+  Object.assign(qa.smokeEvidence.packageInventory, {
+    activeNotesPartCount: 3,
+    packageSlidePartCount: 3,
+    packageNotesPartCount: 3,
+    orphanedCustomerSlidePartCount: 0,
+    orphanedCustomerNotesPartCount: 0,
+  });
+  Object.assign(qa.smokeEvidence.usage, {
+    modelCalls: 32,
+    inputTokens: 3000000,
+  });
+  Object.assign(qa.deterministicChecks, {
+    notesIsolated: true,
+    noOrphanedCustomerParts: true,
+    planEvidenceBound: true,
+  });
+  qa.artifactSha256 = candidateSha256;
+  qa.smokeEvidence.candidateSha256 = candidateSha256;
+  await writeJson(qaPath, qa);
+  qaDescriptor.sha256 = sha256(await readFile(qaPath));
+
+  const humanReviewDescriptor = run.evidence.find(
+    (entry) => entry.kind === "humanReview",
+  );
+  const humanReviewPath = join(fixture, humanReviewDescriptor.path);
+  const humanReview = await readJson(humanReviewPath);
+  humanReview.artifactHashes.powerpoint = candidateSha256;
+  await writeJson(humanReviewPath, humanReview);
+  humanReviewDescriptor.sha256 = sha256(await readFile(humanReviewPath));
+
+  await writeJson(runPath, run);
+  await syncTraceToMetrics(fixture);
+  return fixture;
+}
+
+async function setSmokeCanvasCalls(fixture, canvasCalls) {
+  const runPath = join(fixture, "run.json");
+  const run = await readJson(runPath);
+  run.metrics.canvasCalls = canvasCalls;
+
+  const qaDescriptor = run.evidence.find(
+    (entry) => entry.kind === "powerpointQa",
+  );
+  const qaPath = join(fixture, qaDescriptor.path);
+  const qa = await readJson(qaPath);
+  qa.smokeEvidence.canvas.invokeCalls = canvasCalls;
+  run.metrics.toolCalls =
+    canvasCalls +
+    qa.smokeEvidence.canvas.getModelCalls +
+    qa.smokeEvidence.canvas.otherToolCalls;
+  await writeJson(qaPath, qa);
+  qaDescriptor.sha256 = sha256(await readFile(qaPath));
+
+  const traceDescriptor = run.records.find((entry) => entry.kind === "trace");
+  const tracePath = join(fixture, traceDescriptor.path);
+  const trace = await readJson(tracePath);
+  trace.canvasCallsCaptured = canvasCalls;
+  trace.toolCallsCaptured = run.metrics.toolCalls;
+  await writeJson(tracePath, trace);
+  traceDescriptor.sha256 = sha256(await readFile(tracePath));
+  await writeJson(runPath, run);
+}
+
+async function syncSmokeCandidateBindings(fixture) {
+  const runPath = join(fixture, "run.json");
+  const run = await readJson(runPath);
+  const candidateDescriptor = run.artifacts.find(
+    (entry) => entry.format === "powerpoint",
+  );
+  const candidateSha256 = sha256(
+    await readFile(join(fixture, candidateDescriptor.path)),
+  );
+  candidateDescriptor.sha256 = candidateSha256;
+
+  const qaDescriptor = run.evidence.find(
+    (entry) => entry.kind === "powerpointQa",
+  );
+  const qaPath = join(fixture, qaDescriptor.path);
+  const qa = await readJson(qaPath);
+  qa.artifactSha256 = candidateSha256;
+  qa.smokeEvidence.candidateSha256 = candidateSha256;
+  await writeJson(qaPath, qa);
+  qaDescriptor.sha256 = sha256(await readFile(qaPath));
+
+  const humanReviewDescriptor = run.evidence.find(
+    (entry) => entry.kind === "humanReview",
+  );
+  const humanReviewPath = join(fixture, humanReviewDescriptor.path);
+  const humanReview = await readJson(humanReviewPath);
+  humanReview.artifactHashes.powerpoint = candidateSha256;
+  await writeJson(humanReviewPath, humanReview);
+  humanReviewDescriptor.sha256 = sha256(await readFile(humanReviewPath));
   await writeJson(runPath, run);
 }
 
@@ -105,7 +248,7 @@ async function expectInputError(action, label) {
 
 try {
   const replayTextFiles = (await walk(join(root, "evals", "fde-e2e"))).filter(
-    (path) => [".json", ".html", ".md"].includes(extname(path)),
+    (path) => [".json", ".html", ".md", ".svg"].includes(extname(path)),
   );
   for (const path of replayTextFiles) {
     check(
@@ -220,6 +363,439 @@ try {
       `emitted hash for ${descriptor.id} must match bytes on disk`,
     );
   }
+
+  const smokeFailure = await evaluateFixture(smokeFixtureId);
+  const expectedSmokeFailureCodes = [
+    "efficiency.inputTokens_budget_exceeded",
+    "efficiency.modelCalls_budget_exceeded",
+    "final_outcome.powerpoint_notes_not_isolated",
+    "final_outcome.powerpoint_orphaned_customer_parts",
+    "final_outcome.powerpoint_plan_evidence_binding_failed",
+  ].sort();
+  check(smokeFailure.status === "failed", "attempt-2 smoke fixture must fail");
+  check(
+    JSON.stringify([...reasonCodes(smokeFailure)].sort()) ===
+      JSON.stringify(expectedSmokeFailureCodes),
+    "attempt-2 smoke fixture must fail for only notes, package, evidence binding, and model/token budgets",
+  );
+  check(
+    smokeFailure.axes.artifactQuality.status === "passed" &&
+      smokeFailure.axes.humanApproval.status === "passed" &&
+      smokeFailure.axes.reliability.status === "passed",
+    "attempt-2 visual success and approval must not compensate for structural or budget failures",
+  );
+  check(
+    smokeFailure.metrics.wallTimeMs === 337328 &&
+      smokeFailure.metrics.modelCalls === 37 &&
+      smokeFailure.metrics.inputTokens === 3735253 &&
+      smokeFailure.metrics.canvasCalls === 8 &&
+      smokeFailure.operationalDiagnostics.canvasCalls === 8,
+    "attempt-2 smoke fixture must preserve elapsed, model, token, and canvas usage",
+  );
+  check(
+    smokeFailure.axes.finalOutcome.diagnostics.smoke.packageInventory
+      .packageSlidePartCount === 12 &&
+      smokeFailure.axes.finalOutcome.diagnostics.smoke.packageInventory
+        .packageNotesPartCount === 11 &&
+      smokeFailure.axes.finalOutcome.diagnostics.smoke.canvas.actionCount === 49,
+    "attempt-2 smoke fixture must preserve package and canvas-action evidence",
+  );
+  const smokeSnapshot = await readJson(
+    join(smokeFixture, "artifacts", "powerpoint-snapshot.json"),
+  );
+  check(
+    smokeSnapshot.activeSlides.length === 3 &&
+      smokeSnapshot.nativeTable.rows === 6 &&
+      smokeSnapshot.nativeTable.columns === 3,
+    "attempt-2 smoke fixture must preserve three active slides and the native 6x3 table",
+  );
+
+  const cleanSmokeFixture = await makeCleanSmokeFixture(
+    "clean-powerpoint-smoke",
+  );
+  const cleanSmoke = await evaluateFixture(cleanSmokeFixture);
+  check(
+    cleanSmoke.status === "passed" &&
+      Object.values(cleanSmoke.axes).every((axis) => axis.status === "passed"),
+    "clean PowerPoint smoke control must pass every axis",
+  );
+
+  const missingSmokeArtifactFixture = await makeCleanSmokeFixture(
+    "missing-smoke-artifact",
+  );
+  const missingSmokeArtifactRun = await readJson(
+    join(missingSmokeArtifactFixture, "run.json"),
+  );
+  const missingSmokeArtifact = missingSmokeArtifactRun.artifacts.find(
+    (entry) => entry.format === "powerpoint",
+  );
+  await rm(join(missingSmokeArtifactFixture, missingSmokeArtifact.path));
+  const missingSmokeArtifactResult = await evaluateFixture(
+    missingSmokeArtifactFixture,
+  );
+  check(
+    reasonCodes(missingSmokeArtifactResult).has(
+      "final_outcome.powerpoint_missing",
+    ),
+    "missing smoke candidate must fail the outcome gate instead of rejecting evaluator input",
+  );
+
+  const incompleteSmokeQaFixture = await makeCleanSmokeFixture(
+    "incomplete-smoke-qa",
+  );
+  const incompleteSmokeRun = await readJson(
+    join(incompleteSmokeQaFixture, "run.json"),
+  );
+  const incompleteSmokeQaDescriptor = incompleteSmokeRun.evidence.find(
+    (entry) => entry.kind === "powerpointQa",
+  );
+  const incompleteSmokeQaPath = join(
+    incompleteSmokeQaFixture,
+    incompleteSmokeQaDescriptor.path,
+  );
+  const incompleteSmokeQa = await readJson(incompleteSmokeQaPath);
+  delete incompleteSmokeQa.deterministicChecks.notesIsolated;
+  await writeJson(incompleteSmokeQaPath, incompleteSmokeQa);
+  incompleteSmokeQaDescriptor.sha256 = sha256(
+    await readFile(incompleteSmokeQaPath),
+  );
+  await writeJson(
+    join(incompleteSmokeQaFixture, "run.json"),
+    incompleteSmokeRun,
+  );
+  await expectInputError(
+    () => evaluateFixture(incompleteSmokeQaFixture),
+    "missing required smoke QA check",
+  );
+
+  const staleSnapshotFixture = await makeCleanSmokeFixture(
+    "stale-smoke-snapshot",
+  );
+  const staleSnapshotRun = await readJson(
+    join(staleSnapshotFixture, "run.json"),
+  );
+  const staleSnapshotQaDescriptor = staleSnapshotRun.evidence.find(
+    (entry) => entry.kind === "powerpointQa",
+  );
+  const staleSnapshotQaPath = join(
+    staleSnapshotFixture,
+    staleSnapshotQaDescriptor.path,
+  );
+  const staleSnapshotQa = await readJson(staleSnapshotQaPath);
+  staleSnapshotQa.smokeEvidence.activeSlides[0].shapeCount += 1;
+  await writeJson(staleSnapshotQaPath, staleSnapshotQa);
+  await updateDescriptorHash(
+    staleSnapshotFixture,
+    "evidence",
+    "powerpointQa",
+  );
+  await expectInputError(
+    () => evaluateFixture(staleSnapshotFixture),
+    "smoke QA that disagrees with the candidate snapshot",
+  );
+
+  const detachedNativeTableFixture = await makeCleanSmokeFixture(
+    "detached-native-table",
+  );
+  const detachedNativeTableRun = await readJson(
+    join(detachedNativeTableFixture, "run.json"),
+  );
+  const detachedNativeTableQaDescriptor =
+    detachedNativeTableRun.evidence.find(
+      (entry) => entry.kind === "powerpointQa",
+    );
+  const detachedNativeTableQaPath = join(
+    detachedNativeTableFixture,
+    detachedNativeTableQaDescriptor.path,
+  );
+  const detachedNativeTableQa = await readJson(detachedNativeTableQaPath);
+  detachedNativeTableQa.smokeEvidence.activeSlides[2].tableCount = 0;
+  detachedNativeTableQa.shapeStats.nativeTables = 0;
+  await writeJson(detachedNativeTableQaPath, detachedNativeTableQa);
+  const detachedNativeTableCandidateDescriptor =
+    detachedNativeTableRun.artifacts.find(
+      (entry) => entry.format === "powerpoint",
+    );
+  const detachedNativeTableCandidatePath = join(
+    detachedNativeTableFixture,
+    detachedNativeTableCandidateDescriptor.path,
+  );
+  const detachedNativeTableCandidate = await readJson(
+    detachedNativeTableCandidatePath,
+  );
+  detachedNativeTableCandidate.activeSlides[2].tableCount = 0;
+  await writeJson(
+    detachedNativeTableCandidatePath,
+    detachedNativeTableCandidate,
+  );
+  await syncSmokeCandidateBindings(detachedNativeTableFixture);
+  await expectInputError(
+    () => evaluateFixture(detachedNativeTableFixture),
+    "native table dimensions detached from the dense slide table count",
+  );
+
+  const selfDeclaredPlanFixture = await makeCleanSmokeFixture(
+    "self-declared-smoke-plan",
+  );
+  const selfDeclaredPlanRun = await readJson(
+    join(selfDeclaredPlanFixture, "run.json"),
+  );
+  const selfDeclaredPlanQaDescriptor = selfDeclaredPlanRun.evidence.find(
+    (entry) => entry.kind === "powerpointQa",
+  );
+  const selfDeclaredPlanQaPath = join(
+    selfDeclaredPlanFixture,
+    selfDeclaredPlanQaDescriptor.path,
+  );
+  const selfDeclaredPlanQa = await readJson(selfDeclaredPlanQaPath);
+  selfDeclaredPlanQa.smokeEvidence.activeSlides[1].expectedEvidenceIds = [
+    "EV-FALSE",
+  ];
+  selfDeclaredPlanQa.smokeEvidence.activeSlides[1].evidenceIdsInNotes = [
+    "EV-FALSE",
+  ];
+  await writeJson(selfDeclaredPlanQaPath, selfDeclaredPlanQa);
+  const selfDeclaredPlanCandidateDescriptor =
+    selfDeclaredPlanRun.artifacts.find(
+      (entry) => entry.format === "powerpoint",
+    );
+  const selfDeclaredPlanCandidatePath = join(
+    selfDeclaredPlanFixture,
+    selfDeclaredPlanCandidateDescriptor.path,
+  );
+  const selfDeclaredPlanCandidate = await readJson(
+    selfDeclaredPlanCandidatePath,
+  );
+  selfDeclaredPlanCandidate.activeSlides[1].evidenceIdsInNotes = [
+    "EV-FALSE",
+  ];
+  await writeJson(
+    selfDeclaredPlanCandidatePath,
+    selfDeclaredPlanCandidate,
+  );
+  await syncSmokeCandidateBindings(selfDeclaredPlanFixture);
+  const selfDeclaredPlanResult = await evaluateFixture(
+    selfDeclaredPlanFixture,
+  );
+  check(
+    reasonCodes(selfDeclaredPlanResult).has(
+      "final_outcome.powerpoint_plan_evidence_binding_failed",
+    ),
+    "smoke evidence IDs that disagree with the frozen plan must fail the binding gate",
+  );
+
+  const wrongContactSheetFixture = await makeCleanSmokeFixture(
+    "wrong-contact-sheet-artifact",
+  );
+  const wrongContactSheetRun = await readJson(
+    join(wrongContactSheetFixture, "run.json"),
+  );
+  const wrongContactSheetQaDescriptor = wrongContactSheetRun.evidence.find(
+    (entry) => entry.kind === "powerpointQa",
+  );
+  const wrongContactSheetQaPath = join(
+    wrongContactSheetFixture,
+    wrongContactSheetQaDescriptor.path,
+  );
+  const wrongContactSheetQa = await readJson(wrongContactSheetQaPath);
+  wrongContactSheetQa.smokeEvidence.contactSheet.artifactId = "powerpoint";
+  wrongContactSheetQa.smokeEvidence.contactSheet.sha256 =
+    wrongContactSheetQa.artifactSha256;
+  await writeJson(wrongContactSheetQaPath, wrongContactSheetQa);
+  await updateDescriptorHash(
+    wrongContactSheetFixture,
+    "evidence",
+    "powerpointQa",
+  );
+  await expectInputError(
+    () => evaluateFixture(wrongContactSheetFixture),
+    "contact-sheet evidence that points to the candidate",
+  );
+
+  const aliasedContactSheetFixture = await makeCleanSmokeFixture(
+    "aliased-contact-sheet-path",
+  );
+  const aliasedContactSheetRunPath = join(
+    aliasedContactSheetFixture,
+    "run.json",
+  );
+  const aliasedContactSheetRun = await readJson(aliasedContactSheetRunPath);
+  const aliasedCandidateDescriptor = aliasedContactSheetRun.artifacts.find(
+    (entry) => entry.format === "powerpoint",
+  );
+  const aliasedContactDescriptor = aliasedContactSheetRun.artifacts.find(
+    (entry) => entry.format === "contact-sheet",
+  );
+  aliasedContactDescriptor.path = "artifacts/./powerpoint-snapshot.json";
+  aliasedContactDescriptor.sha256 = aliasedCandidateDescriptor.sha256;
+  const aliasedQaDescriptor = aliasedContactSheetRun.evidence.find(
+    (entry) => entry.kind === "powerpointQa",
+  );
+  const aliasedQaPath = join(
+    aliasedContactSheetFixture,
+    aliasedQaDescriptor.path,
+  );
+  const aliasedQa = await readJson(aliasedQaPath);
+  aliasedQa.smokeEvidence.contactSheet.sha256 =
+    aliasedCandidateDescriptor.sha256;
+  await writeJson(aliasedQaPath, aliasedQa);
+  aliasedQaDescriptor.sha256 = sha256(await readFile(aliasedQaPath));
+  const aliasedHumanDescriptor = aliasedContactSheetRun.evidence.find(
+    (entry) => entry.kind === "humanReview",
+  );
+  const aliasedHumanPath = join(
+    aliasedContactSheetFixture,
+    aliasedHumanDescriptor.path,
+  );
+  const aliasedHuman = await readJson(aliasedHumanPath);
+  aliasedHuman.contactSheetSha256 = aliasedCandidateDescriptor.sha256;
+  await writeJson(aliasedHumanPath, aliasedHuman);
+  aliasedHumanDescriptor.sha256 = sha256(
+    await readFile(aliasedHumanPath),
+  );
+  await writeJson(aliasedContactSheetRunPath, aliasedContactSheetRun);
+  await expectInputError(
+    () => evaluateFixture(aliasedContactSheetFixture),
+    "contact-sheet descriptor that aliases the candidate path",
+  );
+
+  const extraFalseCheckFixture = await makeCleanSmokeFixture(
+    "extra-false-smoke-check",
+  );
+  const extraFalseCheckRun = await readJson(
+    join(extraFalseCheckFixture, "run.json"),
+  );
+  const extraFalseCheckQaDescriptor = extraFalseCheckRun.evidence.find(
+    (entry) => entry.kind === "powerpointQa",
+  );
+  const extraFalseCheckQaPath = join(
+    extraFalseCheckFixture,
+    extraFalseCheckQaDescriptor.path,
+  );
+  const extraFalseCheckQa = await readJson(extraFalseCheckQaPath);
+  extraFalseCheckQa.deterministicChecks.extraSmokeCheck = false;
+  await writeJson(extraFalseCheckQaPath, extraFalseCheckQa);
+  await updateDescriptorHash(
+    extraFalseCheckFixture,
+    "evidence",
+    "powerpointQa",
+  );
+  const extraFalseCheckResult = await evaluateFixture(
+    extraFalseCheckFixture,
+  );
+  check(
+    reasonCodes(extraFalseCheckResult).has(
+      "final_outcome.powerpoint_extraSmokeCheck_failed",
+    ),
+    "an additional false deterministic smoke check must fail the outcome gate",
+  );
+
+  const staleSmokeCandidateFixture = await makeCleanSmokeFixture(
+    "stale-smoke-candidate",
+  );
+  const staleSmokeCandidateRun = await readJson(
+    join(staleSmokeCandidateFixture, "run.json"),
+  );
+  const staleSmokeCandidate = staleSmokeCandidateRun.artifacts.find(
+    (entry) => entry.format === "powerpoint",
+  );
+  await appendFile(
+    join(staleSmokeCandidateFixture, staleSmokeCandidate.path),
+    "\n",
+  );
+  const staleSmokeCandidateResult = await evaluateFixture(
+    staleSmokeCandidateFixture,
+  );
+  check(
+    reasonCodes(staleSmokeCandidateResult).has(
+      "final_outcome.powerpoint_hash_mismatch",
+    ) &&
+      reasonCodes(staleSmokeCandidateResult).has(
+        "final_outcome.powerpoint_qa_stale",
+      ),
+    "post-QA smoke candidate changes must fail hard gates instead of rejecting evaluator input",
+  );
+
+  const unreconciledToolsFixture = await makeCleanSmokeFixture(
+    "unreconciled-smoke-tools",
+  );
+  const unreconciledToolsRunPath = join(
+    unreconciledToolsFixture,
+    "run.json",
+  );
+  const unreconciledToolsRun = await readJson(unreconciledToolsRunPath);
+  unreconciledToolsRun.metrics.toolCalls += 1;
+  await writeJson(unreconciledToolsRunPath, unreconciledToolsRun);
+  await syncTraceToMetrics(unreconciledToolsFixture);
+  await expectInputError(
+    () => evaluateFixture(unreconciledToolsFixture),
+    "tool totals that disagree with smoke evidence",
+  );
+
+  const impossibleToolCategoryFixture = await makeCleanSmokeFixture(
+    "impossible-smoke-tool-category",
+  );
+  const impossibleToolCategoryRunPath = join(
+    impossibleToolCategoryFixture,
+    "run.json",
+  );
+  const impossibleToolCategoryRun = await readJson(
+    impossibleToolCategoryRunPath,
+  );
+  impossibleToolCategoryRun.metrics.failedToolCalls = 1;
+  const impossibleToolQaDescriptor =
+    impossibleToolCategoryRun.evidence.find(
+      (entry) => entry.kind === "powerpointQa",
+    );
+  const impossibleToolQaPath = join(
+    impossibleToolCategoryFixture,
+    impossibleToolQaDescriptor.path,
+  );
+  const impossibleToolQa = await readJson(impossibleToolQaPath);
+  impossibleToolQa.smokeEvidence.canvas.otherToolFailures = 1;
+  await writeJson(impossibleToolQaPath, impossibleToolQa);
+  impossibleToolQaDescriptor.sha256 = sha256(
+    await readFile(impossibleToolQaPath),
+  );
+  const impossibleToolTraceDescriptor =
+    impossibleToolCategoryRun.records.find(
+      (entry) => entry.kind === "trace",
+    );
+  const impossibleToolTracePath = join(
+    impossibleToolCategoryFixture,
+    impossibleToolTraceDescriptor.path,
+  );
+  const impossibleToolTrace = await readJson(impossibleToolTracePath);
+  impossibleToolTrace.failedToolCallsCaptured = 1;
+  impossibleToolTrace.otherToolFailuresCaptured = 1;
+  await writeJson(impossibleToolTracePath, impossibleToolTrace);
+  impossibleToolTraceDescriptor.sha256 = sha256(
+    await readFile(impossibleToolTracePath),
+  );
+  await writeJson(
+    impossibleToolCategoryRunPath,
+    impossibleToolCategoryRun,
+  );
+  await expectInputError(
+    () => evaluateFixture(impossibleToolCategoryFixture),
+    "failed tool category count above its call count",
+  );
+
+  const canvasBoundaryFixture = await makeCleanSmokeFixture(
+    "smoke-canvas-boundary",
+  );
+  await setSmokeCanvasCalls(canvasBoundaryFixture, 10);
+  const canvasBoundary = await evaluateFixture(canvasBoundaryFixture);
+  check(
+    canvasBoundary.status === "passed",
+    "canvas calls equal to the smoke budget must pass",
+  );
+  await setSmokeCanvasCalls(canvasBoundaryFixture, 11);
+  const canvasOver = await evaluateFixture(canvasBoundaryFixture);
+  check(
+    reasonCodes(canvasOver).has("efficiency.canvasCalls_budget_exceeded"),
+    "canvas calls above the smoke budget must fail",
+  );
 
   const oneGateFixture = await copyPassFixture("one-hard-gate");
   const finalStatePath = join(oneGateFixture, "final-state.json");
@@ -628,6 +1204,28 @@ try {
   check(
     JSON.parse(failureCli.stdout).status === "failed",
     "failed CLI fixture must emit failed JSON",
+  );
+
+  const cleanSmokeCli = spawnSync(
+    process.execPath,
+    [cli, "--fixture", cleanSmokeFixture],
+    { encoding: "utf8" },
+  );
+  check(cleanSmokeCli.status === 0, "clean smoke CLI fixture must exit 0");
+  check(
+    JSON.parse(cleanSmokeCli.stdout).status === "passed",
+    "clean smoke CLI fixture must emit passing JSON",
+  );
+
+  const smokeFailureCli = spawnSync(
+    process.execPath,
+    [cli, "--fixture", smokeFixtureId],
+    { encoding: "utf8" },
+  );
+  check(smokeFailureCli.status === 1, "attempt-2 smoke CLI fixture must exit 1");
+  check(
+    JSON.parse(smokeFailureCli.stdout).status === "failed",
+    "attempt-2 smoke CLI fixture must emit failed JSON",
   );
 
   const invalidCli = spawnSync(

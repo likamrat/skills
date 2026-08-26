@@ -1,0 +1,57 @@
+{
+  "fixtureId": "hill-2-pptx-smoke-attempt-2-v1",
+  "representation": "synthetic-powerpoint-smoke-snapshot",
+  "activeSlides": [
+    {
+      "slideId": "256",
+      "planId": "cover",
+      "family": "cover",
+      "shapeCount": 18,
+      "tableCount": 0,
+      "notesRelationshipId": "rId2",
+      "notesPart": "ppt/notesSlides/notesSlide1.xml",
+      "evidenceIdsInNotes": [],
+      "legacyContentRemaining": false
+    },
+    {
+      "slideId": "257",
+      "planId": "decision",
+      "family": "decision",
+      "shapeCount": 18,
+      "tableCount": 0,
+      "notesRelationshipId": "rId2",
+      "notesPart": "ppt/notesSlides/notesSlide2.xml",
+      "evidenceIdsInNotes": [
+        "EV-OWN-01"
+      ],
+      "legacyContentRemaining": false
+    },
+    {
+      "slideId": "267",
+      "planId": "owners",
+      "family": "responsibility",
+      "shapeCount": 10,
+      "tableCount": 1,
+      "notesRelationshipId": "rId2",
+      "notesPart": "ppt/notesSlides/notesSlide2.xml",
+      "evidenceIdsInNotes": [
+        "EV-OWN-01"
+      ],
+      "legacyContentRemaining": false
+    }
+  ],
+  "nativeTable": {
+    "slideId": "267",
+    "rows": 6,
+    "columns": 3
+  },
+  "packageInventory": {
+    "activeSlideCount": 3,
+    "activeNotesPartCount": 2,
+    "packageSlidePartCount": 12,
+    "packageNotesPartCount": 11,
+    "orphanedCustomerSlidePartCount": 9,
+    "orphanedCustomerNotesPartCount": 9
+  },
+  "denseContentReadable": true
+}
