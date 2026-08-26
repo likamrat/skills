@@ -34,6 +34,15 @@ Connectors use shared anchors and one semantic direction. Do not place independe
 - Do not add stock imagery when evidence-bearing diagrams or tables can carry the decision.
 - Do not infer visual precision from template validity.
 
+Keep the design-token budget small:
+
+- use at most two font families and four semantic text sizes per deck;
+- use at most four color roles per slide and maintain 4.5:1 contrast for body text;
+- keep safe margins between 5 and 7.5 percent of the stage width;
+- keep titles to two lines and any body block to six lines;
+- give each slide one primary visual assertion;
+- split content instead of shrinking text or stacking decorative containers.
+
 ## Browser QA
 
 Freeze the plan and HTML first. Bind the complete QA set to both hashes, and repeat the complete set after any later write.
