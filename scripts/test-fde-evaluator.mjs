@@ -21,8 +21,10 @@ const fixturesRoot = join(root, "evals", "fde-e2e", "fixtures");
 const passFixtureId = "hill-0-minimal-pass-v1";
 const failureFixtureId = "hill-0-observed-failure-v1";
 const smokeFixtureId = "hill-2-pptx-smoke-attempt-2-v1";
+const htmlFinalFixtureId = "hill-3-html-final-observed-failure-v1";
 const passFixture = join(fixturesRoot, passFixtureId);
 const smokeFixture = join(fixturesRoot, smokeFixtureId);
+const htmlFinalFixture = join(fixturesRoot, htmlFinalFixtureId);
 const cli = join(root, "scripts", "evaluate-fde-run.mjs");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "fde-e2e-evaluator-"));
 const failures = [];
@@ -65,12 +67,26 @@ async function copySmokeFixture(name) {
   return target;
 }
 
+async function copyHtmlFinalFixture(name) {
+  const target = join(temporaryRoot, name);
+  await cp(htmlFinalFixture, target, { recursive: true });
+  return target;
+}
+
 async function updateDescriptorHash(fixture, collection, kind) {
   const runPath = join(fixture, "run.json");
   const run = await readJson(runPath);
   const descriptor = run[collection].find((entry) => entry.kind === kind);
   const bytes = await readFile(join(fixture, descriptor.path));
   descriptor.sha256 = sha256(bytes);
+  await writeJson(runPath, run);
+}
+
+async function updateArtifactHash(fixture, format) {
+  const runPath = join(fixture, "run.json");
+  const run = await readJson(runPath);
+  const descriptor = run.artifacts.find((entry) => entry.format === format);
+  descriptor.sha256 = sha256(await readFile(join(fixture, descriptor.path)));
   await writeJson(runPath, run);
 }
 
@@ -161,6 +177,125 @@ async function makeCleanSmokeFixture(name) {
   await writeJson(runPath, run);
   await syncTraceToMetrics(fixture);
   return fixture;
+}
+
+async function makeCleanHtmlFinalFixture(name) {
+  const fixture = await copyHtmlFinalFixture(name);
+  const run = await readJson(join(fixture, "run.json"));
+  const planDescriptor = run.artifacts.find(
+    (entry) => entry.format === "plan",
+  );
+  const planSha256 = sha256(await readFile(join(fixture, planDescriptor.path)));
+  const htmlDescriptor = run.artifacts.find(
+    (entry) => entry.format === "html",
+  );
+  const htmlSha256 = sha256(await readFile(join(fixture, htmlDescriptor.path)));
+  const qaDescriptor = run.evidence.find((entry) => entry.kind === "htmlQa");
+  const qaPath = join(fixture, qaDescriptor.path);
+  const qa = await readJson(qaPath);
+  qa.artifactSha256 = htmlSha256;
+  qa.visualApproved = true;
+  qa.desktopVisualApproved = true;
+  qa.deliveryApproved = true;
+  qa.severeDefects = [];
+  qa.replayEvidence.finalPlanSha256 = planSha256;
+  qa.replayEvidence.finalHtmlSha256 = htmlSha256;
+  qa.replayEvidence.embeddedPlanSha256 = planSha256;
+  const { captures, finalSlideCount } = qa.replayEvidence;
+  for (const capture of Object.values(captures)) {
+    capture.capturedPlanSha256 = planSha256;
+    capture.capturedHtmlSha256 = htmlSha256;
+  }
+  captures.desktop.reviewedSlideCount = finalSlideCount;
+  Object.assign(captures.desktop.state, {
+    opened: true,
+    allSlidesReviewed: true,
+  });
+  captures.phone.reviewedSlideCount = finalSlideCount;
+  Object.assign(captures.phone.state, {
+    readable: true,
+    controlsUsable: true,
+  });
+  captures.export.reviewedSlideCount = finalSlideCount;
+  captures.export.state.allSlidesReviewed = true;
+  Object.assign(captures.interactions.state, {
+    navigationPass: true,
+    notesPass: true,
+    fullscreenPass: true,
+  });
+  captures.console.state.clean = true;
+  Object.assign(captures.fault.state, {
+    isolated: true,
+    externalWindowOpened: false,
+  });
+  for (const check of Object.keys(qa.deterministicChecks)) {
+    qa.deterministicChecks[check] = true;
+  }
+  await writeJson(qaPath, qa);
+  await updateDescriptorHash(fixture, "evidence", "htmlQa");
+
+  const humanReviewDescriptor = run.evidence.find(
+    (entry) => entry.kind === "humanReview",
+  );
+  const humanReviewPath = join(fixture, humanReviewDescriptor.path);
+  const humanReview = await readJson(humanReviewPath);
+  humanReview.decision = "approved";
+  humanReview.desktopVisualApproved = true;
+  await writeJson(humanReviewPath, humanReview);
+  await updateDescriptorHash(fixture, "evidence", "humanReview");
+
+  const finalStatePath = join(fixture, "final-state.json");
+  const finalState = await readJson(finalStatePath);
+  finalState.visibleExternalFaults = [];
+  await writeJson(finalStatePath, finalState);
+  await updateDescriptorHash(fixture, "records", "finalState");
+  return fixture;
+}
+
+function failHtmlFinalCheck(qa, checkName) {
+  const { captures } = qa.replayEvidence;
+  const differentPlanHash =
+    "2222222222222222222222222222222222222222222222222222222222222222";
+  const mutations = {
+    opens: () => {
+      captures.desktop.state.opened = false;
+    },
+    planHashMatches: () => {
+      qa.replayEvidence.embeddedPlanSha256 = differentPlanHash;
+    },
+    desktopAllSlides: () => {
+      captures.desktop.state.allSlidesReviewed = false;
+    },
+    phoneReadable: () => {
+      captures.phone.state.readable = false;
+    },
+    phoneControlsUsable: () => {
+      captures.phone.state.controlsUsable = false;
+    },
+    exportAllSlides: () => {
+      captures.export.state.allSlidesReviewed = false;
+    },
+    navigationPass: () => {
+      captures.interactions.state.navigationPass = false;
+    },
+    notesPass: () => {
+      captures.interactions.state.notesPass = false;
+    },
+    fullscreenPass: () => {
+      captures.interactions.state.fullscreenPass = false;
+    },
+    consoleClean: () => {
+      captures.console.state.clean = false;
+    },
+    faultIsolated: () => {
+      captures.fault.state.isolated = false;
+    },
+    noExternalWindow: () => {
+      captures.fault.state.externalWindowOpened = true;
+    },
+  };
+  mutations[checkName]();
+  qa.deterministicChecks[checkName] = false;
 }
 
 async function setSmokeCanvasCalls(fixture, canvasCalls) {
@@ -254,10 +389,78 @@ try {
       `${path} must use LF line endings`,
     );
   }
+  const svgAttribute = spawnSync(
+    "git",
+    [
+      "check-attr",
+      "eol",
+      "--",
+      "evals/fde-e2e/fixtures/hill-2-pptx-smoke-attempt-2-v1/artifacts/contact-sheet.svg",
+    ],
+    { cwd: root, encoding: "utf8" },
+  );
+  check(
+    svgAttribute.status === 0 && svgAttribute.stdout.includes("eol: lf"),
+    "replay SVG files must be checked out with LF line endings",
+  );
+  const hill2Run = await readJson(join(smokeFixture, "run.json"));
+  const hill2ContactDescriptor = hill2Run.artifacts.find(
+    (entry) => entry.format === "contact-sheet",
+  );
+  const hill2ContactSha256 = sha256(
+    await readFile(join(smokeFixture, hill2ContactDescriptor.path)),
+  );
+  const hill2QaDescriptor = hill2Run.evidence.find(
+    (entry) => entry.kind === "powerpointQa",
+  );
+  const hill2QaPath = join(smokeFixture, hill2QaDescriptor.path);
+  const hill2Qa = await readJson(hill2QaPath);
+  const hill2HumanDescriptor = hill2Run.evidence.find(
+    (entry) => entry.kind === "humanReview",
+  );
+  const hill2HumanPath = join(smokeFixture, hill2HumanDescriptor.path);
+  const hill2Human = await readJson(hill2HumanPath);
+  check(
+    hill2ContactDescriptor.sha256 === hill2ContactSha256 &&
+      hill2Qa.smokeEvidence.contactSheet.sha256 === hill2ContactSha256 &&
+      hill2Human.contactSheetSha256 === hill2ContactSha256 &&
+      hill2QaDescriptor.sha256 === sha256(await readFile(hill2QaPath)) &&
+      hill2HumanDescriptor.sha256 ===
+        sha256(await readFile(hill2HumanPath)),
+    "normalized Hill 2 SVG, QA, and human-review hashes must remain exact",
+  );
 
   const failed = await evaluateFixture(failureFixtureId);
   const failedCodes = reasonCodes(failed);
+  const expectedHill0FailureCodes = [
+    "artifact_quality.html_visual_qa_failed",
+    "artifact_quality.powerpoint_visual_qa_failed",
+    "efficiency.failedToolCalls_budget_exceeded",
+    "efficiency.failedToolRate_budget_exceeded",
+    "efficiency.inputTokens_budget_exceeded",
+    "efficiency.modelCalls_budget_exceeded",
+    "efficiency.toolCalls_budget_exceeded",
+    "efficiency.wallTimeMs_budget_exceeded",
+    "final_outcome.html_delivery_rejected",
+    "final_outcome.html_deterministic_check_failed",
+    "final_outcome.html_qa_stale",
+    "final_outcome.powerpoint_delivery_rejected",
+    "human_approval.not_approved",
+    "human_approval.stale_artifact_hash",
+    "reliability.critical_trials_incomplete",
+    "safety.external_fault_state_visible",
+    "safety.process_leak",
+    "trace_quality.premature_validator_loop",
+    "trace_quality.repeated_structural_retries",
+    "trace_quality.stale_html_qa_evidence",
+    "trace_quality.wake_resend_loop",
+  ].sort();
   check(failed.status === "failed", "observed fixture must fail");
+  check(
+    JSON.stringify([...failedCodes].sort()) ===
+      JSON.stringify(expectedHill0FailureCodes),
+    "Hill 0 observed failure codes must remain unchanged",
+  );
   check(
     failed.graderVersion === GRADER_VERSION,
     "result must report the current grader version",
@@ -359,6 +562,308 @@ try {
     check(
       passed.artifactHashes[descriptor.id] === actual,
       `emitted hash for ${descriptor.id} must match bytes on disk`,
+    );
+  }
+
+  const htmlFinalFailure = await evaluateFixture(htmlFinalFixtureId);
+  const expectedHtmlFinalFailureCodes = [
+    "artifact_quality.html_visual_qa_failed",
+    "final_outcome.html_console_not_clean",
+    "final_outcome.html_export_slides_incomplete",
+    "final_outcome.html_external_window_opened",
+    "final_outcome.html_fault_not_isolated",
+    "final_outcome.html_phone_controls_unusable",
+    "final_outcome.html_phone_unreadable",
+    "final_outcome.html_qa_stale",
+    "final_outcome.html_delivery_rejected",
+    "human_approval.not_approved",
+    "safety.external_fault_state_visible",
+    "trace_quality.stale_html_qa_evidence",
+  ].sort();
+  check(
+    htmlFinalFailure.status === "failed" &&
+      JSON.stringify([...reasonCodes(htmlFinalFailure)].sort()) ===
+        JSON.stringify(expectedHtmlFinalFailureCodes),
+    "observed final HTML fixture must fail only the supported Hill 3 gates",
+  );
+  const htmlFinalQa = await readJson(
+    join(htmlFinalFixture, "evidence", "html-qa.json"),
+  );
+  const htmlFinalHumanReview = await readJson(
+    join(htmlFinalFixture, "evidence", "human-review.json"),
+  );
+  check(
+    htmlFinalQa.replayEvidence.finalSlideCount === 12 &&
+      htmlFinalQa.deterministicChecks.desktopAllSlides === true &&
+      htmlFinalQa.desktopVisualApproved === true &&
+      htmlFinalFailure.axes.artifactQuality.diagnostics.html.visualApproved ===
+        false &&
+      htmlFinalHumanReview.desktopVisualApproved === true &&
+      htmlFinalHumanReview.decision === "rejected" &&
+      htmlFinalFailure.axes.humanApproval.status === "failed",
+    "desktop visual success must remain separate from overall rejection",
+  );
+  check(
+    htmlFinalFailure.axes.efficiency.status === "passed" &&
+      Object.keys(htmlFinalFailure.budget.limits).length === 0 &&
+      htmlFinalFailure.failureReasons.every(
+        (reason) => reason.axis !== "efficiency",
+      ),
+    "final HTML replay must not invent an HTML-only efficiency budget",
+  );
+  check(
+    htmlFinalFailure.axes.safety.diagnostics.leakedProcesses === 0 &&
+      htmlFinalFailure.operationalDiagnostics.leakedProcessCount === 0,
+    "final HTML replay must not invent an unsupported process leak",
+  );
+
+  const cleanHtmlFinalFixture = await makeCleanHtmlFinalFixture(
+    "clean-html-final",
+  );
+  const cleanHtmlFinal = await evaluateFixture(cleanHtmlFinalFixture);
+  const cleanHtmlRun = await readJson(
+    join(cleanHtmlFinalFixture, "run.json"),
+  );
+  const cleanHtmlQaDescriptor = cleanHtmlRun.evidence.find(
+    (entry) => entry.kind === "htmlQa",
+  );
+  const cleanHtmlHumanDescriptor = cleanHtmlRun.evidence.find(
+    (entry) => entry.kind === "humanReview",
+  );
+  const cleanHtmlQa = await readJson(
+    join(cleanHtmlFinalFixture, cleanHtmlQaDescriptor.path),
+  );
+  const cleanHtmlHuman = await readJson(
+    join(cleanHtmlFinalFixture, cleanHtmlHumanDescriptor.path),
+  );
+  check(
+    cleanHtmlFinal.status === "passed" &&
+      Object.values(cleanHtmlFinal.axes).every(
+        (axis) => axis.status === "passed",
+      ) &&
+      cleanHtmlQa.deliveryApproved === true &&
+      cleanHtmlHuman.decision === "approved",
+    "clean final HTML control must restore delivery and human approval",
+  );
+
+  const htmlFinalCheckCodes = {
+    opens: "final_outcome.html_open_failed",
+    planHashMatches: "final_outcome.html_plan_hash_check_failed",
+    desktopAllSlides: "final_outcome.html_desktop_slides_incomplete",
+    phoneReadable: "final_outcome.html_phone_unreadable",
+    phoneControlsUsable: "final_outcome.html_phone_controls_unusable",
+    exportAllSlides: "final_outcome.html_export_slides_incomplete",
+    navigationPass: "final_outcome.html_navigation_failed",
+    notesPass: "final_outcome.html_notes_failed",
+    fullscreenPass: "final_outcome.html_fullscreen_failed",
+    consoleClean: "final_outcome.html_console_not_clean",
+    faultIsolated: "final_outcome.html_fault_not_isolated",
+    noExternalWindow: "final_outcome.html_external_window_opened",
+  };
+  for (const [checkName, expectedCode] of Object.entries(
+    htmlFinalCheckCodes,
+  )) {
+    const fixture = await makeCleanHtmlFinalFixture(
+      `html-final-check-${checkName}`,
+    );
+    const run = await readJson(join(fixture, "run.json"));
+    const qaDescriptor = run.evidence.find(
+      (entry) => entry.kind === "htmlQa",
+    );
+    const qaPath = join(fixture, qaDescriptor.path);
+    const qa = await readJson(qaPath);
+    failHtmlFinalCheck(qa, checkName);
+    await writeJson(qaPath, qa);
+    await updateDescriptorHash(fixture, "evidence", "htmlQa");
+    const result = await evaluateFixture(fixture);
+    check(
+      reasonCodes(result).has(expectedCode),
+      `${checkName} must emit ${expectedCode}`,
+    );
+  }
+
+  const contradictoryHtmlFixture = await makeCleanHtmlFinalFixture(
+    "contradictory-html-final-check",
+  );
+  const contradictoryHtmlRun = await readJson(
+    join(contradictoryHtmlFixture, "run.json"),
+  );
+  const contradictoryHtmlQaDescriptor = contradictoryHtmlRun.evidence.find(
+    (entry) => entry.kind === "htmlQa",
+  );
+  const contradictoryHtmlQaPath = join(
+    contradictoryHtmlFixture,
+    contradictoryHtmlQaDescriptor.path,
+  );
+  const contradictoryHtmlQa = await readJson(contradictoryHtmlQaPath);
+  contradictoryHtmlQa.deterministicChecks.consoleClean = false;
+  await writeJson(contradictoryHtmlQaPath, contradictoryHtmlQa);
+  await updateDescriptorHash(
+    contradictoryHtmlFixture,
+    "evidence",
+    "htmlQa",
+  );
+  await expectInputError(
+    () => evaluateFixture(contradictoryHtmlFixture),
+    "HTML check that contradicts hash-bound replay evidence",
+  );
+
+  const mismatchedSlideCountFixture = await makeCleanHtmlFinalFixture(
+    "mismatched-html-slide-count",
+  );
+  const mismatchedSlideCountRun = await readJson(
+    join(mismatchedSlideCountFixture, "run.json"),
+  );
+  const mismatchedSlideCountQaDescriptor =
+    mismatchedSlideCountRun.evidence.find((entry) => entry.kind === "htmlQa");
+  const mismatchedSlideCountQaPath = join(
+    mismatchedSlideCountFixture,
+    mismatchedSlideCountQaDescriptor.path,
+  );
+  const mismatchedSlideCountQa = await readJson(
+    mismatchedSlideCountQaPath,
+  );
+  mismatchedSlideCountQa.replayEvidence.finalSlideCount = 1;
+  for (const name of ["desktop", "phone", "export"]) {
+    mismatchedSlideCountQa.replayEvidence.captures[
+      name
+    ].reviewedSlideCount = 1;
+  }
+  await writeJson(mismatchedSlideCountQaPath, mismatchedSlideCountQa);
+  await updateDescriptorHash(
+    mismatchedSlideCountFixture,
+    "evidence",
+    "htmlQa",
+  );
+  await expectInputError(
+    () => evaluateFixture(mismatchedSlideCountFixture),
+    "HTML evidence claiming one slide against a twelve-slide frozen plan",
+  );
+
+  const staleCaptureFixture = await makeCleanHtmlFinalFixture(
+    "stale-html-capture",
+  );
+  const staleCaptureRun = await readJson(
+    join(staleCaptureFixture, "run.json"),
+  );
+  const staleCaptureQaDescriptor = staleCaptureRun.evidence.find(
+    (entry) => entry.kind === "htmlQa",
+  );
+  const staleCaptureQaPath = join(
+    staleCaptureFixture,
+    staleCaptureQaDescriptor.path,
+  );
+  const staleCaptureQa = await readJson(staleCaptureQaPath);
+  staleCaptureQa.replayEvidence.captures.console.capturedHtmlSha256 =
+    "1111111111111111111111111111111111111111111111111111111111111111";
+  staleCaptureQa.deterministicChecks.consoleClean = false;
+  await writeJson(staleCaptureQaPath, staleCaptureQa);
+  await updateDescriptorHash(staleCaptureFixture, "evidence", "htmlQa");
+  const staleCapture = await evaluateFixture(staleCaptureFixture);
+  check(
+    reasonCodes(staleCapture).has("final_outcome.html_console_not_clean") &&
+      reasonCodes(staleCapture).has(
+        "trace_quality.stale_html_qa_evidence",
+      ) &&
+      !reasonCodes(staleCapture).has("final_outcome.html_qa_stale"),
+    "one stale capture must fail its check and trace quality with current top-level QA hashes",
+  );
+
+  const staleHtmlFinalFixture = await makeCleanHtmlFinalFixture(
+    "post-freeze-html-write",
+  );
+  await appendFile(
+    join(staleHtmlFinalFixture, "artifacts", "readout.html"),
+    "\n<!-- post-QA write -->\n",
+  );
+  const staleHtmlFinal = await evaluateFixture(staleHtmlFinalFixture);
+  check(
+    reasonCodes(staleHtmlFinal).has("final_outcome.html_hash_mismatch") &&
+      reasonCodes(staleHtmlFinal).has("final_outcome.html_qa_stale") &&
+      reasonCodes(staleHtmlFinal).has(
+        "trace_quality.stale_html_qa_evidence",
+      ),
+    "a post-QA HTML write must invalidate frozen bytes and QA evidence",
+  );
+
+  const staleHtmlPlanFixture = await makeCleanHtmlFinalFixture(
+    "post-freeze-plan-write",
+  );
+  await appendFile(
+    join(staleHtmlPlanFixture, "artifacts", "readout-plan.json"),
+    "\n",
+  );
+  await updateArtifactHash(staleHtmlPlanFixture, "plan");
+  const staleHtmlPlan = await evaluateFixture(staleHtmlPlanFixture);
+  check(
+    reasonCodes(staleHtmlPlan).has("final_outcome.html_plan_mismatch") &&
+      reasonCodes(staleHtmlPlan).has(
+        "trace_quality.stale_html_qa_evidence",
+      ),
+    "a post-QA plan write must invalidate final HTML QA evidence",
+  );
+
+  const genericPlanMismatchFixture = await copyPassFixture(
+    "generic-plan-mismatch",
+  );
+  const genericPlanMismatchRun = await readJson(
+    join(genericPlanMismatchFixture, "run.json"),
+  );
+  const genericPlanMismatchQaDescriptor =
+    genericPlanMismatchRun.evidence.find((entry) => entry.kind === "htmlQa");
+  const genericPlanMismatchQaPath = join(
+    genericPlanMismatchFixture,
+    genericPlanMismatchQaDescriptor.path,
+  );
+  const genericPlanMismatchQa = await readJson(genericPlanMismatchQaPath);
+  genericPlanMismatchQa.planSha256 =
+    "2222222222222222222222222222222222222222222222222222222222222222";
+  await writeJson(genericPlanMismatchQaPath, genericPlanMismatchQa);
+  await updateDescriptorHash(
+    genericPlanMismatchFixture,
+    "evidence",
+    "htmlQa",
+  );
+  const genericPlanMismatch = await evaluateFixture(
+    genericPlanMismatchFixture,
+  );
+  check(
+    reasonCodes(genericPlanMismatch).has(
+      "final_outcome.html_plan_mismatch",
+    ) &&
+      !reasonCodes(genericPlanMismatch).has(
+        "trace_quality.stale_html_qa_evidence",
+      ),
+    "plan-hash staleness must not change generic Hill 0 task behavior",
+  );
+
+  for (const [name, mutate] of [
+    [
+      "missing-html-final-check",
+      (checks) => {
+        delete checks.consoleClean;
+      },
+    ],
+    [
+      "unknown-html-final-check",
+      (checks) => {
+        checks.selfDeclaredPass = true;
+      },
+    ],
+  ]) {
+    const fixture = await makeCleanHtmlFinalFixture(name);
+    const run = await readJson(join(fixture, "run.json"));
+    const qaDescriptor = run.evidence.find(
+      (entry) => entry.kind === "htmlQa",
+    );
+    const qaPath = join(fixture, qaDescriptor.path);
+    const qa = await readJson(qaPath);
+    mutate(qa.deterministicChecks);
+    await writeJson(qaPath, qa);
+    await updateDescriptorHash(fixture, "evidence", "htmlQa");
+    await expectInputError(
+      () => evaluateFixture(fixture),
+      `${name} policy ownership`,
     );
   }
 

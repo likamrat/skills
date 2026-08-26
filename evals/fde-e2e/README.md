@@ -70,6 +70,7 @@ Trusted task-class policy in `budgets.json` defines required formats, the exact 
 | `hill-0-observed-failure-v1` | `failed` | Reproduces the 2026-08-25 observed failure |
 | `hill-0-minimal-pass-v1` | `passed` | Proves the evaluator is capable of passing a clean run |
 | `hill-2-pptx-smoke-attempt-2-v1` | `failed` | Preserves visual success while reproducing shared notes, orphaned parts, overwritten note evidence, and model/token overruns |
+| `hill-3-html-final-observed-failure-v1` | `failed` | Preserves final desktop success while reproducing stale synchronized HTML evidence and phone, export, console, and fault-isolation failures |
 
 The observed fixture must report, at minimum:
 
@@ -116,6 +117,24 @@ The replay binds the plan, structural candidate, sanitized contact sheet, active
 The fixture records one frozen experiment, `hill-2-attempt-2`. Native authoring, contact-sheet rendering, and package inspection are stages within that experiment, not independent reliability trials. Repeated-run reliability is not established here and remains Hill 5 work.
 
 Attempt 2 recorded 64 total tool calls: 8 PowerPoint canvas invokes, including 3 `get_model` inspections, plus 56 other tool calls. The `getModelCalls` value is a subset diagnostic and is not added to the total again. Total tool calls remain diagnostic for this task class because no total-tool ceiling was pre-registered.
+
+## Final HTML policy
+
+`readout-html-final` requires HTML only. Final QA must bind one frozen plan hash and one frozen HTML hash to these exact checks:
+
+- open and plan-hash match;
+- every slide at desktop width;
+- readable content and usable controls at phone width;
+- every slide in export mode;
+- navigation, notes, and fullscreen;
+- clean final console and page state;
+- isolated fault testing with no external window.
+
+A later write to either the plan or HTML makes this task class's QA evidence stale. Missing, self-declared, or capture-contradicting checks are invalid evaluator input. Desktop visual success cannot waive stale, phone, export, console, fault, delivery-rejection, or human-rejection failures.
+
+The committed fixture contains a tiny synthetic plan and HTML byte surrogate plus hash-bound capture metadata for desktop, phone, export, interactions, console, and fault state. The evaluator derives all trusted checks from those records and rejects contradictory booleans. The fixture contains no screenshot, customer content, preserved HTML, or raw browser trace. It carries the factual full-session metrics only as diagnostics. The task class has no efficiency limits because no HTML-only budget was pre-registered.
+
+False trusted checks use stable `final_outcome.html_*` reason codes. Generic Hill 0 codes remain authoritative for final-byte mismatch, plan mismatch, stale QA, visual defects, visible external fault state, process cleanup, and stale human approval.
 
 ## Machine-readable result
 

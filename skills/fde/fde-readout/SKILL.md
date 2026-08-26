@@ -30,6 +30,7 @@ Resolve bundled references, assets, and scripts from this skill's root directory
 11. **Inspect every output.** Browser correctness does not prove PowerPoint correctness, and a valid OOXML package does not prove a usable slide.
 12. **Preserve the human voice.** Detect writing patterns before editing, make the minimum effective change, and protect the author's vocabulary, cadence, uncertainty, and specific facts.
 13. **Smoke-test PowerPoint first.** Before full-deck authoring, build and review only the cover, decision, and densest requested slide family.
+14. **Freeze before final HTML QA.** Start final HTML QA only after the `ReadoutPlan` and HTML bytes are frozen. Any later write to either artifact invalidates the complete HTML QA set.
 
 ## Preflight source material
 
@@ -143,7 +144,7 @@ node scripts/render-html.mjs path/to/readout-plan.json path/to/output-directory
 node scripts/serve.mjs path/to/output-directory --port 4173
 ```
 
-The bundled renderer is dependency-free. Inspect desktop, phone, export mode, controls, console, and failure state before delivery.
+The bundled renderer is dependency-free. After freezing the plan and HTML, inspect every slide at desktop and phone widths and in export mode, then exercise navigation, notes, fullscreen, console, and isolated failure behavior. Phone review must confirm readable content and usable controls, not only scaling or lack of overflow.
 
 ## Build editable PowerPoint
 
@@ -168,7 +169,7 @@ Before delivery:
 5. no unresolved placeholder remains;
 6. title hierarchy and slide density are consistent;
 7. connectors share exact anchors and semantic colors;
-8. HTML desktop, phone, export mode, controls, console, and failure state pass;
+8. final HTML QA is bound to the frozen plan and HTML hashes, covers every slide at desktop, phone, and export widths, and passes interaction, console, and isolated failure checks;
 9. PPTX package and every rendered slide pass when PPTX is requested;
 10. HTML and PPTX carry the same plan version and decision;
 11. writing-pattern detection and the portability test pass without flattening the FDE's voice;
@@ -192,6 +193,9 @@ Do not produce a customer or leadership readout when:
 - a requested PPTX cannot isolate notes for its active slides;
 - a requested PPTX retains orphaned customer slide or notes parts;
 - a requested PPTX has unreadable dense representative content;
+- final HTML QA predates the final plan or HTML bytes;
+- final HTML QA is missing any slide, viewport, export, interaction, console, or isolated failure check;
+- phone content is unreadable or phone controls are clipped, hidden, or unusable;
 - severe overflow, overlap, font, conversion, or package warnings remain.
 
 State the blocked artifact, evidence or authorization needed, and the safest available format.

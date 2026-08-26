@@ -36,15 +36,19 @@ Connectors use shared anchors and one semantic direction. Do not place independe
 
 ## Browser QA
 
+Freeze the plan and HTML first. Bind the complete QA set to both hashes, and repeat the complete set after any later write.
+
 Check:
 
-- presentation viewport;
-- phone viewport with uniform stage scaling;
-- all slides in export mode;
-- keyboard, touch, fullscreen, notes, hash navigation, print;
-- console and page errors;
-- loading and source failure;
+- every slide at the presentation viewport;
+- every slide at the phone viewport, with readable content at default zoom and visible, tappable controls;
+- every slide independently in export mode;
+- previous/next controls, keyboard, touch, fullscreen, notes, hash navigation, and print;
+- final console and page errors;
+- loading and source failure in a disposable hidden context that is closed before restoring the primary review context;
 - overlap and overflow using rendered geometry.
+
+Uniform scaling, absence of overflow, or desktop success does not prove phone usability. Clipped controls or text that becomes too small to read fails phone QA.
 
 ## PowerPoint QA
 
