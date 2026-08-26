@@ -38,6 +38,38 @@
           "trial-5"
         ]
       }
+    },
+    "readout-pptx-smoke": {
+        "description": "Temporary replay-only budget for the three-slide native PowerPoint smoke gate.",
+        "requiredFormats": [
+          "powerpoint"
+        ],
+        "limits": {
+          "wallTimeMs": 900000,
+          "modelCalls": 32,
+          "inputTokens": 3000000,
+          "canvasCalls": 10,
+          "failedToolCalls": 1,
+          "failedToolRate": 0.02
+        },
+        "requiredQaChecks": {
+          "powerpoint": [
+            "opens",
+            "packageValid",
+            "editable",
+            "exactlyThreeActiveSlides",
+            "notesIsolated",
+            "noOrphanedCustomerParts",
+            "planEvidenceBound",
+            "legacyContentRemoved",
+            "denseContentReadable"
+          ]
+        },
+        "reliability": {
+          "requiredTrialIds": [
+            "hill-2-attempt-2"
+          ]
+        }
     }
   }
 }

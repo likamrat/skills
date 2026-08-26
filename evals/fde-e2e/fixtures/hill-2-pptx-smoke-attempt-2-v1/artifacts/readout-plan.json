@@ -1,0 +1,37 @@
+{
+  "fixtureId": "hill-2-pptx-smoke-attempt-2-v1",
+  "planVersion": 1,
+  "requestedFormats": [
+    "powerpoint"
+  ],
+  "smokeSelection": {
+    "activePlanIds": [
+      "cover",
+      "decision",
+      "owners"
+    ],
+    "densestPlanId": "owners"
+  },
+  "slides": [
+    {
+      "id": "cover",
+      "family": "cover",
+      "evidenceIds": []
+    },
+    {
+      "id": "decision",
+      "family": "decision",
+      "evidenceIds": [
+        "EV-DEC-01",
+        "HC-DEC-01"
+      ]
+    },
+    {
+      "id": "owners",
+      "family": "responsibility",
+      "evidenceIds": [
+        "EV-OWN-01"
+      ]
+    }
+  ]
+}

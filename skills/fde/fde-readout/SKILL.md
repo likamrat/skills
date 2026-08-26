@@ -29,6 +29,7 @@ Resolve bundled references, assets, and scripts from this skill's root directory
 10. **Keep delivery local.** HTML playback is dependency-free. Do not install or execute remote conversion packages; use an approved native Office tool for editable PPTX.
 11. **Inspect every output.** Browser correctness does not prove PowerPoint correctness, and a valid OOXML package does not prove a usable slide.
 12. **Preserve the human voice.** Detect writing patterns before editing, make the minimum effective change, and protect the author's vocabulary, cadence, uncertainty, and specific facts.
+13. **Smoke-test PowerPoint first.** Before full-deck authoring, build and review only the cover, decision, and densest requested slide family.
 
 ## Preflight source material
 
@@ -148,7 +149,7 @@ The bundled renderer is dependency-free. Inspect desktop, phone, export mode, co
 
 Read [references/powerpoint-delivery.md](references/powerpoint-delivery.md).
 
-Use the native Office path when available. Never substitute a screenshot-only deck or install a converter at runtime. Render and inspect the package and every slide against the plan.
+Use the native Office path when available. Never substitute a screenshot-only deck or install a converter at runtime. Render the three-slide smoke deck and block full authoring until a coordinator or accountable human approves its contact sheet. After approval, render and inspect the full package and every slide against the plan.
 
 ## Restyle from a reference deck
 
@@ -185,6 +186,12 @@ Do not produce a customer or leadership readout when:
 - branding or reference-deck use is unauthorized;
 - restricted customer content would be sent to an external converter or hosted service;
 - no approved native Office renderer is available for requested PPTX delivery;
+- a requested PPTX lacks an approved smoke contact sheet;
+- a requested PPTX has two same-class structural canvas failures;
+- a requested PPTX places replacement content over undeleted legacy content;
+- a requested PPTX cannot isolate notes for its active slides;
+- a requested PPTX retains orphaned customer slide or notes parts;
+- a requested PPTX has unreadable dense representative content;
 - severe overflow, overlap, font, conversion, or package warnings remain.
 
 State the blocked artifact, evidence or authorization needed, and the safest available format.

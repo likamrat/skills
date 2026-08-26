@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import {
   dirname,
   isAbsolute,
@@ -10,7 +10,7 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const GRADER_VERSION = "hill-0-evaluator/1.1.0";
+export const GRADER_VERSION = "hill-0-evaluator/1.2.0";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const defaultFixturesRoot = resolve(root, "evals", "fde-e2e", "fixtures");
@@ -61,6 +61,13 @@ function requireNonNegativeNumber(value, label) {
   return value;
 }
 
+function requireBoolean(value, label) {
+  if (typeof value !== "boolean") {
+    throw new Error(`${label} must be a boolean`);
+  }
+  return value;
+}
+
 function safeFixturePath(fixtureDirectory, path, label) {
   requireString(path, `${label}.path`);
   const candidate = resolve(fixtureDirectory, path);
@@ -73,6 +80,22 @@ function safeFixturePath(fixtureDirectory, path, label) {
     throw new Error(`${label}.path must stay inside the fixture directory`);
   }
   return candidate;
+}
+
+async function safeExistingFixturePath(fixtureDirectory, path, label) {
+  const [canonicalRoot, canonicalPath] = await Promise.all([
+    realpath(fixtureDirectory),
+    realpath(path),
+  ]);
+  const pathFromFixture = relative(canonicalRoot, canonicalPath);
+  if (
+    pathFromFixture.length === 0 ||
+    pathFromFixture.startsWith("..") ||
+    isAbsolute(pathFromFixture)
+  ) {
+    throw new Error(`${label}.path must resolve inside the fixture directory`);
+  }
+  return canonicalPath;
 }
 
 async function readJson(path, label) {
@@ -111,9 +134,14 @@ async function loadJsonDescriptors(fixtureDirectory, descriptors, label) {
     if (loaded.has(kind)) {
       throw new Error(`${label} contains duplicate kind ${kind}`);
     }
-    const path = safeFixturePath(
+    const lexicalPath = safeFixturePath(
       fixtureDirectory,
       descriptor.path,
+      descriptorLabel,
+    );
+    const path = await safeExistingFixturePath(
+      fixtureDirectory,
+      lexicalPath,
       descriptorLabel,
     );
     const file = await readJson(path, descriptorLabel);
@@ -148,11 +176,18 @@ async function loadArtifacts(fixtureDirectory, descriptors) {
 
     const path = safeFixturePath(fixtureDirectory, descriptor.path, label);
     try {
-      const bytes = await readFile(path);
+      const canonicalPath = await safeExistingFixturePath(
+        fixtureDirectory,
+        path,
+        label,
+      );
+      const bytes = await readFile(canonicalPath);
       loaded.set(descriptor.id, {
         descriptor,
         exists: true,
         actualSha256: hash(bytes),
+        bytes,
+        canonicalPath,
       });
     } catch (error) {
       if (error.code !== "ENOENT") {
@@ -162,6 +197,8 @@ async function loadArtifacts(fixtureDirectory, descriptors) {
         descriptor,
         exists: false,
         actualSha256: null,
+        bytes: null,
+        canonicalPath: path,
       });
     }
   }
@@ -225,12 +262,465 @@ function allChecksPass(checks) {
   );
 }
 
+function requireStringSet(value, label) {
+  const entries = requireArray(value, label).map((entry, index) =>
+    requireString(entry, `${label}[${index}]`),
+  );
+  if (new Set(entries).size !== entries.length) {
+    throw new Error(`${label} must contain distinct strings`);
+  }
+  return entries;
+}
+
+function parseArtifactJson(artifact, label) {
+  try {
+    return requireObject(
+      JSON.parse(artifact.bytes.toString("utf8")),
+      label,
+    );
+  } catch (error) {
+    throw new Error(`${label} must be valid JSON: ${error.message}`);
+  }
+}
+
+function setsEqual(left, right) {
+  return (
+    left.length === right.length &&
+    left.every((entry) => new Set(right).has(entry))
+  );
+}
+
+function validateSmokeEvidence({
+  qa,
+  artifact,
+  artifacts,
+  currentPlanHash,
+  metrics,
+  trace,
+  humanReview,
+}) {
+  const smoke = requireObject(qa.smokeEvidence, "powerpointQa.smokeEvidence");
+  const candidateSha256 = requireString(
+    smoke.candidateSha256,
+    "powerpointQa.smokeEvidence.candidateSha256",
+  );
+  const planSha256 = requireString(
+    smoke.planSha256,
+    "powerpointQa.smokeEvidence.planSha256",
+  );
+  if (!isSha256(candidateSha256) || !isSha256(planSha256)) {
+    throw new Error(
+      "powerpointQa.smokeEvidence plan and candidate hashes must be lowercase SHA-256 values",
+    );
+  }
+
+  const contactSheet = requireObject(
+    smoke.contactSheet,
+    "powerpointQa.smokeEvidence.contactSheet",
+  );
+  const contactSheetArtifactId = requireString(
+    contactSheet.artifactId,
+    "powerpointQa.smokeEvidence.contactSheet.artifactId",
+  );
+  const contactSheetSha256 = requireString(
+    contactSheet.sha256,
+    "powerpointQa.smokeEvidence.contactSheet.sha256",
+  );
+  if (!isSha256(contactSheetSha256)) {
+    throw new Error(
+      "powerpointQa.smokeEvidence.contactSheet.sha256 must be a lowercase SHA-256 value",
+    );
+  }
+  const contactSheetArtifact = artifacts.get(contactSheetArtifactId);
+  if (!contactSheetArtifact?.exists) {
+    throw new Error("PowerPoint smoke contact-sheet artifact must exist");
+  }
+  if (
+    contactSheetArtifact.descriptor.format !== "contact-sheet" ||
+    contactSheetArtifact.canonicalPath === artifact?.canonicalPath
+  ) {
+    throw new Error(
+      "PowerPoint smoke contact-sheet evidence must reference a distinct contact-sheet artifact",
+    );
+  }
+
+  const planArtifact = artifactForFormat(artifacts, "plan");
+  if (
+    new Set([
+      planArtifact.canonicalPath,
+      artifact.canonicalPath,
+      contactSheetArtifact.canonicalPath,
+    ]).size !== 3
+  ) {
+    throw new Error(
+      "PowerPoint smoke plan, candidate, and contact sheet must use distinct artifact paths",
+    );
+  }
+  const plan = parseArtifactJson(planArtifact, "PowerPoint smoke plan artifact");
+  const planSlides = requireArray(
+    plan.slides,
+    "PowerPoint smoke plan artifact.slides",
+  );
+  const planSlidesById = new Map(
+    planSlides.map((slide, index) => {
+      const label = `PowerPoint smoke plan artifact.slides[${index}]`;
+      requireObject(slide, label);
+      const id = requireString(slide.id, `${label}.id`);
+      return [
+        id,
+        {
+          id,
+          family: requireString(slide.family, `${label}.family`),
+          evidenceIds: requireStringSet(
+            slide.evidenceIds,
+            `${label}.evidenceIds`,
+          ),
+        },
+      ];
+    }),
+  );
+  if (planSlidesById.size !== planSlides.length) {
+    throw new Error("PowerPoint smoke plan slide IDs must be distinct");
+  }
+  const smokeSelection = requireObject(
+    plan.smokeSelection,
+    "PowerPoint smoke plan artifact.smokeSelection",
+  );
+  const selectedPlanIds = requireStringSet(
+    smokeSelection.activePlanIds,
+    "PowerPoint smoke plan artifact.smokeSelection.activePlanIds",
+  );
+  const densestPlanId = requireString(
+    smokeSelection.densestPlanId,
+    "PowerPoint smoke plan artifact.smokeSelection.densestPlanId",
+  );
+
+  const snapshot = parseArtifactJson(
+    artifact,
+    "PowerPoint smoke candidate snapshot",
+  );
+  const snapshotSlides = requireArray(
+    snapshot.activeSlides,
+    "PowerPoint smoke candidate snapshot.activeSlides",
+  );
+  const snapshotInventory = requireObject(
+    snapshot.packageInventory,
+    "PowerPoint smoke candidate snapshot.packageInventory",
+  );
+  const snapshotNativeTable = requireObject(
+    snapshot.nativeTable,
+    "PowerPoint smoke candidate snapshot.nativeTable",
+  );
+  requireString(
+    snapshotNativeTable.slideId,
+    "PowerPoint smoke candidate snapshot.nativeTable.slideId",
+  );
+  requireNonNegativeNumber(
+    snapshotNativeTable.rows,
+    "PowerPoint smoke candidate snapshot.nativeTable.rows",
+  );
+  requireNonNegativeNumber(
+    snapshotNativeTable.columns,
+    "PowerPoint smoke candidate snapshot.nativeTable.columns",
+  );
+  requireBoolean(
+    snapshot.denseContentReadable,
+    "PowerPoint smoke candidate snapshot.denseContentReadable",
+  );
+
+  const activeSlides = requireArray(
+    smoke.activeSlides,
+    "powerpointQa.smokeEvidence.activeSlides",
+  ).map((slide, index) => {
+    const label = `powerpointQa.smokeEvidence.activeSlides[${index}]`;
+    requireObject(slide, label);
+    return {
+      slideId: requireString(slide.slideId, `${label}.slideId`),
+      planId: requireString(slide.planId, `${label}.planId`),
+      family: requireString(slide.family, `${label}.family`),
+      denseRepresentative: requireBoolean(
+        slide.denseRepresentative,
+        `${label}.denseRepresentative`,
+      ),
+      shapeCount: requireNonNegativeNumber(
+        slide.shapeCount,
+        `${label}.shapeCount`,
+      ),
+      tableCount: requireNonNegativeNumber(
+        slide.tableCount,
+        `${label}.tableCount`,
+      ),
+      notesRelationshipId: requireString(
+        slide.notesRelationshipId,
+        `${label}.notesRelationshipId`,
+      ),
+      notesPart: requireString(slide.notesPart, `${label}.notesPart`),
+      expectedEvidenceIds: requireStringSet(
+        slide.expectedEvidenceIds,
+        `${label}.expectedEvidenceIds`,
+      ),
+      evidenceIdsInNotes: requireStringSet(
+        slide.evidenceIdsInNotes,
+        `${label}.evidenceIdsInNotes`,
+      ),
+      legacyContentRemaining: requireBoolean(
+        slide.legacyContentRemaining,
+        `${label}.legacyContentRemaining`,
+      ),
+    };
+  });
+
+  const inventory = requireObject(
+    smoke.packageInventory,
+    "powerpointQa.smokeEvidence.packageInventory",
+  );
+  for (const field of [
+    "activeSlideCount",
+    "activeNotesPartCount",
+    "packageSlidePartCount",
+    "packageNotesPartCount",
+    "orphanedCustomerSlidePartCount",
+    "orphanedCustomerNotesPartCount",
+  ]) {
+    requireNonNegativeNumber(
+      inventory[field],
+      `powerpointQa.smokeEvidence.packageInventory.${field}`,
+    );
+  }
+
+  const canvas = requireObject(
+    smoke.canvas,
+    "powerpointQa.smokeEvidence.canvas",
+  );
+  for (const field of [
+    "invokeCalls",
+    "getModelCalls",
+    "getModelFailures",
+    "actionCount",
+    "failures",
+    "otherToolCalls",
+    "otherToolFailures",
+  ]) {
+    requireNonNegativeNumber(
+      canvas[field],
+      `powerpointQa.smokeEvidence.canvas.${field}`,
+    );
+  }
+
+  const usage = requireObject(
+    smoke.usage,
+    "powerpointQa.smokeEvidence.usage",
+  );
+  for (const field of ["elapsedTimeMs", "modelCalls", "inputTokens"]) {
+    requireNonNegativeNumber(
+      usage[field],
+      `powerpointQa.smokeEvidence.usage.${field}`,
+    );
+  }
+  const humanDecision = requireString(
+    smoke.humanDecision,
+    "powerpointQa.smokeEvidence.humanDecision",
+  );
+  const denseContentReadable = requireBoolean(
+    smoke.denseContentReadable,
+    "powerpointQa.smokeEvidence.denseContentReadable",
+  );
+  const nativeTable = requireObject(
+    smoke.nativeTable,
+    "powerpointQa.smokeEvidence.nativeTable",
+  );
+  requireString(nativeTable.slideId, "powerpointQa.smokeEvidence.nativeTable.slideId");
+  requireNonNegativeNumber(
+    nativeTable.rows,
+    "powerpointQa.smokeEvidence.nativeTable.rows",
+  );
+  requireNonNegativeNumber(
+    nativeTable.columns,
+    "powerpointQa.smokeEvidence.nativeTable.columns",
+  );
+  const shapeStats = requireObject(qa.shapeStats, "powerpointQa.shapeStats");
+  for (const field of [
+    "slideCount",
+    "totalShapes",
+    "medianShapesPerSlide",
+    "nativeTables",
+  ]) {
+    requireNonNegativeNumber(shapeStats[field], `powerpointQa.shapeStats.${field}`);
+  }
+
+  const snapshotMatchesSlides =
+    snapshotSlides.length === activeSlides.length &&
+    snapshotSlides.every((snapshotSlide, index) => {
+      requireObject(
+        snapshotSlide,
+        `PowerPoint smoke candidate snapshot.activeSlides[${index}]`,
+      );
+      const evidenceSlide = activeSlides[index];
+      return (
+        snapshotSlide.slideId === evidenceSlide.slideId &&
+        snapshotSlide.planId === evidenceSlide.planId &&
+        snapshotSlide.family === evidenceSlide.family &&
+        snapshotSlide.shapeCount === evidenceSlide.shapeCount &&
+        snapshotSlide.tableCount === evidenceSlide.tableCount &&
+        snapshotSlide.notesRelationshipId ===
+          evidenceSlide.notesRelationshipId &&
+        snapshotSlide.notesPart === evidenceSlide.notesPart &&
+        snapshotSlide.legacyContentRemaining ===
+          evidenceSlide.legacyContentRemaining &&
+        setsEqual(
+          requireStringSet(
+            snapshotSlide.evidenceIdsInNotes,
+            `PowerPoint smoke candidate snapshot.activeSlides[${index}].evidenceIdsInNotes`,
+          ),
+          evidenceSlide.evidenceIdsInNotes,
+        )
+      );
+    });
+  const snapshotMatchesInventory = [
+    "activeSlideCount",
+    "activeNotesPartCount",
+    "packageSlidePartCount",
+    "packageNotesPartCount",
+    "orphanedCustomerSlidePartCount",
+    "orphanedCustomerNotesPartCount",
+  ].every((field) => {
+    requireNonNegativeNumber(
+      snapshotInventory[field],
+      `PowerPoint smoke candidate snapshot.packageInventory.${field}`,
+    );
+    return snapshotInventory[field] === inventory[field];
+  });
+  const sortedShapeCounts = activeSlides
+    .map((slide) => slide.shapeCount)
+    .sort((left, right) => left - right);
+  const medianShapeCount =
+    sortedShapeCounts.length % 2 === 1
+      ? sortedShapeCounts[Math.floor(sortedShapeCounts.length / 2)]
+      : (sortedShapeCounts[sortedShapeCounts.length / 2 - 1] +
+          sortedShapeCounts[sortedShapeCounts.length / 2]) /
+        2;
+  const shapeStatsMatch =
+    shapeStats.slideCount === activeSlides.length &&
+    shapeStats.totalShapes ===
+      activeSlides.reduce((total, slide) => total + slide.shapeCount, 0) &&
+    shapeStats.medianShapesPerSlide === medianShapeCount &&
+    shapeStats.nativeTables ===
+      activeSlides.reduce((total, slide) => total + slide.tableCount, 0);
+
+  if (
+    inventory.activeSlideCount !== activeSlides.length ||
+    canvas.invokeCalls !== metrics.canvasCalls ||
+    usage.elapsedTimeMs !== metrics.wallTimeMs ||
+    usage.modelCalls !== metrics.modelCalls ||
+    usage.inputTokens !== metrics.inputTokens ||
+    trace.canvasCallsCaptured !== canvas.invokeCalls ||
+    trace.canvasActionsCaptured !== canvas.actionCount ||
+    trace.canvasFailuresCaptured !== canvas.failures ||
+    trace.getModelFailuresCaptured !== canvas.getModelFailures ||
+    trace.otherToolCallsCaptured !== canvas.otherToolCalls ||
+    trace.otherToolFailuresCaptured !== canvas.otherToolFailures ||
+    canvas.invokeCalls + canvas.otherToolCalls !== metrics.toolCalls ||
+    canvas.failures + canvas.otherToolFailures !==
+      metrics.failedToolCalls ||
+    canvas.failures > canvas.invokeCalls ||
+    canvas.getModelCalls > canvas.invokeCalls ||
+    canvas.getModelFailures > canvas.getModelCalls ||
+    canvas.getModelFailures > canvas.failures ||
+    canvas.otherToolFailures > canvas.otherToolCalls ||
+    !snapshotMatchesSlides ||
+    !snapshotMatchesInventory ||
+    snapshot.denseContentReadable !== denseContentReadable ||
+    snapshotNativeTable.slideId !== nativeTable.slideId ||
+    snapshotNativeTable.rows !== nativeTable.rows ||
+    snapshotNativeTable.columns !== nativeTable.columns ||
+    nativeTable.slideId !== activeSlides[2]?.slideId ||
+    activeSlides[2]?.tableCount < 1 ||
+    nativeTable.rows === 0 ||
+    nativeTable.columns === 0 ||
+    !shapeStatsMatch
+  ) {
+    throw new Error(
+      "PowerPoint smoke evidence must reconcile with the candidate snapshot, run metrics, trace counts, and active slide inventory",
+    );
+  }
+
+  const expectedFamilies = ["cover", "decision"];
+  const exactlyThreeActiveSlides =
+    activeSlides.length === 3 &&
+    selectedPlanIds.length === 3 &&
+    new Set(activeSlides.map((slide) => slide.slideId)).size === 3 &&
+    selectedPlanIds.every(
+      (planId, index) => planId === activeSlides[index].planId,
+    ) &&
+    activeSlides
+      .slice(0, 2)
+      .every((slide, index) => slide.family === expectedFamilies[index]) &&
+    activeSlides[2].denseRepresentative === true &&
+    activeSlides[2].planId === densestPlanId;
+  const notesIsolated =
+    new Set(
+      activeSlides.map(
+        (slide) => `${slide.slideId}:${slide.notesRelationshipId}`,
+      ),
+    ).size === activeSlides.length &&
+    new Set(activeSlides.map((slide) => slide.notesPart)).size ===
+      activeSlides.length;
+  const noOrphanedCustomerParts =
+    inventory.activeSlideCount === 3 &&
+    inventory.activeNotesPartCount === 3 &&
+    inventory.packageSlidePartCount === 3 &&
+    inventory.packageNotesPartCount === 3 &&
+    inventory.orphanedCustomerSlidePartCount === 0 &&
+    inventory.orphanedCustomerNotesPartCount === 0;
+  const planEvidenceBound =
+    planSha256 === currentPlanHash &&
+    candidateSha256 === artifact?.actualSha256 &&
+    contactSheetSha256 === contactSheetArtifact.actualSha256 &&
+    contactSheetArtifact.descriptor.sha256 ===
+      contactSheetArtifact.actualSha256 &&
+    contactSheetArtifact.descriptor.sourcePlanSha256 === currentPlanHash &&
+    humanReview.contactSheetSha256 === contactSheetArtifact.actualSha256 &&
+    humanDecision === humanReview.decision &&
+    activeSlides.every((slide) => {
+      const planSlide = planSlidesById.get(slide.planId);
+      return (
+        planSlide?.family === slide.family &&
+        setsEqual(planSlide.evidenceIds, slide.expectedEvidenceIds) &&
+        setsEqual(slide.expectedEvidenceIds, slide.evidenceIdsInNotes)
+      );
+    });
+  const legacyContentRemoved = activeSlides.every(
+    (slide) => slide.legacyContentRemaining === false,
+  );
+
+  const derivedChecks = {
+    exactlyThreeActiveSlides,
+    notesIsolated,
+    noOrphanedCustomerParts,
+    planEvidenceBound,
+    legacyContentRemoved,
+    denseContentReadable,
+  };
+  for (const [check, derived] of Object.entries(derivedChecks)) {
+    qa.deterministicChecks[check] = derived;
+  }
+
+  return {
+    activeSlideIds: activeSlides.map((slide) => slide.slideId),
+    contactSheetSha256: contactSheetArtifact.actualSha256,
+    packageInventory: inventory,
+    canvas,
+    derivedChecks,
+  };
+}
+
 function metricLabel(metric) {
   const labels = {
     wallTimeMs: "wall time",
     modelCalls: "model calls",
     inputTokens: "input tokens",
     toolCalls: "tool calls",
+    canvasCalls: "PowerPoint canvas calls",
     failedToolCalls: "failed tool calls",
     failedToolRate: "failed tool rate",
   };
@@ -488,6 +978,7 @@ export async function evaluateFixture(
   }
 
   const qaByFormat = new Map();
+  let smokeDiagnostics = null;
 
   for (const format of task.requestedFormats) {
     const artifact = artifactForFormat(artifacts, format);
@@ -522,9 +1013,17 @@ export async function evaluateFixture(
     const missingChecks = formatRequiredChecks.filter(
       (check) => !Object.hasOwn(deterministicChecks, check),
     );
+    const unknownChecks = Object.keys(deterministicChecks).filter(
+      (check) => !formatRequiredChecks.includes(check),
+    );
     if (missingChecks.length > 0) {
       throw new Error(
         `${format}Qa.deterministicChecks is missing required checks: ${missingChecks.join(", ")}`,
+      );
+    }
+    if (unknownChecks.length > 0) {
+      throw new Error(
+        `${format}Qa.deterministicChecks contains checks not owned by trusted policy: ${unknownChecks.join(", ")}`,
       );
     }
     if (
@@ -546,6 +1045,22 @@ export async function evaluateFixture(
         `Required ${format} artifact is missing`,
       );
       continue;
+    }
+    if (
+      taskClass === "readout-pptx-smoke" &&
+      format === "powerpoint" &&
+      artifact.actualSha256 === artifact.descriptor.sha256 &&
+      qa.artifactSha256 === artifact.actualSha256
+    ) {
+      smokeDiagnostics = validateSmokeEvidence({
+        qa,
+        artifact,
+        artifacts,
+        currentPlanHash,
+        metrics,
+        trace,
+        humanReview,
+      });
     }
     if (artifact.actualSha256 !== artifact.descriptor.sha256) {
       addFailure(
@@ -571,13 +1086,43 @@ export async function evaluateFixture(
       );
     }
     if (!allChecksPass(qa.deterministicChecks)) {
-      addFailure(
-        axes,
-        "finalOutcome",
-        `final_outcome.${format}_deterministic_check_failed`,
-        `Required ${format} deterministic delivery checks did not all pass`,
-        qa.deterministicChecks,
-      );
+      if (taskClass === "readout-pptx-smoke") {
+        const smokeFailureCodes = {
+          opens: "final_outcome.powerpoint_open_failed",
+          packageValid: "final_outcome.powerpoint_package_invalid",
+          editable: "final_outcome.powerpoint_not_editable",
+          exactlyThreeActiveSlides:
+            "final_outcome.powerpoint_active_slide_count_failed",
+          notesIsolated: "final_outcome.powerpoint_notes_not_isolated",
+          noOrphanedCustomerParts:
+            "final_outcome.powerpoint_orphaned_customer_parts",
+          planEvidenceBound:
+            "final_outcome.powerpoint_plan_evidence_binding_failed",
+          legacyContentRemoved:
+            "final_outcome.powerpoint_legacy_content_retained",
+          denseContentReadable:
+            "final_outcome.powerpoint_dense_content_unreadable",
+        };
+        for (const check of formatRequiredChecks.filter(
+          (checkName) => deterministicChecks[checkName] !== true,
+        )) {
+          addFailure(
+            axes,
+            "finalOutcome",
+            smokeFailureCodes[check] ??
+              `final_outcome.powerpoint_${check}_failed`,
+            `Required PowerPoint smoke check ${check} failed`,
+          );
+        }
+      } else {
+        addFailure(
+          axes,
+          "finalOutcome",
+          `final_outcome.${format}_deterministic_check_failed`,
+          `Required ${format} deterministic delivery checks did not all pass`,
+          qa.deterministicChecks,
+        );
+      }
     }
     if (qa.artifactSha256 !== artifact.actualSha256) {
       addFailure(
@@ -613,6 +1158,7 @@ export async function evaluateFixture(
   axes.finalOutcome.diagnostics = {
     requestedFormats: task.requestedFormats,
     finalPlanSha256: currentPlanHash,
+    smoke: smokeDiagnostics,
   };
   axes.artifactQuality.diagnostics = Object.fromEntries(
     [...qaByFormat.entries()].map(([format, qa]) => [
@@ -830,6 +1376,7 @@ export async function evaluateFixture(
     failedToolCalls: metrics.failedToolCalls,
     failedToolRate,
     leakedProcessCount: leakedProcesses.length,
+    canvasCalls: metrics.canvasCalls ?? null,
   };
   return {
     schemaVersion: 1,

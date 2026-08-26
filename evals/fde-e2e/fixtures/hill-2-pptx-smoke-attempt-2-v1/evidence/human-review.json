@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "required": true,
+  "reviewer": "coordinator-smoke-review",
+  "decision": "approved",
+  "artifactHashes": {
+    "powerpoint": "57043535c78493ba780e35a6551596e934f804ff48183972241d501933573a58"
+  },
+  "contactSheetSha256": "689871be619584df8a074e1952e4725807b7e5b96525251a9384d0c723f0dc7a",
+  "reasons": [
+    "The three rendered slides are visually readable.",
+    "Structural and efficiency gates remain independently authoritative."
+  ]
+}
