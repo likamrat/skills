@@ -55,9 +55,9 @@ Each fixture contains:
 - `trace.json`: captured call counts, loops, retries, and structural validation attempts;
 - `reliability.json`: required critical trials and their outcomes.
 
-The evaluator recomputes every artifact hash. QA and human review must point to the recomputed final hashes. Agent claims are retained in output as `agentClaimIgnored` and never affect a gate.
+The evaluator requires the frozen plan file to exist and match its declared hash before evaluating any format binding. It recomputes every artifact hash. QA and human review must point to the recomputed final hashes. Agent claims are retained in output as `agentClaimIgnored` and never affect a gate.
 
-`run.json` declares `evaluationMode` as `frozen-replay` or `live`. A frozen replay may use a synthetic PowerPoint structural snapshot to reproduce a historical grade. A live run that requests PowerPoint must point to a `.pptx` Open Packaging Conventions ZIP with PowerPoint content types, presentation parts, relationships, slides, and current hash-bound QA.
+`run.json` declares `evaluationMode` as `frozen-replay` or `live`. A frozen replay may use a synthetic PowerPoint structural snapshot to reproduce a historical grade. A live run that requests PowerPoint must point to a readable `.pptx` Open Packaging Conventions ZIP with valid XML for PowerPoint content types, the root office-document relationship, presentation and slide relationships, the presentation, referenced slides, and current hash-bound QA.
 
 The PowerPoint file in each committed fixture is a synthetic structural snapshot, not a customer deck. The failure fixture preserves only the slide and shape evidence needed to reproduce the visual hard gate. No raw transcript, customer source, screenshot, or generated presentation package is committed.
 
