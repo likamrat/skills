@@ -80,6 +80,12 @@ try {
     "HTML responsibility and risk surfaces must use readable measures and soft neutral colors",
   );
   check(
+    html.includes("linear-gradient(90deg,#2563eb,#6d5bd0)") &&
+    html.includes("box-shadow:0 14px 34px #1f334814") &&
+    html.includes(".responsibility-step:last-child{border-right:0}"),
+    "HTML must compose related content into integrated editorial panels",
+  );
+  check(
     html.includes("__fdeReadoutQa"),
     "HTML must expose a rendered-geometry QA preflight",
   );

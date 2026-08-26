@@ -45,6 +45,8 @@ Keep the design-token budget small:
 - keep evidence text on dark surfaces at WCAG AA contrast instead of reusing saturated link blue;
 - size containers from their content and intended reading measure; a short sentence does not justify a tall empty card;
 - present single-sentence guardrails as compact ruled notes instead of full-width filled panels;
+- compose related facts into one integrated matrix, rail, or open row before reaching for repeated detached cards;
+- use one restrained signature accent per slide, such as a thin blue-to-violet rail, rather than making every container compete;
 - give each slide one primary visual assertion;
 - split content instead of shrinking text or stacking decorative containers.
 
