@@ -43,6 +43,8 @@ Keep the design-token budget small:
 - keep body measures wide enough for phrases rather than one-word-per-line wrapping;
 - reserve saturated brand colors for small accents; prefer soft blue, sage, stone, and warm-neutral surfaces, and do not use pink panel backgrounds unless the user requests them;
 - keep evidence text on dark surfaces at WCAG AA contrast instead of reusing saturated link blue;
+- size containers from their content and intended reading measure; a short sentence does not justify a tall empty card;
+- present single-sentence guardrails as compact ruled notes instead of full-width filled panels;
 - give each slide one primary visual assertion;
 - split content instead of shrinking text or stacking decorative containers.
 
