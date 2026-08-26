@@ -7,10 +7,10 @@ Every new editable deck starts from a copy of [`../assets/powerpoint-16x9-seed.p
 Use this authoring order:
 
 1. copy the clean seed to the output path;
-2. assign the starter slide's speaker notes and persist that mutation;
-3. for each planned slide, use one separate persisted canvas call to add that slide and assign its notes, then require an updated artifact version before adding the next slide;
-4. confirm that the active slide count equals the unique notes-relationship and notes-part counts;
-5. replace starter content and build the planned native shapes, tables, charts, and diagrams.
+2. use the native PowerPoint host to assign the starter notes, add each planned slide, and assign its notes before creating the next slide;
+3. save, close, and reopen the native deck, then confirm that the active slide count equals the unique notes-relationship and notes-part counts;
+4. only after that check, open the deck in the Office canvas and build the planned native shapes, tables, charts, and diagrams;
+5. do not add, delete, reorder, or assign notes to slides in the canvas after the native skeleton passes.
 
 The seed establishes a clean package foundation. It does not prove that a full deck can be authored safely, so the smoke gate still applies.
 
@@ -22,7 +22,7 @@ Before full-deck authoring, copy the seed, add two slides, and use the native Of
 2. the decision slide;
 3. the densest requested slide family.
 
-The third slide must exercise its native structure, such as the largest table or chart. Set and persist the starter notes first. Add one slide and set its notes in a single canvas call, persist the result, then make a new canvas call for the next slide. Do not place multiple slide-and-notes pairs in one batch; that batch has one serialization boundary and may clone the same notes relationship across every appended slide. Render all three slides as one contact sheet and pause for coordinator or accountable-human approval. Treat the smoke deck as disposable. After approval, repeat the same separately persisted slide-and-notes sequence from a fresh seed before replacing starter content. Visual approval permits full authoring; it does not waive evidence, notes, package, or efficiency gates.
+The third slide must exercise its native structure, such as the largest table or chart. Build the three-slide and three-notes skeleton in the native PowerPoint host, save it, close it, reopen it, and confirm three unique notes parts before opening the Office canvas. The canvas package serializer may point every added slide at one notes part even when slide-and-notes writes are separate; do not use it to create the skeleton. Render all three slides as one contact sheet and pause for coordinator or accountable-human approval. Treat the smoke deck as disposable. After approval, repeat the same native skeleton creation from a fresh seed before canvas content authoring. Visual approval permits full authoring; it does not waive evidence, notes, package, or efficiency gates.
 
 Stop the PowerPoint path immediately when:
 
@@ -40,11 +40,12 @@ When an Office presentation tool is available:
 
 1. inspect any supplied template or reference package without using it as the output base;
 2. verify the copied seed's slide size before content;
-3. map plan families to layouts;
-4. build `table` and `chart` families as native PowerPoint tables and charts; build other families with editable text, shapes, SVG diagrams, and notes;
-5. use exact coordinates for connectors and repeated geometry;
-6. preserve the plan's evidence IDs and footer;
-7. inspect package and render every slide.
+3. create and verify the complete slide-and-notes skeleton in the native PowerPoint host;
+4. map plan families to layouts without changing slide structure in the canvas;
+5. build `table` and `chart` families as native PowerPoint tables and charts; build other families with editable text, shapes, and SVG diagrams;
+6. use exact coordinates for connectors and repeated geometry;
+7. preserve the plan's evidence IDs and footer;
+8. inspect package and render every slide.
 
 Structural slide changes happen before content formatting. Template slot counts must match plan items; delete unused placeholder groups rather than leaving blank labels or images.
 
