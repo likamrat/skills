@@ -4,7 +4,6 @@ import { createHash } from "node:crypto";
 import {
   appendFile,
   cp,
-  copyFile,
   mkdtemp,
   readFile,
   rm,
@@ -21,15 +20,6 @@ const fixturesRoot = join(root, "evals", "fde-e2e", "fixtures");
 const passFixtureId = "hill-0-minimal-pass-v1";
 const failureFixtureId = "hill-0-observed-failure-v1";
 const passFixture = join(fixturesRoot, passFixtureId);
-const nativePowerpointExample = join(
-  root,
-  "skills",
-  "fde",
-  "fde-readout",
-  "assets",
-  "examples",
-  "lattice-harbor-readout.pptx",
-);
 const cli = join(root, "scripts", "evaluate-fde-run.mjs");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "fde-e2e-evaluator-"));
 const failures = [];
@@ -40,96 +30,6 @@ function check(condition, message) {
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
-}
-
-function crc32(bytes) {
-  let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit += 1) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function createStoredZip(entries) {
-  const localRecords = [];
-  const centralRecords = [];
-  let localOffset = 0;
-  for (const [entryName, value] of Object.entries(entries)) {
-    const name = Buffer.from(entryName, "utf8");
-    const content = Buffer.from(value, "utf8");
-    const entryCrc32 = crc32(content);
-    const localHeader = Buffer.alloc(30);
-    localHeader.writeUInt32LE(0x04034b50, 0);
-    localHeader.writeUInt16LE(20, 4);
-    localHeader.writeUInt32LE(entryCrc32, 14);
-    localHeader.writeUInt32LE(content.length, 18);
-    localHeader.writeUInt32LE(content.length, 22);
-    localHeader.writeUInt16LE(name.length, 26);
-    const localRecord = Buffer.concat([localHeader, name, content]);
-    localRecords.push(localRecord);
-
-    const centralHeader = Buffer.alloc(46);
-    centralHeader.writeUInt32LE(0x02014b50, 0);
-    centralHeader.writeUInt16LE(20, 4);
-    centralHeader.writeUInt16LE(20, 6);
-    centralHeader.writeUInt32LE(entryCrc32, 16);
-    centralHeader.writeUInt32LE(content.length, 20);
-    centralHeader.writeUInt32LE(content.length, 24);
-    centralHeader.writeUInt16LE(name.length, 28);
-    centralHeader.writeUInt32LE(localOffset, 42);
-    centralRecords.push(Buffer.concat([centralHeader, name]));
-    localOffset += localRecord.length;
-  }
-
-  const centralDirectory = Buffer.concat(centralRecords);
-  const endOfCentralDirectory = Buffer.alloc(22);
-  endOfCentralDirectory.writeUInt32LE(0x06054b50, 0);
-  endOfCentralDirectory.writeUInt16LE(Object.keys(entries).length, 8);
-  endOfCentralDirectory.writeUInt16LE(Object.keys(entries).length, 10);
-  endOfCentralDirectory.writeUInt32LE(centralDirectory.length, 12);
-  endOfCentralDirectory.writeUInt32LE(localOffset, 16);
-  return Buffer.concat([
-    ...localRecords,
-    centralDirectory,
-    endOfCentralDirectory,
-  ]);
-}
-
-function addZipComment(bytes, comment) {
-  const signature = 0x06054b50;
-  let endOfCentralDirectory = -1;
-  for (let index = bytes.length - 22; index >= 0; index -= 1) {
-    if (
-      bytes.readUInt32LE(index) === signature &&
-      index + 22 + bytes.readUInt16LE(index + 20) === bytes.length
-    ) {
-      endOfCentralDirectory = index;
-      break;
-    }
-  }
-  if (endOfCentralDirectory < 0) throw new Error("test PPTX has no EOCD");
-  const output = Buffer.concat([bytes, comment]);
-  output.writeUInt16LE(comment.length, endOfCentralDirectory + 20);
-  return output;
-}
-
-function minimalPptxEntries(overrides = {}) {
-  return {
-    "[Content_Types].xml":
-      '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>',
-    "_rels/.rels":
-      '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>',
-    "ppt/presentation.xml":
-      '<?xml version="1.0"?><p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId r:id="rId1"/></p:sldIdLst></p:presentation>',
-    "ppt/_rels/presentation.xml.rels":
-      '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/></Relationships>',
-    "ppt/slides/slide1.xml":
-      '<?xml version="1.0"?><p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"></p:sld>',
-    ...overrides,
-  };
 }
 
 async function readJson(path) {
@@ -167,59 +67,6 @@ async function syncTraceToMetrics(fixture) {
   await writeJson(tracePath, trace);
   traceDescriptor.sha256 = sha256(await readFile(tracePath));
   await writeJson(runPath, run);
-}
-
-async function configureLivePowerpoint(
-  fixture,
-  sourcePath,
-  { slideCount } = {},
-) {
-  const runPath = join(fixture, "run.json");
-  const run = await readJson(runPath);
-  run.evaluationMode = "live";
-  const powerpointPath = join(fixture, "artifacts", "readout.pptx");
-  await copyFile(sourcePath, powerpointPath);
-  const powerpointHash = sha256(await readFile(powerpointPath));
-  const powerpointDescriptor = run.artifacts.find(
-    (artifact) => artifact.format === "powerpoint",
-  );
-  powerpointDescriptor.path = "artifacts/readout.pptx";
-  powerpointDescriptor.sha256 = powerpointHash;
-  powerpointDescriptor.representation = "native-pptx";
-
-  const powerpointQaDescriptor = run.evidence.find(
-    (entry) => entry.kind === "powerpointQa",
-  );
-  const powerpointQaPath = join(fixture, powerpointQaDescriptor.path);
-  const powerpointQa = await readJson(powerpointQaPath);
-  powerpointQa.artifactSha256 = powerpointHash;
-  if (slideCount !== undefined && powerpointQa.shapeStats) {
-    powerpointQa.shapeStats.slideCount = slideCount;
-  }
-  await writeJson(powerpointQaPath, powerpointQa);
-  powerpointQaDescriptor.sha256 = sha256(await readFile(powerpointQaPath));
-
-  const humanReviewDescriptor = run.evidence.find(
-    (entry) => entry.kind === "humanReview",
-  );
-  const humanReviewPath = join(fixture, humanReviewDescriptor.path);
-  const humanReview = await readJson(humanReviewPath);
-  humanReview.artifactHashes.powerpoint = powerpointHash;
-  await writeJson(humanReviewPath, humanReview);
-  humanReviewDescriptor.sha256 = sha256(await readFile(humanReviewPath));
-  await writeJson(runPath, run);
-}
-
-async function expectLivePowerpointRejected(name, bytes, message) {
-  const sourcePath = join(temporaryRoot, `${name}.pptx`);
-  await writeFile(sourcePath, bytes);
-  const fixture = await copyPassFixture(name);
-  await configureLivePowerpoint(fixture, sourcePath);
-  const result = await evaluateFixture(fixture);
-  check(
-    reasonCodes(result).has("final_outcome.powerpoint_requires_native_pptx"),
-    message,
-  );
 }
 
 function reasonCodes(result) {
@@ -414,313 +261,26 @@ try {
     "one known-incomplete validator attempt must fail trace quality",
   );
 
-  const liveSnapshotFixture = await copyPassFixture("live-snapshot");
-  const liveSnapshotRunPath = join(liveSnapshotFixture, "run.json");
-  const liveSnapshotRun = await readJson(liveSnapshotRunPath);
-  liveSnapshotRun.evaluationMode = "live";
-  await writeJson(liveSnapshotRunPath, liveSnapshotRun);
-  const liveSnapshotResult = await evaluateFixture(liveSnapshotFixture);
+  const unsupportedLiveFixture = await copyPassFixture("unsupported-live");
+  const unsupportedLiveRunPath = join(unsupportedLiveFixture, "run.json");
+  const unsupportedLiveRun = await readJson(unsupportedLiveRunPath);
+  unsupportedLiveRun.evaluationMode = "live";
+  await writeJson(unsupportedLiveRunPath, unsupportedLiveRun);
+  await expectInputError(
+    () => evaluateFixture(unsupportedLiveFixture),
+    "unsupported live evaluation mode",
+  );
+  const unsupportedLiveCli = spawnSync(
+    process.execPath,
+    [cli, "--fixture", unsupportedLiveFixture],
+    { encoding: "utf8" },
+  );
   check(
-    liveSnapshotResult.evaluationMode === "live" &&
-      reasonCodes(liveSnapshotResult).has(
-        "final_outcome.powerpoint_requires_native_pptx",
+    unsupportedLiveCli.status === 2 &&
+      unsupportedLiveCli.stderr.includes(
+        "trusted live evaluation is unsupported until Hill 2",
       ),
-    "live PowerPoint evaluation must reject a synthetic replay snapshot",
-  );
-
-  await expectLivePowerpointRejected(
-    "live-malformed-xml",
-    createStoredZip({
-      ...minimalPptxEntries(),
-      "ppt/presentation.xml":
-        '<?xml version="1.0"?><p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId r:id="rId1"/></p:sldIdLst>&broken;</p:presentation><extra/>',
-    }),
-    "live PowerPoint evaluation must reject a ZIP with malformed XML contents",
-  );
-
-  await expectLivePowerpointRejected(
-    "live-invalid-entity",
-    createStoredZip(
-      minimalPptxEntries({
-        "ppt/slides/slide1.xml":
-          '<?xml version="1.0"?><p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">&#0;</p:sld>',
-      }),
-    ),
-    "live PowerPoint evaluation must reject XML-invalid numeric entities",
-  );
-
-  await expectLivePowerpointRejected(
-    "live-spoofed-relationships",
-    createStoredZip(
-      minimalPptxEntries({
-        "_rels/.rels":
-          '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><!-- <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/> --></Relationships>',
-      }),
-    ),
-    "live PowerPoint evaluation must ignore relationship text in comments",
-  );
-
-  await expectLivePowerpointRejected(
-    "live-rebound-relationship-namespace",
-    createStoredZip(
-      minimalPptxEntries({
-        "_rels/.rels":
-          '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship xmlns="urn:not-opc" Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>',
-      }),
-    ),
-    "live PowerPoint evaluation must reject relationship namespace rebinding",
-  );
-
-  await expectLivePowerpointRejected(
-    "live-malformed-utf8",
-    createStoredZip(
-      minimalPptxEntries({
-        "ppt/slides/slide1.xml": Buffer.from([0xff, 0xfe, 0x00]),
-      }),
-    ),
-    "live PowerPoint evaluation must reject malformed UTF-8 XML",
-  );
-
-  await expectLivePowerpointRejected(
-    "live-invalid-xml-declaration",
-    createStoredZip(
-      minimalPptxEntries({
-        "ppt/slides/slide1.xml":
-          '<?xml version="1.0" garbage?><p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"></p:sld>',
-      }),
-    ),
-    "live PowerPoint evaluation must reject invalid XML declarations",
-  );
-
-  await expectLivePowerpointRejected(
-    "live-leading-declaration-whitespace",
-    createStoredZip(
-      minimalPptxEntries({
-        "ppt/slides/slide1.xml":
-          ' \n<?xml version="1.0"?><p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>',
-      }),
-    ),
-    "live PowerPoint evaluation must reject whitespace before an XML declaration",
-  );
-
-  await expectLivePowerpointRejected(
-    "live-invalid-tag-whitespace",
-    createStoredZip(
-      minimalPptxEntries({
-        "ppt/slides/slide1.xml":
-          '<?xml version="1.0"?>< p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>',
-      }),
-    ),
-    "live PowerPoint evaluation must reject whitespace after an opening bracket",
-  );
-
-  await expectLivePowerpointRejected(
-    "live-invalid-self-close-whitespace",
-    createStoredZip(
-      minimalPptxEntries({
-        "ppt/slides/slide1.xml":
-          '<?xml version="1.0"?><p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/ >',
-      }),
-    ),
-    "live PowerPoint evaluation must reject whitespace after a self-closing slash",
-  );
-
-  await expectLivePowerpointRejected(
-    "live-non-xml-whitespace",
-    createStoredZip(
-      minimalPptxEntries({
-        "ppt/slides/slide1.xml":
-          '<?xml version="1.0"?><p:sld\u00a0xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>',
-      }),
-    ),
-    "live PowerPoint evaluation must reject non-XML whitespace as an attribute separator",
-  );
-
-  await expectLivePowerpointRejected(
-    "live-invalid-namespace-declaration",
-    createStoredZip(
-      minimalPptxEntries({
-        "ppt/slides/slide1.xml":
-          '<?xml version="1.0"?><p:sld xmlns:="urn:not-valid" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>',
-      }),
-    ),
-    "live PowerPoint evaluation must reject invalid namespace declarations",
-  );
-
-  await expectLivePowerpointRejected(
-    "live-malformed-namespace-prefix",
-    createStoredZip(
-      minimalPptxEntries({
-        "ppt/slides/slide1.xml":
-          '<?xml version="1.0"?><p:sld xmlns:bad:name="urn:not-valid" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>',
-      }),
-    ),
-    "live PowerPoint evaluation must reject malformed namespace prefixes",
-  );
-
-  await expectLivePowerpointRejected(
-    "live-invalid-comment-ending",
-    createStoredZip(
-      minimalPptxEntries({
-        "ppt/slides/slide1.xml":
-          '<?xml version="1.0"?><p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><!--invalid---></p:sld>',
-      }),
-    ),
-    "live PowerPoint evaluation must reject comments ending in a hyphen",
-  );
-
-  await expectLivePowerpointRejected(
-    "live-encoding-mismatch",
-    createStoredZip(
-      minimalPptxEntries({
-        "ppt/slides/slide1.xml":
-          '<?xml version="1.0" encoding="UTF-16"?><p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>',
-      }),
-    ),
-    "live PowerPoint evaluation must reject XML encoding declarations that contradict UTF-8 bytes",
-  );
-
-  const deepPresentation =
-    '<?xml version="1.0"?><p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-    "<p:x>".repeat(600) +
-    '<p:sldIdLst><p:sldId r:id="rId1"/></p:sldIdLst>' +
-    "</p:x>".repeat(600) +
-    "</p:presentation>";
-  await expectLivePowerpointRejected(
-    "live-excessive-xml-depth",
-    createStoredZip(
-      minimalPptxEntries({
-        "ppt/presentation.xml": deepPresentation,
-      }),
-    ),
-    "live PowerPoint evaluation must reject excessive XML nesting",
-  );
-
-  const widePresentation =
-    '<?xml version="1.0"?><p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-    "<p:x/>".repeat(100_001) +
-    '<p:sldIdLst><p:sldId r:id="rId1"/></p:sldIdLst></p:presentation>';
-  await expectLivePowerpointRejected(
-    "live-excessive-xml-width",
-    createStoredZip(
-      minimalPptxEntries({
-        "ppt/presentation.xml": widePresentation,
-      }),
-    ),
-    "live PowerPoint evaluation must reject excessive XML node counts",
-  );
-
-  const corruptCrcPackage = createStoredZip(minimalPptxEntries());
-  const centralDirectorySignature = Buffer.from([0x50, 0x4b, 0x01, 0x02]);
-  const centralDirectoryOffset = corruptCrcPackage.indexOf(
-    centralDirectorySignature,
-  );
-  corruptCrcPackage.writeUInt32LE(
-    corruptCrcPackage.readUInt32LE(centralDirectoryOffset + 16) ^ 1,
-    centralDirectoryOffset + 16,
-  );
-  await expectLivePowerpointRejected(
-    "live-corrupt-crc",
-    corruptCrcPackage,
-    "live PowerPoint evaluation must reject corrupt entry CRC values",
-  );
-
-  const splitNamePackage = createStoredZip(minimalPptxEntries());
-  splitNamePackage[30] = "X".charCodeAt(0);
-  await expectLivePowerpointRejected(
-    "live-split-name",
-    splitNamePackage,
-    "live PowerPoint evaluation must reject mismatched local and central filenames",
-  );
-
-  const backslashEntries = Object.fromEntries(
-    Object.entries(minimalPptxEntries()).map(([name, content]) => [
-      name.replaceAll("/", "\\"),
-      content,
-    ]),
-  );
-  await expectLivePowerpointRejected(
-    "live-backslash-paths",
-    createStoredZip(backslashEntries),
-    "live PowerPoint evaluation must reject backslash OPC entry paths",
-  );
-
-  const contradictoryDirectorySizePackage = createStoredZip(
-    minimalPptxEntries(),
-  );
-  contradictoryDirectorySizePackage.writeUInt32LE(
-    0,
-    contradictoryDirectorySizePackage.length - 22 + 12,
-  );
-  await expectLivePowerpointRejected(
-    "live-contradictory-directory-size",
-    contradictoryDirectorySizePackage,
-    "live PowerPoint evaluation must reject contradictory central-directory sizes",
-  );
-
-  const liveNativeFixture = await copyPassFixture("live-native-pptx");
-  await configureLivePowerpoint(liveNativeFixture, nativePowerpointExample, {
-    slideCount: 11,
-  });
-  const liveNativeResult = await evaluateFixture(liveNativeFixture);
-  check(
-    liveNativeResult.status === "passed" &&
-      liveNativeResult.evaluationMode === "live",
-    "live PowerPoint evaluation must accept native PPTX bytes with current hash-bound QA",
-  );
-
-  const entityNamespaceFixture = await copyPassFixture(
-    "live-entity-namespace",
-  );
-  const entityNamespacePath = join(temporaryRoot, "entity-namespace.pptx");
-  await writeFile(
-    entityNamespacePath,
-    createStoredZip(
-      minimalPptxEntries({
-        "ppt/presentation.xml":
-          '<?xml version="1.0"?><p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/ma&#x69;n" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId r:id="rId1"/></p:sldIdLst></p:presentation>',
-        "ppt/slides/slide1.xml":
-          '<?xml version="1.0"?><p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/ma&#x69;n"></p:sld>',
-      }),
-    ),
-  );
-  await configureLivePowerpoint(
-    entityNamespaceFixture,
-    entityNamespacePath,
-    { slideCount: 1 },
-  );
-  const entityNamespaceResult = await evaluateFixture(
-    entityNamespaceFixture,
-  );
-  check(
-    entityNamespaceResult.status === "passed",
-    "live PowerPoint evaluation must expand valid namespace entities",
-  );
-
-  const commentedNativeFixture = await copyPassFixture(
-    "live-commented-native-pptx",
-  );
-  const commentedNativePath = join(temporaryRoot, "commented-native.pptx");
-  const zipComment = Buffer.concat([
-    Buffer.from("comment-before-signature"),
-    Buffer.from([0x50, 0x4b, 0x05, 0x06]),
-    Buffer.from("comment-after-signature"),
-  ]);
-  await writeFile(
-    commentedNativePath,
-    addZipComment(await readFile(nativePowerpointExample), zipComment),
-  );
-  await configureLivePowerpoint(
-    commentedNativeFixture,
-    commentedNativePath,
-    { slideCount: 11 },
-  );
-  const commentedNativeResult = await evaluateFixture(
-    commentedNativeFixture,
-  );
-  check(
-    commentedNativeResult.status === "passed",
-    "live PowerPoint evaluation must accept a legal ZIP comment containing an EOCD signature",
+    "live mode must exit 2 with the Hill 2 deferral message",
   );
 
   const reliabilityFixture = await copyPassFixture("reliability");
@@ -1030,5 +590,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  "FDE end-to-end evaluator tests passed: replay and live modes, trusted QA, hard gates, hashes, budgets, reliability, and CLI.",
+  "FDE end-to-end evaluator tests passed: replay-only mode, trusted QA, hard gates, hashes, budgets, reliability, and CLI.",
 );

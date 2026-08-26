@@ -57,9 +57,9 @@ Each fixture contains:
 
 The evaluator requires the frozen plan file to exist and match its declared hash before evaluating any format binding. It recomputes every artifact hash. QA and human review must point to the recomputed final hashes. Agent claims are retained in output as `agentClaimIgnored` and never affect a gate.
 
-`run.json` declares `evaluationMode` as `frozen-replay` or `live`. A frozen replay may use a synthetic PowerPoint structural snapshot to reproduce a historical grade. A live run that requests PowerPoint must point to a readable `.pptx` Open Packaging Conventions ZIP with valid XML for PowerPoint content types, the root office-document relationship, presentation and slide relationships, the presentation, referenced slides, and current hash-bound QA.
+`run.json` must declare `evaluationMode` as `frozen-replay`. Any `live` value is invalid evaluator input and exits with code `2`. Trusted live acquisition, native Office open/render/editability checks, and the PowerPoint smoke gate belong to Hill 2.
 
-The PowerPoint file in each committed fixture is a synthetic structural snapshot, not a customer deck. The failure fixture preserves only the slide and shape evidence needed to reproduce the visual hard gate. No raw transcript, customer source, screenshot, or generated presentation package is committed.
+The PowerPoint file in each committed fixture is a synthetic structural snapshot, not a customer deck. Structural snapshots are replay evidence only; Hill 0 never certifies a live artifact. The failure fixture preserves only the slide and shape evidence needed to reproduce the visual hard gate. No raw transcript, customer source, screenshot, or generated presentation package is committed.
 
 Trusted task-class policy in `budgets.json` defines the required HTML and PowerPoint deterministic checks and the five distinct reliability trial IDs. A fixture cannot weaken those requirements. Duplicate requested formats, duplicate artifact formats, duplicate trial IDs, and missing required QA checks are invalid evaluator input.
 
