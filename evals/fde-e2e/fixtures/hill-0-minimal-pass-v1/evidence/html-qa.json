@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "artifactId": "html",
-  "artifactSha256": "2f34b4fa7308014b0726d070aa5c39952bb044c816cfe89914ed8a2e0bdf6e2a",
-  "planSha256": "3dc7b135c600fe266aecf4fb95f4117c985dae07fb973ebdd23f4c534de68938",
+  "artifactSha256": "6bff8274f2fbfb39347525dd8c8b1cf4ce97cbc164f77bcd2ec322ed17f9b27b",
+  "planSha256": "8de458d3fc770b134b289574661aa4e2ff95305688d5fb8059b31eeca511a9d8",
   "deliveryApproved": true,
   "visualApproved": true,
   "deterministicChecks": {

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "artifactId": "powerpoint",
-  "artifactSha256": "8183a738c1991b34eb6c29752d5f9c5cf54325c3a60e89b961d56514aa4c63fb",
-  "planSha256": "3dc7b135c600fe266aecf4fb95f4117c985dae07fb973ebdd23f4c534de68938",
+  "artifactSha256": "beaa6e7bfb88a0ecc3cc6ba35bc7ec62138768d41074dbbb1776d5903fc3e6e9",
+  "planSha256": "8de458d3fc770b134b289574661aa4e2ff95305688d5fb8059b31eeca511a9d8",
   "deliveryApproved": true,
   "visualApproved": true,
   "deterministicChecks": {

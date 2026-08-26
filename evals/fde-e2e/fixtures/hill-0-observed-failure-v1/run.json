@@ -46,23 +46,23 @@
       "id": "plan",
       "format": "plan",
       "path": "artifacts/readout-plan.json",
-      "sha256": "627339e3a1f12a12dc926a56a7dfcf596669607e287847c2b5033f3ff6bf3ce1",
+      "sha256": "ff5d9967f01f07c9ee4221da3de34332cfe9e2d1ec2098c6e76e03dd6b68c240",
       "required": true
     },
     {
       "id": "html",
       "format": "html",
       "path": "artifacts/readout.html",
-      "sha256": "51aa8e6cc2d732c9874f1d64c2114dfdcb894a2466620e0d5d86337a6be22369",
-      "sourcePlanSha256": "627339e3a1f12a12dc926a56a7dfcf596669607e287847c2b5033f3ff6bf3ce1",
+      "sha256": "e46ae0a5c7cda0b8237f564fdf54329e7fcff445cceeaa96388168cf6dc4ac33",
+      "sourcePlanSha256": "ff5d9967f01f07c9ee4221da3de34332cfe9e2d1ec2098c6e76e03dd6b68c240",
       "required": true
     },
     {
       "id": "powerpoint",
       "format": "powerpoint",
       "path": "artifacts/powerpoint-snapshot.json",
-      "sha256": "57f6fc65780e49b7e00d41b54ed4a253b8ecc8e25868150811d145f788c220e8",
-      "sourcePlanSha256": "627339e3a1f12a12dc926a56a7dfcf596669607e287847c2b5033f3ff6bf3ce1",
+      "sha256": "b9113df4894efff1810a9e33f1787fe2f5876c86b46045b4b0491696ce85aca1",
+      "sourcePlanSha256": "ff5d9967f01f07c9ee4221da3de34332cfe9e2d1ec2098c6e76e03dd6b68c240",
       "representation": "synthetic-snapshot",
       "required": true
     }
@@ -72,19 +72,19 @@
       "id": "html-qa",
       "kind": "htmlQa",
       "path": "evidence/html-qa.json",
-      "sha256": "d3f3c1c4d8ad169ad2ecd3453d4f977ba0ab0c2676e5d9446cd4eb40cf325cf0"
+      "sha256": "c3bd956146b1e3384435bc15398929e37aafe96f9d994aaa25d516c413087896"
     },
     {
       "id": "powerpoint-qa",
       "kind": "powerpointQa",
       "path": "evidence/powerpoint-qa.json",
-      "sha256": "5bd5b6fe2ab79eeac29686f88dd5c91ea7bec82d65aafd12de1878203519c9d2"
+      "sha256": "5c05a5b649899a372413bfad18705f265eb2f010ec7513d2a9084c83d27f908e"
     },
     {
       "id": "human-review",
       "kind": "humanReview",
       "path": "evidence/human-review.json",
-      "sha256": "205543c0812aeddb0e5acca2342c77210b7f80c673cde33497bcbc3ed5a6c936"
+      "sha256": "dec1c72a4b85beb5cc13b6aef27080b385563d05ac22de7c686cc9b154bab1e5"
     }
   ],
   "records": [
@@ -92,19 +92,19 @@
       "id": "final-state",
       "kind": "finalState",
       "path": "final-state.json",
-      "sha256": "f64bd23cdf3cbf3596b80e51ae54908c12d9ffe3dbd05fd68f97a8821b594f98"
+      "sha256": "4e7411ca98d14a571b7db8f7c8addbfa21f93ea0ea0b1699bfb01e73d6b927d4"
     },
     {
       "id": "trace",
       "kind": "trace",
       "path": "trace.json",
-      "sha256": "8a257aee63d6bc15cacd3eeda8c3181c8cfe042a8fca15eb1eda7fedc8a6337c"
+      "sha256": "4314e9035e7ba555de565027907268c1bc1f0dfd00cd9d1c0a394c6cf56ba28e"
     },
     {
       "id": "reliability",
       "kind": "reliability",
       "path": "reliability.json",
-      "sha256": "657722adcd25a8467f415c58149f4998c96945f3ee60f1ce0b6575a83be42d61"
+      "sha256": "6e7c20d2869ce477e2ef76c994620046946acaf0b4fa10d2f4f212187baaf302"
     }
   ],
   "agentClaim": {

@@ -1,7 +1,7 @@
 {
   "fixtureId": "hill-0-observed-failure-v1",
   "representation": "synthetic-powerpoint-snapshot",
-  "sourcePlanSha256": "627339e3a1f12a12dc926a56a7dfcf596669607e287847c2b5033f3ff6bf3ce1",
+  "sourcePlanSha256": "ff5d9967f01f07c9ee4221da3de34332cfe9e2d1ec2098c6e76e03dd6b68c240",
   "slideCount": 12,
   "shapeCounts": [
     3,

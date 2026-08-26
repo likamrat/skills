@@ -6,10 +6,11 @@ import {
   cp,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   writeFile,
 } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -34,6 +35,16 @@ function sha256(bytes) {
 
 async function readJson(path) {
   return JSON.parse(await readFile(path, "utf8"));
+}
+
+async function walk(directory) {
+  const files = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...(await walk(path)));
+    else files.push(path);
+  }
+  return files;
 }
 
 async function writeJson(path, value) {
@@ -93,6 +104,16 @@ async function expectInputError(action, label) {
 }
 
 try {
+  const replayTextFiles = (await walk(join(root, "evals", "fde-e2e"))).filter(
+    (path) => [".json", ".html", ".md"].includes(extname(path)),
+  );
+  for (const path of replayTextFiles) {
+    check(
+      !(await readFile(path, "utf8")).includes("\r"),
+      `${path} must use LF line endings`,
+    );
+  }
+
   const failed = await evaluateFixture(failureFixtureId);
   const failedCodes = reasonCodes(failed);
   check(failed.status === "failed", "observed fixture must fail");

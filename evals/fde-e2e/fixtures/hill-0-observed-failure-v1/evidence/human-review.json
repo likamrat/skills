@@ -5,7 +5,7 @@
   "decision": "rejected",
   "artifactHashes": {
     "html": "1111111111111111111111111111111111111111111111111111111111111111",
-    "powerpoint": "57f6fc65780e49b7e00d41b54ed4a253b8ecc8e25868150811d145f788c220e8"
+    "powerpoint": "b9113df4894efff1810a9e33f1787fe2f5876c86b46045b4b0491696ce85aca1"
   },
   "reasons": [
     "PowerPoint visual QA failed.",
