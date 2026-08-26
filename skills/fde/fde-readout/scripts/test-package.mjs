@@ -272,8 +272,17 @@ try {
     "PowerPoint skeleton helper must target notes-body placeholders and add native slides",
   );
   check(
+    skeletonHelper.includes("IsNullOrWhiteSpace($Seed)") &&
+      skeletonHelper.includes("Join-Path $PSScriptRoot"),
+    "PowerPoint skeleton helper must resolve its default seed after parameter binding",
+  );
+  check(
     !skeletonHelper.includes("speakerNotes"),
     "PowerPoint skeleton helper must not use the unsupported speakerNotes field",
+  );
+  check(
+    !skeletonHelper.includes("ConvertFrom-Json -Depth"),
+    "PowerPoint skeleton helper must remain compatible with Windows PowerShell 5.1",
   );
 } catch (error) {
   failures.push(`PowerPoint skeleton helper contract could not be verified: ${error.message}`);
