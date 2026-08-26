@@ -7,8 +7,8 @@ Every new editable deck starts from a copy of [`../assets/powerpoint-16x9-seed.p
 Use this authoring order:
 
 1. copy the clean seed to the output path;
-2. assign the starter slide's speaker notes;
-3. add one planned slide, assign that new slide's notes immediately, and repeat without batching all slide additions ahead of note assignment;
+2. assign the starter slide's speaker notes and persist that mutation;
+3. for each planned slide, use one separate persisted canvas call to add that slide and assign its notes, then require an updated artifact version before adding the next slide;
 4. confirm that the active slide count equals the unique notes-relationship and notes-part counts;
 5. replace starter content and build the planned native shapes, tables, charts, and diagrams.
 
@@ -22,7 +22,7 @@ Before full-deck authoring, copy the seed, add two slides, and use the native Of
 2. the decision slide;
 3. the densest requested slide family.
 
-The third slide must exercise its native structure, such as the largest table or chart. Set the starter notes first, then add one slide and set its notes before adding the next. Do not add all slides and assign notes afterward; package serializers may clone the last notes relationship across appended slides. Render all three slides as one contact sheet and pause for coordinator or accountable-human approval. Treat the smoke deck as disposable. After approval, repeat the same slide-and-notes pairing from a fresh seed before replacing starter content. Visual approval permits full authoring; it does not waive evidence, notes, package, or efficiency gates.
+The third slide must exercise its native structure, such as the largest table or chart. Set and persist the starter notes first. Add one slide and set its notes in a single canvas call, persist the result, then make a new canvas call for the next slide. Do not place multiple slide-and-notes pairs in one batch; that batch has one serialization boundary and may clone the same notes relationship across every appended slide. Render all three slides as one contact sheet and pause for coordinator or accountable-human approval. Treat the smoke deck as disposable. After approval, repeat the same separately persisted slide-and-notes sequence from a fresh seed before replacing starter content. Visual approval permits full authoring; it does not waive evidence, notes, package, or efficiency gates.
 
 Stop the PowerPoint path immediately when:
 
