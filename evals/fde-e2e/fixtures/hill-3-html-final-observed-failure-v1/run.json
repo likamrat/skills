@@ -62,13 +62,13 @@
       "id": "html-qa",
       "kind": "htmlQa",
       "path": "evidence/html-qa.json",
-      "sha256": "7877bdd394c25a0b749e1ae147eecf565c9220990538185a2c2b26b7266619ce"
+      "sha256": "f4a2925c98a045d0d5f66b2687462d5c19d07eb46728b3d344db5445d28aa4e2"
     },
     {
       "id": "human-review",
       "kind": "humanReview",
       "path": "evidence/human-review.json",
-      "sha256": "03698cbe73d326ed01af84d0d472261d258476e1264d57c0a5c0a375530f3946"
+      "sha256": "8c95605e4e7311c7d74a97a937eecbf78b6427f0827e335f0e807b8ec63ddac4"
     }
   ],
   "records": [

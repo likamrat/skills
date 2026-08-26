@@ -130,9 +130,9 @@ Attempt 2 recorded 64 total tool calls: 8 PowerPoint canvas invokes, including 3
 - clean final console and page state;
 - isolated fault testing with no external window.
 
-A later write to either the plan or HTML makes the QA evidence stale. Missing or self-declared checks are invalid evaluator input. Desktop approval cannot waive stale, phone, export, console, or fault failures.
+A later write to either the plan or HTML makes this task class's QA evidence stale. Missing, self-declared, or capture-contradicting checks are invalid evaluator input. Desktop visual success cannot waive stale, phone, export, console, fault, delivery-rejection, or human-rejection failures.
 
-The committed fixture contains a tiny synthetic plan and HTML byte surrogate, sanitized JSON evidence, and no screenshot, customer content, preserved HTML, or raw browser trace. It carries the factual full-session metrics only as diagnostics. The task class has no efficiency limits because no HTML-only budget was pre-registered.
+The committed fixture contains a tiny synthetic plan and HTML byte surrogate plus hash-bound capture metadata for desktop, phone, export, interactions, console, and fault state. The evaluator derives all trusted checks from those records and rejects contradictory booleans. The fixture contains no screenshot, customer content, preserved HTML, or raw browser trace. It carries the factual full-session metrics only as diagnostics. The task class has no efficiency limits because no HTML-only budget was pre-registered.
 
 False trusted checks use stable `final_outcome.html_*` reason codes. Generic Hill 0 codes remain authoritative for final-byte mismatch, plan mismatch, stale QA, visual defects, visible external fault state, process cleanup, and stale human approval.
 

@@ -728,6 +728,222 @@ function validateSmokeEvidence({
   };
 }
 
+function validateHtmlFinalEvidence({ qa, artifact, currentPlanHash }) {
+  const replay = requireObject(
+    qa.replayEvidence,
+    "htmlQa.replayEvidence",
+  );
+  const finalPlanSha256 = requireString(
+    replay.finalPlanSha256,
+    "htmlQa.replayEvidence.finalPlanSha256",
+  );
+  const finalHtmlSha256 = requireString(
+    replay.finalHtmlSha256,
+    "htmlQa.replayEvidence.finalHtmlSha256",
+  );
+  const embeddedPlanSha256 = requireString(
+    replay.embeddedPlanSha256,
+    "htmlQa.replayEvidence.embeddedPlanSha256",
+  );
+  if (
+    !isSha256(finalPlanSha256) ||
+    !isSha256(finalHtmlSha256) ||
+    !isSha256(embeddedPlanSha256)
+  ) {
+    throw new Error(
+      "htmlQa.replayEvidence final plan and HTML hashes must be lowercase SHA-256 values",
+    );
+  }
+  const finalSlideCount = requireNonNegativeNumber(
+    replay.finalSlideCount,
+    "htmlQa.replayEvidence.finalSlideCount",
+  );
+  if (finalSlideCount === 0) {
+    throw new Error("htmlQa.replayEvidence.finalSlideCount must be positive");
+  }
+
+  const captures = requireObject(
+    replay.captures,
+    "htmlQa.replayEvidence.captures",
+  );
+  const requiredCaptureNames = [
+    "desktop",
+    "phone",
+    "export",
+    "interactions",
+    "console",
+    "fault",
+  ];
+  const missingCaptureNames = requiredCaptureNames.filter(
+    (name) => !Object.hasOwn(captures, name),
+  );
+  const unknownCaptureNames = Object.keys(captures).filter(
+    (name) => !requiredCaptureNames.includes(name),
+  );
+  if (missingCaptureNames.length > 0 || unknownCaptureNames.length > 0) {
+    throw new Error(
+      `htmlQa.replayEvidence.captures must contain exactly ${requiredCaptureNames.join(", ")}`,
+    );
+  }
+
+  const captureIds = new Set();
+  function readCapture(name, stateFields, { slides = false } = {}) {
+    const label = `htmlQa.replayEvidence.captures.${name}`;
+    const capture = requireObject(captures[name], label);
+    const captureId = requireString(capture.captureId, `${label}.captureId`);
+    if (captureIds.has(captureId)) {
+      throw new Error("htmlQa replay capture IDs must be distinct");
+    }
+    captureIds.add(captureId);
+    const capturedPlanSha256 = requireString(
+      capture.capturedPlanSha256,
+      `${label}.capturedPlanSha256`,
+    );
+    const capturedHtmlSha256 = requireString(
+      capture.capturedHtmlSha256,
+      `${label}.capturedHtmlSha256`,
+    );
+    if (!isSha256(capturedPlanSha256) || !isSha256(capturedHtmlSha256)) {
+      throw new Error(`${label} hashes must be lowercase SHA-256 values`);
+    }
+    let reviewedSlideCount;
+    if (slides) {
+      reviewedSlideCount =
+        capture.reviewedSlideCount === null
+          ? null
+          : requireNonNegativeNumber(
+              capture.reviewedSlideCount,
+              `${label}.reviewedSlideCount`,
+            );
+    }
+    const state = requireObject(capture.state, `${label}.state`);
+    const missingStateFields = stateFields.filter(
+      (field) => !Object.hasOwn(state, field),
+    );
+    const unknownStateFields = Object.keys(state).filter(
+      (field) => !stateFields.includes(field),
+    );
+    if (missingStateFields.length > 0 || unknownStateFields.length > 0) {
+      throw new Error(
+        `${label}.state must contain exactly ${stateFields.join(", ")}`,
+      );
+    }
+    for (const field of stateFields) {
+      requireBoolean(state[field], `${label}.state.${field}`);
+    }
+    return {
+      captureId,
+      capturedPlanSha256,
+      capturedHtmlSha256,
+      reviewedSlideCount,
+      state,
+    };
+  }
+
+  const desktop = readCapture(
+    "desktop",
+    ["opened", "allSlidesReviewed"],
+    { slides: true },
+  );
+  const phone = readCapture(
+    "phone",
+    ["readable", "controlsUsable"],
+    { slides: true },
+  );
+  const exportCapture = readCapture(
+    "export",
+    ["allSlidesReviewed"],
+    { slides: true },
+  );
+  const interactions = readCapture("interactions", [
+    "navigationPass",
+    "notesPass",
+    "fullscreenPass",
+  ]);
+  const consoleCapture = readCapture("console", ["clean"]);
+  const fault = readCapture("fault", [
+    "isolated",
+    "externalWindowOpened",
+  ]);
+
+  const finalHashesMatch =
+    finalPlanSha256 === currentPlanHash &&
+    finalHtmlSha256 === artifact.actualSha256;
+  const isFinalCapture = (capture) =>
+    finalHashesMatch &&
+    capture.capturedPlanSha256 === finalPlanSha256 &&
+    capture.capturedHtmlSha256 === finalHtmlSha256;
+  const reviewedEverySlide = (capture) =>
+    capture.reviewedSlideCount === finalSlideCount;
+
+  const derivedChecks = {
+    opens: isFinalCapture(desktop) && desktop.state.opened,
+    planHashMatches:
+      finalPlanSha256 === currentPlanHash &&
+      embeddedPlanSha256 === finalPlanSha256 &&
+      qa.planSha256 === currentPlanHash &&
+      artifact.descriptor.sourcePlanSha256 === currentPlanHash,
+    desktopAllSlides:
+      isFinalCapture(desktop) &&
+      reviewedEverySlide(desktop) &&
+      desktop.state.allSlidesReviewed,
+    phoneReadable:
+      isFinalCapture(phone) &&
+      reviewedEverySlide(phone) &&
+      phone.state.readable,
+    phoneControlsUsable:
+      isFinalCapture(phone) &&
+      reviewedEverySlide(phone) &&
+      phone.state.controlsUsable,
+    exportAllSlides:
+      isFinalCapture(exportCapture) &&
+      reviewedEverySlide(exportCapture) &&
+      exportCapture.state.allSlidesReviewed,
+    navigationPass:
+      isFinalCapture(interactions) && interactions.state.navigationPass,
+    notesPass: isFinalCapture(interactions) && interactions.state.notesPass,
+    fullscreenPass:
+      isFinalCapture(interactions) && interactions.state.fullscreenPass,
+    consoleClean:
+      isFinalCapture(consoleCapture) && consoleCapture.state.clean,
+    faultIsolated: isFinalCapture(fault) && fault.state.isolated,
+    noExternalWindow:
+      isFinalCapture(fault) && fault.state.externalWindowOpened === false,
+  };
+  const contradictions = Object.entries(derivedChecks)
+    .filter(([check, derived]) => qa.deterministicChecks[check] !== derived)
+    .map(([check]) => check);
+  if (contradictions.length > 0) {
+    throw new Error(
+      `htmlQa.deterministicChecks contradict replay evidence: ${contradictions.join(", ")}`,
+    );
+  }
+
+  return {
+    finalPlanSha256,
+    finalHtmlSha256,
+    embeddedPlanSha256,
+    finalSlideCount,
+    captures: Object.fromEntries(
+      [
+        desktop,
+        phone,
+        exportCapture,
+        interactions,
+        consoleCapture,
+        fault,
+      ].map((capture) => [
+        capture.captureId,
+        {
+          finalHashBound: isFinalCapture(capture),
+          reviewedSlideCount: capture.reviewedSlideCount ?? null,
+        },
+      ]),
+    ),
+    derivedChecks,
+  };
+}
+
 function metricLabel(metric) {
   const labels = {
     wallTimeMs: "wall time",
@@ -993,6 +1209,7 @@ export async function evaluateFixture(
 
   const qaByFormat = new Map();
   let smokeDiagnostics = null;
+  let htmlFinalDiagnostics = null;
 
   for (const format of task.requestedFormats) {
     const artifact = artifactForFormat(artifacts, format);
@@ -1074,6 +1291,19 @@ export async function evaluateFixture(
         metrics,
         trace,
         humanReview,
+      });
+    }
+    if (
+      taskClass === "readout-html-final" &&
+      format === "html" &&
+      artifact.actualSha256 === artifact.descriptor.sha256 &&
+      artifact.descriptor.sourcePlanSha256 === currentPlanHash &&
+      qa.planSha256 === currentPlanHash
+    ) {
+      htmlFinalDiagnostics = validateHtmlFinalEvidence({
+        qa,
+        artifact,
+        currentPlanHash,
       });
     }
     if (artifact.actualSha256 !== artifact.descriptor.sha256) {
@@ -1186,6 +1416,9 @@ export async function evaluateFixture(
     finalPlanSha256: currentPlanHash,
     smoke: smokeDiagnostics,
   };
+  if (htmlFinalDiagnostics) {
+    axes.finalOutcome.diagnostics.htmlFinal = htmlFinalDiagnostics;
+  }
   axes.artifactQuality.diagnostics = Object.fromEntries(
     [...qaByFormat.entries()].map(([format, qa]) => [
       format,
@@ -1202,7 +1435,9 @@ export async function evaluateFixture(
     return (
       artifact &&
       (qa?.artifactSha256 !== artifact.actualSha256 ||
-        qa?.planSha256 !== currentPlanHash)
+        (taskClass === "readout-html-final" &&
+          format === "html" &&
+          qa?.planSha256 !== currentPlanHash))
     );
   });
   const retryGroups = requireArray(

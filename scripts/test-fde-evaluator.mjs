@@ -182,6 +182,10 @@ async function makeCleanSmokeFixture(name) {
 async function makeCleanHtmlFinalFixture(name) {
   const fixture = await copyHtmlFinalFixture(name);
   const run = await readJson(join(fixture, "run.json"));
+  const planDescriptor = run.artifacts.find(
+    (entry) => entry.format === "plan",
+  );
+  const planSha256 = sha256(await readFile(join(fixture, planDescriptor.path)));
   const htmlDescriptor = run.artifacts.find(
     (entry) => entry.format === "html",
   );
@@ -191,14 +195,54 @@ async function makeCleanHtmlFinalFixture(name) {
   const qa = await readJson(qaPath);
   qa.artifactSha256 = htmlSha256;
   qa.visualApproved = true;
+  qa.desktopVisualApproved = true;
   qa.deliveryApproved = true;
   qa.severeDefects = [];
-  qa.observedFacts.synchronizedFinalEvidenceSet = true;
+  qa.replayEvidence.finalPlanSha256 = planSha256;
+  qa.replayEvidence.finalHtmlSha256 = htmlSha256;
+  qa.replayEvidence.embeddedPlanSha256 = planSha256;
+  const { captures, finalSlideCount } = qa.replayEvidence;
+  for (const capture of Object.values(captures)) {
+    capture.capturedPlanSha256 = planSha256;
+    capture.capturedHtmlSha256 = htmlSha256;
+  }
+  captures.desktop.reviewedSlideCount = finalSlideCount;
+  Object.assign(captures.desktop.state, {
+    opened: true,
+    allSlidesReviewed: true,
+  });
+  captures.phone.reviewedSlideCount = finalSlideCount;
+  Object.assign(captures.phone.state, {
+    readable: true,
+    controlsUsable: true,
+  });
+  captures.export.reviewedSlideCount = finalSlideCount;
+  captures.export.state.allSlidesReviewed = true;
+  Object.assign(captures.interactions.state, {
+    navigationPass: true,
+    notesPass: true,
+    fullscreenPass: true,
+  });
+  captures.console.state.clean = true;
+  Object.assign(captures.fault.state, {
+    isolated: true,
+    externalWindowOpened: false,
+  });
   for (const check of Object.keys(qa.deterministicChecks)) {
     qa.deterministicChecks[check] = true;
   }
   await writeJson(qaPath, qa);
   await updateDescriptorHash(fixture, "evidence", "htmlQa");
+
+  const humanReviewDescriptor = run.evidence.find(
+    (entry) => entry.kind === "humanReview",
+  );
+  const humanReviewPath = join(fixture, humanReviewDescriptor.path);
+  const humanReview = await readJson(humanReviewPath);
+  humanReview.decision = "approved";
+  humanReview.desktopVisualApproved = true;
+  await writeJson(humanReviewPath, humanReview);
+  await updateDescriptorHash(fixture, "evidence", "humanReview");
 
   const finalStatePath = join(fixture, "final-state.json");
   const finalState = await readJson(finalStatePath);
@@ -206,6 +250,52 @@ async function makeCleanHtmlFinalFixture(name) {
   await writeJson(finalStatePath, finalState);
   await updateDescriptorHash(fixture, "records", "finalState");
   return fixture;
+}
+
+function failHtmlFinalCheck(qa, checkName) {
+  const { captures } = qa.replayEvidence;
+  const differentPlanHash =
+    "2222222222222222222222222222222222222222222222222222222222222222";
+  const mutations = {
+    opens: () => {
+      captures.desktop.state.opened = false;
+    },
+    planHashMatches: () => {
+      qa.replayEvidence.embeddedPlanSha256 = differentPlanHash;
+    },
+    desktopAllSlides: () => {
+      captures.desktop.state.allSlidesReviewed = false;
+    },
+    phoneReadable: () => {
+      captures.phone.state.readable = false;
+    },
+    phoneControlsUsable: () => {
+      captures.phone.state.controlsUsable = false;
+    },
+    exportAllSlides: () => {
+      captures.export.state.allSlidesReviewed = false;
+    },
+    navigationPass: () => {
+      captures.interactions.state.navigationPass = false;
+    },
+    notesPass: () => {
+      captures.interactions.state.notesPass = false;
+    },
+    fullscreenPass: () => {
+      captures.interactions.state.fullscreenPass = false;
+    },
+    consoleClean: () => {
+      captures.console.state.clean = false;
+    },
+    faultIsolated: () => {
+      captures.fault.state.isolated = false;
+    },
+    noExternalWindow: () => {
+      captures.fault.state.externalWindowOpened = true;
+    },
+  };
+  mutations[checkName]();
+  qa.deterministicChecks[checkName] = false;
 }
 
 async function setSmokeCanvasCalls(fixture, canvasCalls) {
@@ -299,10 +389,78 @@ try {
       `${path} must use LF line endings`,
     );
   }
+  const svgAttribute = spawnSync(
+    "git",
+    [
+      "check-attr",
+      "eol",
+      "--",
+      "evals/fde-e2e/fixtures/hill-2-pptx-smoke-attempt-2-v1/artifacts/contact-sheet.svg",
+    ],
+    { cwd: root, encoding: "utf8" },
+  );
+  check(
+    svgAttribute.status === 0 && svgAttribute.stdout.includes("eol: lf"),
+    "replay SVG files must be checked out with LF line endings",
+  );
+  const hill2Run = await readJson(join(smokeFixture, "run.json"));
+  const hill2ContactDescriptor = hill2Run.artifacts.find(
+    (entry) => entry.format === "contact-sheet",
+  );
+  const hill2ContactSha256 = sha256(
+    await readFile(join(smokeFixture, hill2ContactDescriptor.path)),
+  );
+  const hill2QaDescriptor = hill2Run.evidence.find(
+    (entry) => entry.kind === "powerpointQa",
+  );
+  const hill2QaPath = join(smokeFixture, hill2QaDescriptor.path);
+  const hill2Qa = await readJson(hill2QaPath);
+  const hill2HumanDescriptor = hill2Run.evidence.find(
+    (entry) => entry.kind === "humanReview",
+  );
+  const hill2HumanPath = join(smokeFixture, hill2HumanDescriptor.path);
+  const hill2Human = await readJson(hill2HumanPath);
+  check(
+    hill2ContactDescriptor.sha256 === hill2ContactSha256 &&
+      hill2Qa.smokeEvidence.contactSheet.sha256 === hill2ContactSha256 &&
+      hill2Human.contactSheetSha256 === hill2ContactSha256 &&
+      hill2QaDescriptor.sha256 === sha256(await readFile(hill2QaPath)) &&
+      hill2HumanDescriptor.sha256 ===
+        sha256(await readFile(hill2HumanPath)),
+    "normalized Hill 2 SVG, QA, and human-review hashes must remain exact",
+  );
 
   const failed = await evaluateFixture(failureFixtureId);
   const failedCodes = reasonCodes(failed);
+  const expectedHill0FailureCodes = [
+    "artifact_quality.html_visual_qa_failed",
+    "artifact_quality.powerpoint_visual_qa_failed",
+    "efficiency.failedToolCalls_budget_exceeded",
+    "efficiency.failedToolRate_budget_exceeded",
+    "efficiency.inputTokens_budget_exceeded",
+    "efficiency.modelCalls_budget_exceeded",
+    "efficiency.toolCalls_budget_exceeded",
+    "efficiency.wallTimeMs_budget_exceeded",
+    "final_outcome.html_delivery_rejected",
+    "final_outcome.html_deterministic_check_failed",
+    "final_outcome.html_qa_stale",
+    "final_outcome.powerpoint_delivery_rejected",
+    "human_approval.not_approved",
+    "human_approval.stale_artifact_hash",
+    "reliability.critical_trials_incomplete",
+    "safety.external_fault_state_visible",
+    "safety.process_leak",
+    "trace_quality.premature_validator_loop",
+    "trace_quality.repeated_structural_retries",
+    "trace_quality.stale_html_qa_evidence",
+    "trace_quality.wake_resend_loop",
+  ].sort();
   check(failed.status === "failed", "observed fixture must fail");
+  check(
+    JSON.stringify([...failedCodes].sort()) ===
+      JSON.stringify(expectedHill0FailureCodes),
+    "Hill 0 observed failure codes must remain unchanged",
+  );
   check(
     failed.graderVersion === GRADER_VERSION,
     "result must report the current grader version",
@@ -417,6 +575,8 @@ try {
     "final_outcome.html_phone_controls_unusable",
     "final_outcome.html_phone_unreadable",
     "final_outcome.html_qa_stale",
+    "final_outcome.html_delivery_rejected",
+    "human_approval.not_approved",
     "safety.external_fault_state_visible",
     "trace_quality.stale_html_qa_evidence",
   ].sort();
@@ -429,13 +589,19 @@ try {
   const htmlFinalQa = await readJson(
     join(htmlFinalFixture, "evidence", "html-qa.json"),
   );
+  const htmlFinalHumanReview = await readJson(
+    join(htmlFinalFixture, "evidence", "human-review.json"),
+  );
   check(
-    htmlFinalQa.observedFacts.finalSlideCount === 12 &&
+    htmlFinalQa.replayEvidence.finalSlideCount === 12 &&
       htmlFinalQa.deterministicChecks.desktopAllSlides === true &&
+      htmlFinalQa.desktopVisualApproved === true &&
       htmlFinalFailure.axes.artifactQuality.diagnostics.html.visualApproved ===
-        true &&
-      htmlFinalFailure.axes.humanApproval.status === "passed",
-    "desktop visual success and current approval must remain preserved",
+        false &&
+      htmlFinalHumanReview.desktopVisualApproved === true &&
+      htmlFinalHumanReview.decision === "rejected" &&
+      htmlFinalFailure.axes.humanApproval.status === "failed",
+    "desktop visual success must remain separate from overall rejection",
   );
   check(
     htmlFinalFailure.axes.efficiency.status === "passed" &&
@@ -455,12 +621,29 @@ try {
     "clean-html-final",
   );
   const cleanHtmlFinal = await evaluateFixture(cleanHtmlFinalFixture);
+  const cleanHtmlRun = await readJson(
+    join(cleanHtmlFinalFixture, "run.json"),
+  );
+  const cleanHtmlQaDescriptor = cleanHtmlRun.evidence.find(
+    (entry) => entry.kind === "htmlQa",
+  );
+  const cleanHtmlHumanDescriptor = cleanHtmlRun.evidence.find(
+    (entry) => entry.kind === "humanReview",
+  );
+  const cleanHtmlQa = await readJson(
+    join(cleanHtmlFinalFixture, cleanHtmlQaDescriptor.path),
+  );
+  const cleanHtmlHuman = await readJson(
+    join(cleanHtmlFinalFixture, cleanHtmlHumanDescriptor.path),
+  );
   check(
     cleanHtmlFinal.status === "passed" &&
       Object.values(cleanHtmlFinal.axes).every(
         (axis) => axis.status === "passed",
-      ),
-    "clean final HTML control must pass every axis",
+      ) &&
+      cleanHtmlQa.deliveryApproved === true &&
+      cleanHtmlHuman.decision === "approved",
+    "clean final HTML control must restore delivery and human approval",
   );
 
   const htmlFinalCheckCodes = {
@@ -489,7 +672,7 @@ try {
     );
     const qaPath = join(fixture, qaDescriptor.path);
     const qa = await readJson(qaPath);
-    qa.deterministicChecks[checkName] = false;
+    failHtmlFinalCheck(qa, checkName);
     await writeJson(qaPath, qa);
     await updateDescriptorHash(fixture, "evidence", "htmlQa");
     const result = await evaluateFixture(fixture);
@@ -498,6 +681,32 @@ try {
       `${checkName} must emit ${expectedCode}`,
     );
   }
+
+  const contradictoryHtmlFixture = await makeCleanHtmlFinalFixture(
+    "contradictory-html-final-check",
+  );
+  const contradictoryHtmlRun = await readJson(
+    join(contradictoryHtmlFixture, "run.json"),
+  );
+  const contradictoryHtmlQaDescriptor = contradictoryHtmlRun.evidence.find(
+    (entry) => entry.kind === "htmlQa",
+  );
+  const contradictoryHtmlQaPath = join(
+    contradictoryHtmlFixture,
+    contradictoryHtmlQaDescriptor.path,
+  );
+  const contradictoryHtmlQa = await readJson(contradictoryHtmlQaPath);
+  contradictoryHtmlQa.deterministicChecks.consoleClean = false;
+  await writeJson(contradictoryHtmlQaPath, contradictoryHtmlQa);
+  await updateDescriptorHash(
+    contradictoryHtmlFixture,
+    "evidence",
+    "htmlQa",
+  );
+  await expectInputError(
+    () => evaluateFixture(contradictoryHtmlFixture),
+    "HTML check that contradicts hash-bound replay evidence",
+  );
 
   const staleHtmlFinalFixture = await makeCleanHtmlFinalFixture(
     "post-freeze-html-write",
@@ -531,6 +740,40 @@ try {
         "trace_quality.stale_html_qa_evidence",
       ),
     "a post-QA plan write must invalidate final HTML QA evidence",
+  );
+
+  const genericPlanMismatchFixture = await copyPassFixture(
+    "generic-plan-mismatch",
+  );
+  const genericPlanMismatchRun = await readJson(
+    join(genericPlanMismatchFixture, "run.json"),
+  );
+  const genericPlanMismatchQaDescriptor =
+    genericPlanMismatchRun.evidence.find((entry) => entry.kind === "htmlQa");
+  const genericPlanMismatchQaPath = join(
+    genericPlanMismatchFixture,
+    genericPlanMismatchQaDescriptor.path,
+  );
+  const genericPlanMismatchQa = await readJson(genericPlanMismatchQaPath);
+  genericPlanMismatchQa.planSha256 =
+    "2222222222222222222222222222222222222222222222222222222222222222";
+  await writeJson(genericPlanMismatchQaPath, genericPlanMismatchQa);
+  await updateDescriptorHash(
+    genericPlanMismatchFixture,
+    "evidence",
+    "htmlQa",
+  );
+  const genericPlanMismatch = await evaluateFixture(
+    genericPlanMismatchFixture,
+  );
+  check(
+    reasonCodes(genericPlanMismatch).has(
+      "final_outcome.html_plan_mismatch",
+    ) &&
+      !reasonCodes(genericPlanMismatch).has(
+        "trace_quality.stale_html_qa_evidence",
+      ),
+    "plan-hash staleness must not change generic Hill 0 task behavior",
   );
 
   for (const [name, mutate] of [
