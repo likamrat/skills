@@ -40,6 +40,9 @@ Keep the design-token budget small:
 - use at most four color roles per slide and maintain 4.5:1 contrast for body text;
 - keep safe margins between 5 and 7.5 percent of the stage width;
 - keep titles to two lines and any body block to six lines;
+- keep body measures wide enough for phrases rather than one-word-per-line wrapping;
+- reserve saturated brand colors for small accents; prefer soft blue, sage, stone, and warm-neutral surfaces, and do not use pink panel backgrounds unless the user requests them;
+- keep evidence text on dark surfaces at WCAG AA contrast instead of reusing saturated link blue;
 - give each slide one primary visual assertion;
 - split content instead of shrinking text or stacking decorative containers.
 
