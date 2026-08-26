@@ -73,8 +73,10 @@ try {
   check(
     html.includes("grid-template-columns:repeat(5,minmax(0,1fr))") &&
       html.includes(".responsibility-step p{font-size:18px") &&
-      html.includes(".authority{background:#f4efe7;border:0") &&
-      html.includes(".risk--dark{background:#e8eef3"),
+    html.includes(".responsibility-step{min-height:0") &&
+    html.includes(".authority{background:transparent;border:0") &&
+    html.includes(".risk{background:#f5f7f8;min-height:0") &&
+    html.includes(".risk--dark{background:#e8f0ea"),
     "HTML responsibility and risk surfaces must use readable measures and soft neutral colors",
   );
   check(
