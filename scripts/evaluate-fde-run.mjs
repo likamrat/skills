@@ -728,7 +728,27 @@ function validateSmokeEvidence({
   };
 }
 
-function validateHtmlFinalEvidence({ qa, artifact, currentPlanHash }) {
+function validateHtmlFinalEvidence({
+  qa,
+  artifact,
+  planArtifact,
+  currentPlanHash,
+}) {
+  const plan = parseArtifactJson(
+    planArtifact,
+    "Final HTML replay plan artifact",
+  );
+  const planSlides = requireArray(
+    plan.slides,
+    "Final HTML replay plan artifact.slides",
+  );
+  if (planSlides.length === 0) {
+    throw new Error("Final HTML replay plan must contain at least one slide");
+  }
+  for (const [index, slide] of planSlides.entries()) {
+    requireObject(slide, `Final HTML replay plan artifact.slides[${index}]`);
+  }
+
   const replay = requireObject(
     qa.replayEvidence,
     "htmlQa.replayEvidence",
@@ -754,12 +774,15 @@ function validateHtmlFinalEvidence({ qa, artifact, currentPlanHash }) {
       "htmlQa.replayEvidence final plan and HTML hashes must be lowercase SHA-256 values",
     );
   }
-  const finalSlideCount = requireNonNegativeNumber(
+  const declaredFinalSlideCount = requireNonNegativeNumber(
     replay.finalSlideCount,
     "htmlQa.replayEvidence.finalSlideCount",
   );
-  if (finalSlideCount === 0) {
-    throw new Error("htmlQa.replayEvidence.finalSlideCount must be positive");
+  const finalSlideCount = planSlides.length;
+  if (declaredFinalSlideCount !== finalSlideCount) {
+    throw new Error(
+      "htmlQa.replayEvidence.finalSlideCount must match the frozen plan slide count",
+    );
   }
 
   const captures = requireObject(
@@ -919,20 +942,26 @@ function validateHtmlFinalEvidence({ qa, artifact, currentPlanHash }) {
     );
   }
 
+  const replayCaptures = [
+    desktop,
+    phone,
+    exportCapture,
+    interactions,
+    consoleCapture,
+    fault,
+  ];
+  const staleCaptureIds = replayCaptures
+    .filter((capture) => !isFinalCapture(capture))
+    .map((capture) => capture.captureId);
+
   return {
     finalPlanSha256,
     finalHtmlSha256,
     embeddedPlanSha256,
     finalSlideCount,
+    staleCaptureIds,
     captures: Object.fromEntries(
-      [
-        desktop,
-        phone,
-        exportCapture,
-        interactions,
-        consoleCapture,
-        fault,
-      ].map((capture) => [
+      replayCaptures.map((capture) => [
         capture.captureId,
         {
           finalHashBound: isFinalCapture(capture),
@@ -1303,6 +1332,7 @@ export async function evaluateFixture(
       htmlFinalDiagnostics = validateHtmlFinalEvidence({
         qa,
         artifact,
+        planArtifact: plan,
         currentPlanHash,
       });
     }
@@ -1432,12 +1462,17 @@ export async function evaluateFixture(
   const staleQaFormats = task.requestedFormats.filter((format) => {
     const artifact = artifactForFormat(artifacts, format);
     const qa = qaByFormat.get(format);
+    const staleHtmlFinalCapture =
+      taskClass === "readout-html-final" &&
+      format === "html" &&
+      htmlFinalDiagnostics?.staleCaptureIds.length > 0;
     return (
       artifact &&
       (qa?.artifactSha256 !== artifact.actualSha256 ||
         (taskClass === "readout-html-final" &&
           format === "html" &&
-          qa?.planSha256 !== currentPlanHash))
+          qa?.planSha256 !== currentPlanHash) ||
+        staleHtmlFinalCapture)
     );
   });
   const retryGroups = requireArray(

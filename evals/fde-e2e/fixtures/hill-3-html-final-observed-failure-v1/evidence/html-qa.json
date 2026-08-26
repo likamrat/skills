@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "artifactId": "html",
   "artifactSha256": "1111111111111111111111111111111111111111111111111111111111111111",
-  "planSha256": "2eebf0f2bfb914ec634a44d2d054db4e0ed0fa24889c3cf4e84eef287e9af0cb",
+  "planSha256": "f634c740b8a11059a6f76428e55685db32b3f7db68812936c9ac5794314659bd",
   "deliveryApproved": false,
   "visualApproved": false,
   "desktopVisualApproved": true,
@@ -21,14 +21,14 @@
     "noExternalWindow": false
   },
   "replayEvidence": {
-    "finalPlanSha256": "2eebf0f2bfb914ec634a44d2d054db4e0ed0fa24889c3cf4e84eef287e9af0cb",
+    "finalPlanSha256": "f634c740b8a11059a6f76428e55685db32b3f7db68812936c9ac5794314659bd",
     "finalHtmlSha256": "9d204825305472cfa77b5dedabd6c0ac38f87c91c37cdf9c043a3a62d06e5700",
-    "embeddedPlanSha256": "2eebf0f2bfb914ec634a44d2d054db4e0ed0fa24889c3cf4e84eef287e9af0cb",
+    "embeddedPlanSha256": "f634c740b8a11059a6f76428e55685db32b3f7db68812936c9ac5794314659bd",
     "finalSlideCount": 12,
     "captures": {
       "desktop": {
         "captureId": "desktop-final",
-        "capturedPlanSha256": "2eebf0f2bfb914ec634a44d2d054db4e0ed0fa24889c3cf4e84eef287e9af0cb",
+        "capturedPlanSha256": "f634c740b8a11059a6f76428e55685db32b3f7db68812936c9ac5794314659bd",
         "capturedHtmlSha256": "9d204825305472cfa77b5dedabd6c0ac38f87c91c37cdf9c043a3a62d06e5700",
         "reviewedSlideCount": 12,
         "state": {
@@ -38,7 +38,7 @@
       },
       "phone": {
         "captureId": "phone-earlier-state",
-        "capturedPlanSha256": "2eebf0f2bfb914ec634a44d2d054db4e0ed0fa24889c3cf4e84eef287e9af0cb",
+        "capturedPlanSha256": "f634c740b8a11059a6f76428e55685db32b3f7db68812936c9ac5794314659bd",
         "capturedHtmlSha256": "1111111111111111111111111111111111111111111111111111111111111111",
         "reviewedSlideCount": 12,
         "state": {
@@ -48,7 +48,7 @@
       },
       "export": {
         "captureId": "export-incomplete",
-        "capturedPlanSha256": "2eebf0f2bfb914ec634a44d2d054db4e0ed0fa24889c3cf4e84eef287e9af0cb",
+        "capturedPlanSha256": "f634c740b8a11059a6f76428e55685db32b3f7db68812936c9ac5794314659bd",
         "capturedHtmlSha256": "9d204825305472cfa77b5dedabd6c0ac38f87c91c37cdf9c043a3a62d06e5700",
         "reviewedSlideCount": null,
         "state": {
@@ -57,7 +57,7 @@
       },
       "interactions": {
         "captureId": "interactions-final",
-        "capturedPlanSha256": "2eebf0f2bfb914ec634a44d2d054db4e0ed0fa24889c3cf4e84eef287e9af0cb",
+        "capturedPlanSha256": "f634c740b8a11059a6f76428e55685db32b3f7db68812936c9ac5794314659bd",
         "capturedHtmlSha256": "9d204825305472cfa77b5dedabd6c0ac38f87c91c37cdf9c043a3a62d06e5700",
         "state": {
           "navigationPass": true,
@@ -67,7 +67,7 @@
       },
       "console": {
         "captureId": "console-final",
-        "capturedPlanSha256": "2eebf0f2bfb914ec634a44d2d054db4e0ed0fa24889c3cf4e84eef287e9af0cb",
+        "capturedPlanSha256": "f634c740b8a11059a6f76428e55685db32b3f7db68812936c9ac5794314659bd",
         "capturedHtmlSha256": "9d204825305472cfa77b5dedabd6c0ac38f87c91c37cdf9c043a3a62d06e5700",
         "state": {
           "clean": false
@@ -75,7 +75,7 @@
       },
       "fault": {
         "captureId": "fault-external-window",
-        "capturedPlanSha256": "2eebf0f2bfb914ec634a44d2d054db4e0ed0fa24889c3cf4e84eef287e9af0cb",
+        "capturedPlanSha256": "f634c740b8a11059a6f76428e55685db32b3f7db68812936c9ac5794314659bd",
         "capturedHtmlSha256": "9d204825305472cfa77b5dedabd6c0ac38f87c91c37cdf9c043a3a62d06e5700",
         "state": {
           "isolated": false,

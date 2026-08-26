@@ -708,6 +708,67 @@ try {
     "HTML check that contradicts hash-bound replay evidence",
   );
 
+  const mismatchedSlideCountFixture = await makeCleanHtmlFinalFixture(
+    "mismatched-html-slide-count",
+  );
+  const mismatchedSlideCountRun = await readJson(
+    join(mismatchedSlideCountFixture, "run.json"),
+  );
+  const mismatchedSlideCountQaDescriptor =
+    mismatchedSlideCountRun.evidence.find((entry) => entry.kind === "htmlQa");
+  const mismatchedSlideCountQaPath = join(
+    mismatchedSlideCountFixture,
+    mismatchedSlideCountQaDescriptor.path,
+  );
+  const mismatchedSlideCountQa = await readJson(
+    mismatchedSlideCountQaPath,
+  );
+  mismatchedSlideCountQa.replayEvidence.finalSlideCount = 1;
+  for (const name of ["desktop", "phone", "export"]) {
+    mismatchedSlideCountQa.replayEvidence.captures[
+      name
+    ].reviewedSlideCount = 1;
+  }
+  await writeJson(mismatchedSlideCountQaPath, mismatchedSlideCountQa);
+  await updateDescriptorHash(
+    mismatchedSlideCountFixture,
+    "evidence",
+    "htmlQa",
+  );
+  await expectInputError(
+    () => evaluateFixture(mismatchedSlideCountFixture),
+    "HTML evidence claiming one slide against a twelve-slide frozen plan",
+  );
+
+  const staleCaptureFixture = await makeCleanHtmlFinalFixture(
+    "stale-html-capture",
+  );
+  const staleCaptureRun = await readJson(
+    join(staleCaptureFixture, "run.json"),
+  );
+  const staleCaptureQaDescriptor = staleCaptureRun.evidence.find(
+    (entry) => entry.kind === "htmlQa",
+  );
+  const staleCaptureQaPath = join(
+    staleCaptureFixture,
+    staleCaptureQaDescriptor.path,
+  );
+  const staleCaptureQa = await readJson(staleCaptureQaPath);
+  staleCaptureQa.replayEvidence.captures.console.capturedHtmlSha256 =
+    "1111111111111111111111111111111111111111111111111111111111111111";
+  staleCaptureQa.deterministicChecks.consoleClean = false;
+  await writeJson(staleCaptureQaPath, staleCaptureQa);
+  await updateDescriptorHash(staleCaptureFixture, "evidence", "htmlQa");
+  const staleCapture = await evaluateFixture(staleCaptureFixture);
+  check(
+    reasonCodes(staleCapture).has("final_outcome.html_console_not_clean") &&
+      reasonCodes(staleCapture).has(
+        "trace_quality.stale_html_qa_evidence",
+      ) &&
+      !reasonCodes(staleCapture).has("final_outcome.html_qa_stale"),
+    "one stale capture must fail its check and trace quality with current top-level QA hashes",
+  );
+
   const staleHtmlFinalFixture = await makeCleanHtmlFinalFixture(
     "post-freeze-html-write",
   );
