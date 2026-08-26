@@ -64,6 +64,13 @@ try {
     "HTML must render exact workflow connectors",
   );
   check(
+    html.includes('markerWidth="8"') &&
+      html.includes('d="M1,1 L7,4 L1,7"') &&
+      html.includes("stroke-width:2;opacity:.72") &&
+      html.includes(".flow-arrow:before"),
+    "HTML workflow connectors must use restrained open arrowheads and thin rails",
+  );
+  check(
     html.includes("__fdeReadoutQa"),
     "HTML must expose a rendered-geometry QA preflight",
   );
