@@ -47,6 +47,7 @@ Keep the design-token budget small:
 - present single-sentence guardrails as compact ruled notes instead of full-width filled panels;
 - compose related facts into one integrated matrix, rail, or open row before reaching for repeated detached cards;
 - use one restrained signature accent per slide, such as a thin blue-to-violet rail, rather than making every container compete;
+- establish one original abstract motif for the opening and repeat only a small fragment elsewhere; do not imitate another brand's logo, illustration, or product constellation;
 - give each slide one primary visual assertion;
 - split content instead of shrinking text or stacking decorative containers.
 

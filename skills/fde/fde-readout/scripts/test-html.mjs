@@ -82,7 +82,10 @@ try {
   check(
     html.includes("linear-gradient(90deg,#2563eb,#6d5bd0)") &&
     html.includes("box-shadow:0 14px 34px #1f334814") &&
-    html.includes(".responsibility-step:last-child{border-right:0}"),
+    html.includes(".responsibility-step:last-child{border-right:0}") &&
+    html.includes(".decision-grid{border:1px solid #d8e0e7") &&
+    html.includes(".evidence-groups{border:1px solid #d8e0e7") &&
+    html.includes("radial-gradient(circle at 104% 31%"),
     "HTML must compose related content into integrated editorial panels",
   );
   check(
