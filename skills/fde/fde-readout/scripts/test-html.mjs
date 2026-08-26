@@ -68,6 +68,18 @@ try {
     "HTML must expose a rendered-geometry QA preflight",
   );
   check(
+    html.includes("innerWidth<=760") &&
+      html.includes("min-height:44px") &&
+      html.includes("grid-template-columns:repeat(4,1fr)"),
+    "HTML must reflow on phones with usable controls and four-up desktop metrics",
+  );
+  check(
+    html.includes('faultMode=params.get("fault")') &&
+      html.includes("Injected initialization fault.") &&
+      html.includes("ReadoutPlan and rendered slide counts do not match."),
+    "HTML must validate initialization and expose an isolated fault state",
+  );
+  check(
     html.includes("{J:judgment-rationale-001}") &&
       html.includes("Human context: judgment-rationale-001"),
     "HTML must preserve visible and speaker-note human-context provenance",
