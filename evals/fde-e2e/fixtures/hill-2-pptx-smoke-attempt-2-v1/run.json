@@ -31,10 +31,10 @@
     "wallTimeMs": 337328,
     "modelCalls": 37,
     "inputTokens": 3735253,
-    "outputTokens": 0,
-    "nanoAiUnits": 0,
-    "aiUnits": 0,
-    "toolCalls": 11,
+    "outputTokens": 21131,
+    "nanoAiUnits": 128454630000,
+    "aiUnits": 128.45463,
+    "toolCalls": 64,
     "canvasCalls": 8,
     "failedToolCalls": 0
   },
@@ -69,7 +69,7 @@
       "id": "powerpoint-qa",
       "kind": "powerpointQa",
       "path": "evidence/powerpoint-qa.json",
-      "sha256": "0fc2cd51c25bd049a007637f9c1b72fdb2d3bf50687e33ac133a7234e9804084"
+      "sha256": "b3828375f54237ae9d0cf52f16bd8eb5c81f41a12f414409e2976ba40e3a55d4"
     },
     {
       "id": "human-review",
@@ -89,13 +89,13 @@
       "id": "trace",
       "kind": "trace",
       "path": "trace.json",
-      "sha256": "831cb8c07b367194a34074a0a30f7d416456d034a20b4be0670b7affdea0ba68"
+      "sha256": "8f99cac6cf36fb3f0317ec0cf5739c15d528ab14c4300a57d1e193154249b475"
     },
     {
       "id": "reliability",
       "kind": "reliability",
       "path": "reliability.json",
-      "sha256": "fdda9a70b3f2d5b64838b21745cb692109359b1cfee3084559c6c0b879d24e9e"
+      "sha256": "ffdca1dc8b68a3f40fd222683acea9077bbeb80739b60f16477be4124b77db20"
     }
   ],
   "agentClaim": {

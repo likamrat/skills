@@ -87,7 +87,7 @@
       "getModelFailures": 0,
       "actionCount": 49,
       "failures": 0,
-      "otherToolCalls": 0,
+      "otherToolCalls": 56,
       "otherToolFailures": 0
     },
     "nativeTable": {

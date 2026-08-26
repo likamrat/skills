@@ -175,9 +175,7 @@ async function setSmokeCanvasCalls(fixture, canvasCalls) {
   const qa = await readJson(qaPath);
   qa.smokeEvidence.canvas.invokeCalls = canvasCalls;
   run.metrics.toolCalls =
-    canvasCalls +
-    qa.smokeEvidence.canvas.getModelCalls +
-    qa.smokeEvidence.canvas.otherToolCalls;
+    canvasCalls + qa.smokeEvidence.canvas.otherToolCalls;
   await writeJson(qaPath, qa);
   qaDescriptor.sha256 = sha256(await readFile(qaPath));
 
@@ -388,17 +386,29 @@ try {
     smokeFailure.metrics.wallTimeMs === 337328 &&
       smokeFailure.metrics.modelCalls === 37 &&
       smokeFailure.metrics.inputTokens === 3735253 &&
+      smokeFailure.metrics.outputTokens === 21131 &&
+      smokeFailure.metrics.nanoAiUnits === 128454630000 &&
+      smokeFailure.metrics.aiUnits === 128.45463 &&
+      smokeFailure.metrics.toolCalls === 64 &&
       smokeFailure.metrics.canvasCalls === 8 &&
       smokeFailure.operationalDiagnostics.canvasCalls === 8,
-    "attempt-2 smoke fixture must preserve elapsed, model, token, and canvas usage",
+    "attempt-2 smoke fixture must preserve measured elapsed, model, token, AI-unit, tool, and canvas usage",
   );
   check(
     smokeFailure.axes.finalOutcome.diagnostics.smoke.packageInventory
       .packageSlidePartCount === 12 &&
       smokeFailure.axes.finalOutcome.diagnostics.smoke.packageInventory
         .packageNotesPartCount === 11 &&
-      smokeFailure.axes.finalOutcome.diagnostics.smoke.canvas.actionCount === 49,
-    "attempt-2 smoke fixture must preserve package and canvas-action evidence",
+      smokeFailure.axes.finalOutcome.diagnostics.smoke.canvas.actionCount === 49 &&
+      smokeFailure.axes.finalOutcome.diagnostics.smoke.canvas.invokeCalls === 8 &&
+      smokeFailure.axes.finalOutcome.diagnostics.smoke.canvas.getModelCalls === 3 &&
+      smokeFailure.axes.finalOutcome.diagnostics.smoke.canvas.otherToolCalls === 56,
+    "attempt-2 smoke fixture must preserve package and non-overlapping tool-call evidence",
+  );
+  check(
+    smokeFailure.axes.reliability.diagnostics.requiredTrialIds.join(",") ===
+      "hill-2-attempt-2",
+    "smoke replay must represent one frozen Hill 2 experiment",
   );
   const smokeSnapshot = await readJson(
     join(smokeFixture, "artifacts", "powerpoint-snapshot.json"),
@@ -659,36 +669,25 @@ try {
     "contact-sheet descriptor that aliases the candidate path",
   );
 
-  const extraFalseCheckFixture = await makeCleanSmokeFixture(
-    "extra-false-smoke-check",
-  );
-  const extraFalseCheckRun = await readJson(
-    join(extraFalseCheckFixture, "run.json"),
-  );
-  const extraFalseCheckQaDescriptor = extraFalseCheckRun.evidence.find(
-    (entry) => entry.kind === "powerpointQa",
-  );
-  const extraFalseCheckQaPath = join(
-    extraFalseCheckFixture,
-    extraFalseCheckQaDescriptor.path,
-  );
-  const extraFalseCheckQa = await readJson(extraFalseCheckQaPath);
-  extraFalseCheckQa.deterministicChecks.extraSmokeCheck = false;
-  await writeJson(extraFalseCheckQaPath, extraFalseCheckQa);
-  await updateDescriptorHash(
-    extraFalseCheckFixture,
-    "evidence",
-    "powerpointQa",
-  );
-  const extraFalseCheckResult = await evaluateFixture(
-    extraFalseCheckFixture,
-  );
-  check(
-    reasonCodes(extraFalseCheckResult).has(
-      "final_outcome.powerpoint_extraSmokeCheck_failed",
-    ),
-    "an additional false deterministic smoke check must fail the outcome gate",
-  );
+  for (const [name, value] of [
+    ["extra-true-smoke-check", true],
+    ["extra-false-smoke-check", false],
+  ]) {
+    const fixture = await makeCleanSmokeFixture(name);
+    const run = await readJson(join(fixture, "run.json"));
+    const qaDescriptor = run.evidence.find(
+      (entry) => entry.kind === "powerpointQa",
+    );
+    const qaPath = join(fixture, qaDescriptor.path);
+    const qa = await readJson(qaPath);
+    qa.deterministicChecks.fixtureDefinedCheck = value;
+    await writeJson(qaPath, qa);
+    await updateDescriptorHash(fixture, "evidence", "powerpointQa");
+    await expectInputError(
+      () => evaluateFixture(fixture),
+      `${name} not owned by trusted policy`,
+    );
+  }
 
   const staleSmokeCandidateFixture = await makeCleanSmokeFixture(
     "stale-smoke-candidate",
@@ -742,6 +741,7 @@ try {
   const impossibleToolCategoryRun = await readJson(
     impossibleToolCategoryRunPath,
   );
+  impossibleToolCategoryRun.metrics.toolCalls = 8;
   impossibleToolCategoryRun.metrics.failedToolCalls = 1;
   const impossibleToolQaDescriptor =
     impossibleToolCategoryRun.evidence.find(
@@ -752,6 +752,7 @@ try {
     impossibleToolQaDescriptor.path,
   );
   const impossibleToolQa = await readJson(impossibleToolQaPath);
+  impossibleToolQa.smokeEvidence.canvas.otherToolCalls = 0;
   impossibleToolQa.smokeEvidence.canvas.otherToolFailures = 1;
   await writeJson(impossibleToolQaPath, impossibleToolQa);
   impossibleToolQaDescriptor.sha256 = sha256(
@@ -766,7 +767,9 @@ try {
     impossibleToolTraceDescriptor.path,
   );
   const impossibleToolTrace = await readJson(impossibleToolTracePath);
+  impossibleToolTrace.toolCallsCaptured = 8;
   impossibleToolTrace.failedToolCallsCaptured = 1;
+  impossibleToolTrace.otherToolCallsCaptured = 0;
   impossibleToolTrace.otherToolFailuresCaptured = 1;
   await writeJson(impossibleToolTracePath, impossibleToolTrace);
   impossibleToolTraceDescriptor.sha256 = sha256(

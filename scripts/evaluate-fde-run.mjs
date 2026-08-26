@@ -619,12 +619,13 @@ function validateSmokeEvidence({
     trace.getModelFailuresCaptured !== canvas.getModelFailures ||
     trace.otherToolCallsCaptured !== canvas.otherToolCalls ||
     trace.otherToolFailuresCaptured !== canvas.otherToolFailures ||
-    canvas.invokeCalls + canvas.getModelCalls + canvas.otherToolCalls !==
-      metrics.toolCalls ||
-    canvas.failures + canvas.getModelFailures + canvas.otherToolFailures !==
+    canvas.invokeCalls + canvas.otherToolCalls !== metrics.toolCalls ||
+    canvas.failures + canvas.otherToolFailures !==
       metrics.failedToolCalls ||
     canvas.failures > canvas.invokeCalls ||
+    canvas.getModelCalls > canvas.invokeCalls ||
     canvas.getModelFailures > canvas.getModelCalls ||
+    canvas.getModelFailures > canvas.failures ||
     canvas.otherToolFailures > canvas.otherToolCalls ||
     !snapshotMatchesSlides ||
     !snapshotMatchesInventory ||
@@ -1012,9 +1013,17 @@ export async function evaluateFixture(
     const missingChecks = formatRequiredChecks.filter(
       (check) => !Object.hasOwn(deterministicChecks, check),
     );
+    const unknownChecks = Object.keys(deterministicChecks).filter(
+      (check) => !formatRequiredChecks.includes(check),
+    );
     if (missingChecks.length > 0) {
       throw new Error(
         `${format}Qa.deterministicChecks is missing required checks: ${missingChecks.join(", ")}`,
+      );
+    }
+    if (unknownChecks.length > 0) {
+      throw new Error(
+        `${format}Qa.deterministicChecks contains checks not owned by trusted policy: ${unknownChecks.join(", ")}`,
       );
     }
     if (
@@ -1094,7 +1103,7 @@ export async function evaluateFixture(
           denseContentReadable:
             "final_outcome.powerpoint_dense_content_unreadable",
         };
-        for (const check of Object.keys(deterministicChecks).filter(
+        for (const check of formatRequiredChecks.filter(
           (checkName) => deterministicChecks[checkName] !== true,
         )) {
           addFailure(

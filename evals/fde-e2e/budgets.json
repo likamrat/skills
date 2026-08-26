@@ -67,9 +67,7 @@
         },
         "reliability": {
           "requiredTrialIds": [
-            "native-authoring",
-            "contact-sheet-render",
-            "native-package-inspection"
+            "hill-2-attempt-2"
           ]
         }
     }

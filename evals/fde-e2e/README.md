@@ -53,7 +53,7 @@ Each fixture contains:
 - `evidence/`: HTML QA, PowerPoint QA, and human review;
 - `final-state.json`: boundary, process cleanup, and visible fault state;
 - `trace.json`: captured call counts, loops, retries, and structural validation attempts;
-- `reliability.json`: required critical trials and their outcomes.
+- `reliability.json`: trusted experiment or reliability trial IDs and their outcomes.
 
 The evaluator requires the frozen plan file to exist and match its declared hash before evaluating any format binding. It recomputes every artifact hash. QA and human review must point to the recomputed final hashes. Agent claims are retained in output as `agentClaimIgnored` and never affect a gate.
 
@@ -61,7 +61,7 @@ The evaluator requires the frozen plan file to exist and match its declared hash
 
 The PowerPoint file in each committed fixture is a synthetic structural snapshot, not a customer deck. Structural snapshots are replay evidence only; Hill 0 never certifies a live artifact. The failure fixture preserves only the slide and shape evidence needed to reproduce the visual hard gate. No raw transcript, customer source, screenshot, or generated presentation package is committed.
 
-Trusted task-class policy in `budgets.json` defines required formats, deterministic checks, reliability trials, and hard limits. A fixture cannot weaken those requirements. Missing, extra, or duplicate requested formats, duplicate artifact formats, duplicate trial IDs, and missing required QA checks are invalid evaluator input. Requested format order does not matter.
+Trusted task-class policy in `budgets.json` defines required formats, the exact deterministic check set, experiment or reliability trial IDs, and hard limits. A fixture cannot weaken or extend those requirements. Missing or unknown QA checks, missing, extra, or duplicate requested formats, duplicate artifact formats, and duplicate trial IDs are invalid evaluator input. Requested format order does not matter.
 
 ## Frozen fixtures
 
@@ -112,6 +112,10 @@ The evaluator calculates `failedToolRate` as failed tool calls divided by total 
 | Failed tool rate | 2% |
 
 The replay binds the plan, structural candidate, sanitized contact sheet, active slide IDs, shape/table counts, notes relationships and evidence IDs, active/package part inventory, canvas usage, elapsed time, model usage, and human decision. It contains no PPTX, package bytes, or raw session trace. Package inspection remains owned by the native Office canvas; the evaluator does not parse ZIP, XML, or OPC.
+
+The fixture records one frozen experiment, `hill-2-attempt-2`. Native authoring, contact-sheet rendering, and package inspection are stages within that experiment, not independent reliability trials. Repeated-run reliability is not established here and remains Hill 5 work.
+
+Attempt 2 recorded 64 total tool calls: 8 PowerPoint canvas invokes, including 3 `get_model` inspections, plus 56 other tool calls. The `getModelCalls` value is a subset diagnostic and is not added to the total again. Total tool calls remain diagnostic for this task class because no total-tool ceiling was pre-registered.
 
 ## Machine-readable result
 
