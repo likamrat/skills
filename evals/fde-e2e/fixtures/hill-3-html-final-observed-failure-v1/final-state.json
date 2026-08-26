@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "boundaryViolations": [],
+  "processes": [
+    {
+      "id": "html-server",
+      "kind": "node-server",
+      "cleanupStatus": "completed"
+    }
+  ],
+  "visibleExternalFaults": [
+    {
+      "surface": "external-browser-window",
+      "state": "raw-onclick-error-visible"
+    }
+  ]
+}

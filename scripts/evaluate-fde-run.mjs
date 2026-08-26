@@ -10,7 +10,7 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const GRADER_VERSION = "hill-0-evaluator/1.2.0";
+export const GRADER_VERSION = "hill-0-evaluator/1.3.0";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const defaultFixturesRoot = resolve(root, "evals", "fde-e2e", "fixtures");
@@ -24,6 +24,20 @@ const axisNames = [
   "reliability",
   "humanApproval",
 ];
+const htmlFinalFailureCodes = {
+  opens: "final_outcome.html_open_failed",
+  planHashMatches: "final_outcome.html_plan_hash_check_failed",
+  desktopAllSlides: "final_outcome.html_desktop_slides_incomplete",
+  phoneReadable: "final_outcome.html_phone_unreadable",
+  phoneControlsUsable: "final_outcome.html_phone_controls_unusable",
+  exportAllSlides: "final_outcome.html_export_slides_incomplete",
+  navigationPass: "final_outcome.html_navigation_failed",
+  notesPass: "final_outcome.html_notes_failed",
+  fullscreenPass: "final_outcome.html_fullscreen_failed",
+  consoleClean: "final_outcome.html_console_not_clean",
+  faultIsolated: "final_outcome.html_fault_not_isolated",
+  noExternalWindow: "final_outcome.html_external_window_opened",
+};
 
 function hash(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
@@ -1114,6 +1128,18 @@ export async function evaluateFixture(
             `Required PowerPoint smoke check ${check} failed`,
           );
         }
+      } else if (taskClass === "readout-html-final" && format === "html") {
+        for (const check of formatRequiredChecks.filter(
+          (checkName) => deterministicChecks[checkName] !== true,
+        )) {
+          addFailure(
+            axes,
+            "finalOutcome",
+            htmlFinalFailureCodes[check] ??
+              `final_outcome.html_${check}_failed`,
+            `Required final HTML check ${check} failed`,
+          );
+        }
       } else {
         addFailure(
           axes,
@@ -1172,7 +1198,12 @@ export async function evaluateFixture(
 
   const staleQaFormats = task.requestedFormats.filter((format) => {
     const artifact = artifactForFormat(artifacts, format);
-    return artifact && qaByFormat.get(format)?.artifactSha256 !== artifact.actualSha256;
+    const qa = qaByFormat.get(format);
+    return (
+      artifact &&
+      (qa?.artifactSha256 !== artifact.actualSha256 ||
+        qa?.planSha256 !== currentPlanHash)
+    );
   });
   const retryGroups = requireArray(
     trace.structuralRetryGroups,

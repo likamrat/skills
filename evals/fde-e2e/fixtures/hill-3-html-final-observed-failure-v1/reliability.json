@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "trials": [
+    {
+      "id": "hill-3-preserved-run",
+      "passed": true
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "hill-3-html-final-observed-failure-v1",
+  "evaluationMode": "frozen-replay",
+  "task": {
+    "id": "fde-readout-html-final",
+    "class": "readout-html-final",
+    "requestedFormats": [
+      "html"
+    ]
+  },
+  "versions": {
+    "model": "gpt-5.6-sol",
+    "skills": {
+      "fde-readout": "main-observed-2026-08-25"
+    },
+    "tools": {
+      "copilotCli": "sanitized-replay",
+      "playwright": "observed-run"
+    },
+    "browser": "external-chrome-observed-run",
+    "office": "not-used",
+    "fonts": [
+      "Aptos"
+    ],
+    "viewports": {
+      "desktop": "1600x900",
+      "phone": "390x844",
+      "export": "all-slides"
+    }
+  },
+  "metrics": {
+    "wallTimeMs": 2853000,
+    "modelCalls": 193,
+    "inputTokens": 29645256,
+    "outputTokens": 131740,
+    "nanoAiUnits": 815191200000,
+    "aiUnits": 815.1912,
+    "toolCalls": 220,
+    "failedToolCalls": 8
+  },
+  "artifacts": [
+    {
+      "id": "plan",
+      "format": "plan",
+      "path": "artifacts/readout-plan.json",
+      "sha256": "2eebf0f2bfb914ec634a44d2d054db4e0ed0fa24889c3cf4e84eef287e9af0cb",
+      "required": true
+    },
+    {
+      "id": "html",
+      "format": "html",
+      "path": "artifacts/readout.html",
+      "sha256": "9d204825305472cfa77b5dedabd6c0ac38f87c91c37cdf9c043a3a62d06e5700",
+      "sourcePlanSha256": "2eebf0f2bfb914ec634a44d2d054db4e0ed0fa24889c3cf4e84eef287e9af0cb",
+      "representation": "synthetic-byte-surrogate",
+      "required": true
+    }
+  ],
+  "evidence": [
+    {
+      "id": "html-qa",
+      "kind": "htmlQa",
+      "path": "evidence/html-qa.json",
+      "sha256": "7877bdd394c25a0b749e1ae147eecf565c9220990538185a2c2b26b7266619ce"
+    },
+    {
+      "id": "human-review",
+      "kind": "humanReview",
+      "path": "evidence/human-review.json",
+      "sha256": "03698cbe73d326ed01af84d0d472261d258476e1264d57c0a5c0a375530f3946"
+    }
+  ],
+  "records": [
+    {
+      "id": "final-state",
+      "kind": "finalState",
+      "path": "final-state.json",
+      "sha256": "404d8cd04714bd0e6f7bb199a5f8a46ad8a50c1aa30fd481a9bdfdc7bba48c34"
+    },
+    {
+      "id": "trace",
+      "kind": "trace",
+      "path": "trace.json",
+      "sha256": "d868d056d9146b5fd9e01931379f4ba5e6f0cbdebb1e3c247cc709f765eab79a"
+    },
+    {
+      "id": "reliability",
+      "kind": "reliability",
+      "path": "reliability.json",
+      "sha256": "55fac48ac0b1f2e7bfbd2dd973ad7d796ed1bc4873242bbdbbbeba0b4ce46aa9"
+    }
+  ],
+  "agentClaim": {
+    "status": "passed",
+    "message": "The final desktop contact sheet shows all 12 slides are visually usable."
+  }
+}

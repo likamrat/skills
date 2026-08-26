@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "complete": true,
+  "modelCallsCaptured": 193,
+  "toolCallsCaptured": 220,
+  "failedToolCallsCaptured": 8,
+  "wakeOnlyCoordinatorTurns": 0,
+  "prematureValidationAttempts": 0,
+  "structuralRetryGroups": []
+}

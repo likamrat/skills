@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "required": true,
+  "reviewer": "independent-desktop-review",
+  "decision": "approved",
+  "artifactHashes": {
+    "html": "9d204825305472cfa77b5dedabd6c0ac38f87c91c37cdf9c043a3a62d06e5700"
+  },
+  "reasons": [
+    "All 12 final desktop slides were visually usable.",
+    "Desktop approval does not waive other delivery gates."
+  ]
+}

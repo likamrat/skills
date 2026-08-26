@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "html",
+  "artifactSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "planSha256": "2eebf0f2bfb914ec634a44d2d054db4e0ed0fa24889c3cf4e84eef287e9af0cb",
+  "deliveryApproved": true,
+  "visualApproved": true,
+  "deterministicChecks": {
+    "opens": true,
+    "planHashMatches": true,
+    "desktopAllSlides": true,
+    "phoneReadable": false,
+    "phoneControlsUsable": false,
+    "exportAllSlides": false,
+    "navigationPass": true,
+    "notesPass": true,
+    "fullscreenPass": true,
+    "consoleClean": false,
+    "faultIsolated": false,
+    "noExternalWindow": false
+  },
+  "observedFacts": {
+    "finalSlideCount": 12,
+    "desktopFinalContactSheetAllSlidesUsable": true,
+    "synchronizedFinalEvidenceSet": false
+  },
+  "severeDefects": [
+    "phone-content-unreadable",
+    "phone-controls-clipped"
+  ]
+}
