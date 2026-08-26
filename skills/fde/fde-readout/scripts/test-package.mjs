@@ -97,6 +97,7 @@ const textExtensions = new Set([
   ".json",
   ".md",
   ".mjs",
+  ".ps1",
   ".txt",
   ".yaml",
   ".yml",
@@ -189,6 +190,10 @@ const requiredAssets = [
     join(skillRoot, "assets", "examples", "lattice-harbor-readout.png"),
     "example montage",
   ],
+  [
+    join(skillRoot, "scripts", "create-powerpoint-skeleton.ps1"),
+    "native PowerPoint skeleton helper",
+  ],
 ];
 for (const [path, label] of requiredAssets) {
   try {
@@ -248,6 +253,30 @@ try {
   );
 } catch (error) {
   failures.push(`PowerPoint seed contract could not be verified: ${error.message}`);
+}
+
+try {
+  const skeletonHelper = await readFile(
+    join(skillRoot, "scripts", "create-powerpoint-skeleton.ps1"),
+    "utf8",
+  );
+  check(
+    skeletonHelper.includes("$PlanSlide.notes") &&
+      skeletonHelper.includes("$PlanSlide.evidenceIds") &&
+      skeletonHelper.includes("$PlanSlide.judgmentIds"),
+    "PowerPoint skeleton helper must use validated ReadoutPlan note fields",
+  );
+  check(
+    skeletonHelper.includes("$shape.PlaceholderFormat.Type -eq 2") &&
+      skeletonHelper.includes("$presentation.Slides.AddSlide"),
+    "PowerPoint skeleton helper must target notes-body placeholders and add native slides",
+  );
+  check(
+    !skeletonHelper.includes("speakerNotes"),
+    "PowerPoint skeleton helper must not use the unsupported speakerNotes field",
+  );
+} catch (error) {
+  failures.push(`PowerPoint skeleton helper contract could not be verified: ${error.message}`);
 }
 
 for (const file of files.filter(

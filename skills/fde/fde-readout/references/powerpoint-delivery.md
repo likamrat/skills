@@ -7,10 +7,16 @@ Every new editable deck starts from a copy of [`../assets/powerpoint-16x9-seed.p
 Use this authoring order:
 
 1. copy the clean seed to the output path;
-2. use the native PowerPoint host to assign the starter notes, add each planned slide, and assign its notes before creating the next slide;
-3. save, close, and reopen the native deck, then confirm that the active slide count equals the unique notes-relationship and notes-part counts;
-4. only after that check, open the deck in the Office canvas and build the planned native shapes, tables, charts, and diagrams;
-5. do not add, delete, reorder, or assign notes to slides in the canvas after the native skeleton passes.
+2. on Windows with PowerPoint installed, create the native slide-and-notes skeleton with:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts/create-powerpoint-skeleton.ps1 -Plan plan.json -Output readout.pptx
+   ```
+
+3. otherwise, use the native PowerPoint host to assign the starter notes, add each planned slide, and assign its notes before creating the next slide;
+4. save, close, and reopen the native deck, then confirm that the active slide count equals the unique notes-relationship and notes-part counts;
+5. only after that check, open the deck in the Office canvas and build the planned native shapes, tables, charts, and diagrams;
+6. do not add, delete, reorder, or assign notes to slides in the canvas after the native skeleton passes.
 
 The seed establishes a clean package foundation. It does not prove that a full deck can be authored safely, so the smoke gate still applies.
 
