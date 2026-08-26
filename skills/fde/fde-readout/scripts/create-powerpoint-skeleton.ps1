@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Output,
 
-    [string]$Seed = (Join-Path $PSScriptRoot '..\assets\powerpoint-16x9-seed.pptx')
+    [string]$Seed
 )
 
 Set-StrictMode -Version Latest
@@ -44,8 +44,15 @@ function Get-NotesText {
     ) -join "`r`n"
 }
 
+$seedInput = if ([string]::IsNullOrWhiteSpace($Seed)) {
+    Join-Path $PSScriptRoot '..\assets\powerpoint-16x9-seed.pptx'
+}
+else {
+    $Seed
+}
+
 $planPath = (Resolve-Path -LiteralPath $Plan).Path
-$seedPath = (Resolve-Path -LiteralPath $Seed).Path
+$seedPath = (Resolve-Path -LiteralPath $seedInput).Path
 $outputPath = [System.IO.Path]::GetFullPath($Output)
 $outputDirectory = Split-Path -Parent $outputPath
 
@@ -53,7 +60,7 @@ if (-not (Test-Path -LiteralPath $outputDirectory)) {
     [void](New-Item -ItemType Directory -Path $outputDirectory)
 }
 
-$readout = Get-Content -Raw -LiteralPath $planPath | ConvertFrom-Json -Depth 100
+$readout = Get-Content -Raw -LiteralPath $planPath | ConvertFrom-Json
 $planSlides = @($readout.slides)
 if ($planSlides.Count -lt 1) {
     throw 'ReadoutPlan must contain at least one slide.'
