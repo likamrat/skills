@@ -150,7 +150,7 @@ The bundled renderer is dependency-free. After freezing the plan and HTML, inspe
 
 Read [references/powerpoint-delivery.md](references/powerpoint-delivery.md).
 
-Copy the bundled clean 16:9 seed before native Office authoring; a reference deck is design input, never the mutable output base. Never substitute a screenshot-only deck or install a converter at runtime. Render the three-slide smoke deck and block full authoring until a coordinator or accountable human approves its contact sheet. After approval, restart from a fresh seed copy, persist each slide-and-notes pair in a separate canvas call before adding the next slide, then author, render, and inspect the full package against the plan.
+Copy the bundled clean 16:9 seed before native Office authoring; a reference deck is design input, never the mutable output base. Never substitute a screenshot-only deck or install a converter at runtime. Build and verify the complete slide-and-notes skeleton in the native PowerPoint host before opening the Office canvas. Render the three-slide smoke deck and block full authoring until a coordinator or accountable human approves its contact sheet. After approval, restart from a fresh seed copy, repeat native skeleton creation, then use the canvas for content only before rendering and inspecting the full package against the plan.
 
 ## Restyle from a reference deck
 
