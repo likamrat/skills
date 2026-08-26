@@ -21,7 +21,7 @@ Use color by meaning:
 - one risk color;
 - neutral support surfaces.
 
-Connectors use shared anchors and one semantic direction. Do not place independent arrows by eye.
+Connectors use shared anchors and one semantic direction. Use restrained 1-2 px rails, round line caps, narrow open arrowheads, and muted semantic color. Do not place independent arrows by eye, use filled triangular heads, or separate steps with oversized arrow glyphs.
 
 ## Layout rules
 
