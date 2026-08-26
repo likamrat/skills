@@ -186,6 +186,10 @@ try {
       passed.operationalDiagnostics.leakedProcessCount === 0,
     "minimal passing fixture must emit zero operational diagnostics",
   );
+  check(
+    passed.budget.requiredFormats.join(",") === "html,powerpoint",
+    "result must emit the trusted required format set",
+  );
 
   const passRun = await readJson(join(passFixture, "run.json"));
   for (const descriptor of passRun.artifacts) {
@@ -397,6 +401,40 @@ try {
         "efficiency.failedToolCalls_budget_exceeded",
       ),
     "failed tool rate above 2 percent must fail independently of count",
+  );
+
+  for (const [name, requestedFormats] of [
+    ["missing-powerpoint-format", ["html"]],
+    ["missing-html-format", ["powerpoint"]],
+    ["extra-requested-format", ["html", "powerpoint", "pdf"]],
+  ]) {
+    const fixture = await copyPassFixture(name);
+    const runPath = join(fixture, "run.json");
+    const run = await readJson(runPath);
+    run.task.requestedFormats = requestedFormats;
+    await writeJson(runPath, run);
+    await expectInputError(
+      () => evaluateFixture(fixture),
+      `${name} requested format set`,
+    );
+  }
+
+  const reorderedFormatsFixture = await copyPassFixture(
+    "reordered-required-formats",
+  );
+  const reorderedFormatsRunPath = join(
+    reorderedFormatsFixture,
+    "run.json",
+  );
+  const reorderedFormatsRun = await readJson(reorderedFormatsRunPath);
+  reorderedFormatsRun.task.requestedFormats.reverse();
+  await writeJson(reorderedFormatsRunPath, reorderedFormatsRun);
+  const reorderedFormatsResult = await evaluateFixture(
+    reorderedFormatsFixture,
+  );
+  check(
+    reorderedFormatsResult.status === "passed",
+    "requested formats may match trusted policy in any order",
   );
 
   const duplicateRequestedFixture = await copyPassFixture(

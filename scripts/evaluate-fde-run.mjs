@@ -343,6 +343,34 @@ export async function evaluateFixture(
     requireObject(budgets.taskClasses, "budgets.taskClasses")[taskClass],
     `budget task class ${taskClass}`,
   );
+  const requiredFormats = requireArray(
+    budget.requiredFormats,
+    `budget ${taskClass}.requiredFormats`,
+  );
+  if (
+    requiredFormats.length === 0 ||
+    requiredFormats.some(
+      (format) => typeof format !== "string" || format.length === 0,
+    ) ||
+    new Set(requiredFormats).size !== requiredFormats.length
+  ) {
+    throw new Error(
+      `budget ${taskClass}.requiredFormats must contain distinct non-empty strings`,
+    );
+  }
+  const requestedFormatSet = new Set(task.requestedFormats);
+  const requiredFormatSet = new Set(requiredFormats);
+  const missingFormats = requiredFormats.filter(
+    (format) => !requestedFormatSet.has(format),
+  );
+  const extraFormats = task.requestedFormats.filter(
+    (format) => !requiredFormatSet.has(format),
+  );
+  if (missingFormats.length > 0 || extraFormats.length > 0) {
+    throw new Error(
+      `run.task.requestedFormats must match trusted task-class formats; missing: ${missingFormats.join(", ") || "none"}; extra: ${extraFormats.join(", ") || "none"}`,
+    );
+  }
   const limits = requireObject(budget.limits, `budget ${taskClass}.limits`);
   const requiredQaChecks = requireObject(
     budget.requiredQaChecks,
@@ -815,6 +843,7 @@ export async function evaluateFixture(
     operationalDiagnostics,
     budget: {
       taskClass,
+      requiredFormats,
       limits,
     },
     artifactHashes: currentArtifactHashes,

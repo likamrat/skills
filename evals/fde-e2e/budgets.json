@@ -3,6 +3,10 @@
   "taskClasses": {
     "full-fde-dual-format": {
       "description": "Temporary composite of the 10-minute engagement and 20-minute dual-format budgets.",
+      "requiredFormats": [
+        "html",
+        "powerpoint"
+      ],
       "limits": {
         "wallTimeMs": 1800000,
         "modelCalls": 90,

@@ -61,7 +61,7 @@ The evaluator requires the frozen plan file to exist and match its declared hash
 
 The PowerPoint file in each committed fixture is a synthetic structural snapshot, not a customer deck. Structural snapshots are replay evidence only; Hill 0 never certifies a live artifact. The failure fixture preserves only the slide and shape evidence needed to reproduce the visual hard gate. No raw transcript, customer source, screenshot, or generated presentation package is committed.
 
-Trusted task-class policy in `budgets.json` defines the required HTML and PowerPoint deterministic checks and the five distinct reliability trial IDs. A fixture cannot weaken those requirements. Duplicate requested formats, duplicate artifact formats, duplicate trial IDs, and missing required QA checks are invalid evaluator input.
+Trusted task-class policy in `budgets.json` requires exactly HTML and PowerPoint, defines their deterministic checks, and defines the five distinct reliability trial IDs. A fixture cannot weaken those requirements. Missing, extra, or duplicate requested formats, duplicate artifact formats, duplicate trial IDs, and missing required QA checks are invalid evaluator input. Requested format order does not matter.
 
 ## Frozen fixtures
 
