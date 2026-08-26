@@ -8,7 +8,7 @@ Use this authoring order:
 
 1. copy the clean seed to the output path;
 2. assign the starter slide's speaker notes and persist that mutation;
-3. for each planned slide, use one separate persisted canvas call to add that slide and assign its notes, then wait for the updated artifact version before adding the next slide;
+3. for each planned slide, use one separate persisted canvas call to add that slide and assign its notes, then require an updated artifact version before adding the next slide;
 4. confirm that the active slide count equals the unique notes-relationship and notes-part counts;
 5. replace starter content and build the planned native shapes, tables, charts, and diagrams.
 
