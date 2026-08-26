@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "boundaryViolations": [],
+  "processes": [
+    {
+      "id": "html-server",
+      "kind": "node-server",
+      "cleanupStatus": "running"
+    },
+    {
+      "id": "contact-sheet-server",
+      "kind": "node-server",
+      "cleanupStatus": "running"
+    }
+  ],
+  "visibleExternalFaults": [
+    {
+      "surface": "external-chrome",
+      "state": "raw-javascript-error",
+      "message": "Presentation initialization failed. Cannot set properties of null."
+    }
+  ]
+}

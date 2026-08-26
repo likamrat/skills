@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "powerpoint",
+  "artifactSha256": "b9113df4894efff1810a9e33f1787fe2f5876c86b46045b4b0491696ce85aca1",
+  "planSha256": "ff5d9967f01f07c9ee4221da3de34332cfe9e2d1ec2098c6e76e03dd6b68c240",
+  "deliveryApproved": false,
+  "visualApproved": false,
+  "deterministicChecks": {
+    "opens": true,
+    "packageValid": true,
+    "editable": true
+  },
+  "shapeStats": {
+    "slideCount": 12,
+    "totalShapes": 40,
+    "medianShapesPerSlide": 3
+  },
+  "referenceStats": {
+    "slideCount": 11,
+    "totalShapes": 244,
+    "medianShapesPerSlide": 22
+  },
+  "severeDefects": [
+    "Slides 7 and 8 are near blank.",
+    "Slide 9 lacks usable hierarchy.",
+    "Slide 10 contains overlapping structures and unreadable hierarchy."
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "fixtureId": "hill-0-observed-failure-v1",
+  "representation": "synthetic-powerpoint-snapshot",
+  "sourcePlanSha256": "ff5d9967f01f07c9ee4221da3de34332cfe9e2d1ec2098c6e76e03dd6b68c240",
+  "slideCount": 12,
+  "shapeCounts": [
+    3,
+    4,
+    4,
+    3,
+    4,
+    5,
+    2,
+    2,
+    3,
+    4,
+    3,
+    3
+  ]
+}

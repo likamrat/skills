@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "required": true,
+  "reviewer": "independent-fde-review",
+  "decision": "approved",
+  "artifactHashes": {
+    "html": "6bff8274f2fbfb39347525dd8c8b1cf4ce97cbc164f77bcd2ec322ed17f9b27b",
+    "powerpoint": "beaa6e7bfb88a0ecc3cc6ba35bc7ec62138768d41074dbbb1776d5903fc3e6e9"
+  },
+  "reasons": []
+}

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "trials": [
+    {
+      "id": "trial-1",
+      "passed": true
+    },
+    {
+      "id": "trial-2",
+      "passed": true
+    },
+    {
+      "id": "trial-3",
+      "passed": true
+    },
+    {
+      "id": "trial-4",
+      "passed": true
+    },
+    {
+      "id": "trial-5",
+      "passed": true
+    }
+  ]
+}

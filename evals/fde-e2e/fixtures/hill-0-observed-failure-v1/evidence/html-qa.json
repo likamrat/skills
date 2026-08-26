@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "html",
+  "artifactSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "planSha256": "ff5d9967f01f07c9ee4221da3de34332cfe9e2d1ec2098c6e76e03dd6b68c240",
+  "deliveryApproved": false,
+  "visualApproved": false,
+  "deterministicChecks": {
+    "opens": true,
+    "desktopComplete": false,
+    "phoneUsable": false,
+    "exportComplete": false,
+    "consoleClean": false
+  },
+  "severeDefects": [
+    "Desktop and phone evidence represent different artifact states.",
+    "Phone text and controls were not approved.",
+    "Final export and console evidence is incomplete."
+  ]
+}

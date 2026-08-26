@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "powerpoint",
+  "artifactSha256": "beaa6e7bfb88a0ecc3cc6ba35bc7ec62138768d41074dbbb1776d5903fc3e6e9",
+  "planSha256": "8de458d3fc770b134b289574661aa4e2ff95305688d5fb8059b31eeca511a9d8",
+  "deliveryApproved": true,
+  "visualApproved": true,
+  "deterministicChecks": {
+    "opens": true,
+    "packageValid": true,
+    "editable": true
+  },
+  "shapeStats": {
+    "slideCount": 3,
+    "totalShapes": 62,
+    "medianShapesPerSlide": 20
+  },
+  "severeDefects": []
+}

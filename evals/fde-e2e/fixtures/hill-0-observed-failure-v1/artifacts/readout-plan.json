@@ -1,0 +1,9 @@
+{
+  "fixtureId": "hill-0-observed-failure-v1",
+  "planVersion": 1,
+  "slideCount": 12,
+  "requestedFormats": [
+    "html",
+    "powerpoint"
+  ]
+}
