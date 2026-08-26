@@ -68,6 +68,12 @@ Render dependency-free HTML:
 node scripts/render-html.mjs path/to/readout-plan.json path/to/output-directory
 ```
 
+Create a clean native PowerPoint slide-and-notes skeleton on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/create-powerpoint-skeleton.ps1 -Plan path/to/readout-plan.json -Output path/to/readout.pptx
+```
+
 Run the HTML deck on localhost:
 
 ```text
