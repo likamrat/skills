@@ -71,6 +71,13 @@ try {
     "HTML workflow connectors must use restrained open arrowheads and thin rails",
   );
   check(
+    html.includes("grid-template-columns:repeat(5,minmax(0,1fr))") &&
+      html.includes(".responsibility-step p{font-size:18px") &&
+      html.includes(".authority{background:#f4efe7;border:0") &&
+      html.includes(".risk--dark{background:#e8eef3"),
+    "HTML responsibility and risk surfaces must use readable measures and soft neutral colors",
+  );
+  check(
     html.includes("__fdeReadoutQa"),
     "HTML must expose a rendered-geometry QA preflight",
   );
