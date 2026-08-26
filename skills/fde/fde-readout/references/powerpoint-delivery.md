@@ -1,14 +1,27 @@
 # PowerPoint delivery
 
+## Start from the clean seed
+
+Every new editable deck starts from a copy of [`../assets/powerpoint-16x9-seed.pptx`](../assets/powerpoint-16x9-seed.pptx). Keep the bundled asset unchanged. A reference deck supplies design grammar only and must never become the mutable output base.
+
+Use this authoring order:
+
+1. copy the clean seed to the output path;
+2. add every required slide before removing or replacing anything in the starter slide;
+3. assign distinct speaker notes to every active slide and confirm each has its own notes relationship and notes part;
+4. replace starter content and build the planned native shapes, tables, charts, and diagrams.
+
+The seed establishes a clean package foundation. It does not prove that a full deck can be authored safely, so the smoke gate still applies.
+
 ## Three-slide smoke gate
 
-Before full-deck authoring, use the native Office presentation canvas to build only:
+Before full-deck authoring, copy the seed, add two slides, and use the native Office presentation canvas to build only:
 
 1. the cover;
 2. the decision slide;
 3. the densest requested slide family.
 
-The third slide must exercise its native structure, such as the largest table or chart. Delete legacy source content before placing replacement content. Render all three slides as one contact sheet and pause for coordinator or accountable-human approval. Visual approval permits full authoring; it does not waive evidence, notes, package, or efficiency gates.
+The third slide must exercise its native structure, such as the largest table or chart. Set unique notes on all three slides before content replacement. Render all three slides as one contact sheet and pause for coordinator or accountable-human approval. Treat the smoke deck as disposable. After approval, copy the clean seed again, add every planned slide and its unique notes, and only then replace starter content. Visual approval permits full authoring; it does not waive evidence, notes, package, or efficiency gates.
 
 Stop the PowerPoint path immediately when:
 
@@ -24,8 +37,8 @@ Do not work around these stops with more retries, a screenshot deck, or direct Z
 
 When an Office presentation tool is available:
 
-1. inspect any supplied template or reference package;
-2. set slide size before content;
+1. inspect any supplied template or reference package without using it as the output base;
+2. verify the copied seed's slide size before content;
 3. map plan families to layouts;
 4. build `table` and `chart` families as native PowerPoint tables and charts; build other families with editable text, shapes, SVG diagrams, and notes;
 5. use exact coordinates for connectors and repeated geometry;

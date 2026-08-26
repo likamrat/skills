@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "powerpoint-16x9-seed",
+  "sha256": "f109680b3231c5a9c0dbb4e8920867c648feaa91cf2a7f361d84f58f7c6dab90",
+  "byteLength": 32179,
+  "activeSlideCount": 1,
+  "notesCount": 0,
+  "widthEmu": 12192000,
+  "heightEmu": 6858000,
+  "purpose": "Clean native 16:9 PowerPoint seed for new editable decks."
+}

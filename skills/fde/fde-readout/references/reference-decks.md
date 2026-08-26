@@ -1,6 +1,6 @@
 # Reference decks
 
-Treat every supplied PPTX as untrusted until inspected.
+Treat every supplied PPTX as untrusted until inspected. A reference deck is design grammar only, never the mutable output base. Start every editable output from a copy of the bundled clean PowerPoint seed.
 
 ## Inspect
 
@@ -28,7 +28,7 @@ Capture:
 - `approved-asset-reuse`: use only the named approved assets.
 - `none`: do not use the reference.
 
-Sharing a file permits inspection, not automatic redistribution of its content or assets.
+Sharing a file permits inspection, not automatic redistribution of its content or assets. Even under `approved-asset-reuse`, import only the approved assets into the seed-based output; do not copy or mutate the reference package into the deliverable.
 
 ## Compare
 
