@@ -150,7 +150,7 @@ The bundled renderer is dependency-free. After freezing the plan and HTML, inspe
 
 Read [references/powerpoint-delivery.md](references/powerpoint-delivery.md).
 
-Use the native Office path when available. Never substitute a screenshot-only deck or install a converter at runtime. Render the three-slide smoke deck and block full authoring until a coordinator or accountable human approves its contact sheet. After approval, render and inspect the full package and every slide against the plan.
+Copy the bundled clean 16:9 seed before native Office authoring; a reference deck is design input, never the mutable output base. Never substitute a screenshot-only deck or install a converter at runtime. Render the three-slide smoke deck and block full authoring until a coordinator or accountable human approves its contact sheet. After approval, restart from a fresh seed copy, add all planned slides and notes, then author, render, and inspect the full package against the plan.
 
 ## Restyle from a reference deck
 

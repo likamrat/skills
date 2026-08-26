@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from "node:crypto";
 import { access, readFile, readdir, stat } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { basename, dirname, extname, join, resolve } from "node:path";
@@ -160,6 +161,14 @@ for (const file of files.filter((candidate) =>
 const requiredAssets = [
   [join(skillRoot, "assets", "readout-plan.template.json"), "plan template"],
   [
+    join(skillRoot, "assets", "powerpoint-16x9-seed.pptx"),
+    "PowerPoint seed",
+  ],
+  [
+    join(skillRoot, "assets", "powerpoint-16x9-seed.metadata.json"),
+    "PowerPoint seed metadata",
+  ],
+  [
     join(
       skillRoot,
       "assets",
@@ -189,6 +198,56 @@ for (const [path, label] of requiredAssets) {
     failures.push(`${label} is missing`);
   }
 
+}
+
+const seedPath = join(skillRoot, "assets", "powerpoint-16x9-seed.pptx");
+const seedMetadataPath = join(
+  skillRoot,
+  "assets",
+  "powerpoint-16x9-seed.metadata.json",
+);
+const expectedSeedMetadata = {
+  schemaVersion: 1,
+  id: "powerpoint-16x9-seed",
+  sha256: "f109680b3231c5a9c0dbb4e8920867c648feaa91cf2a7f361d84f58f7c6dab90",
+  byteLength: 32179,
+  activeSlideCount: 1,
+  notesCount: 0,
+  widthEmu: 12192000,
+  heightEmu: 6858000,
+  purpose: "Clean native 16:9 PowerPoint seed for new editable decks.",
+};
+
+try {
+  const [seed, metadataText] = await Promise.all([
+    readFile(seedPath),
+    readFile(seedMetadataPath, "utf8"),
+  ]);
+  const metadata = JSON.parse(metadataText);
+  const actualSha256 = createHash("sha256").update(seed).digest("hex");
+  const expectedFields = Object.keys(expectedSeedMetadata).sort();
+  const actualFields = Object.keys(metadata).sort();
+
+  check(
+    JSON.stringify(actualFields) === JSON.stringify(expectedFields),
+    "PowerPoint seed metadata fields must match the package contract",
+  );
+  for (const [field, expected] of Object.entries(expectedSeedMetadata)) {
+    check(
+      metadata[field] === expected,
+      `PowerPoint seed metadata ${field} must equal ${JSON.stringify(expected)}`,
+    );
+  }
+  check(
+    seed.byteLength === expectedSeedMetadata.byteLength,
+    `PowerPoint seed must be exactly ${expectedSeedMetadata.byteLength} bytes`,
+  );
+  check(
+    actualSha256 === expectedSeedMetadata.sha256,
+    `PowerPoint seed SHA-256 must equal ${expectedSeedMetadata.sha256}`,
+  );
+} catch (error) {
+  failures.push(`PowerPoint seed contract could not be verified: ${error.message}`);
 }
 
 for (const file of files.filter(

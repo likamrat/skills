@@ -2,3 +2,4 @@ evals/fde-e2e/**/*.json text eol=lf
 evals/fde-e2e/**/*.html text eol=lf
 evals/fde-e2e/**/*.md text eol=lf
 evals/fde-e2e/**/*.svg text eol=lf
+skills/fde/fde-readout/assets/powerpoint-16x9-seed.pptx binary
