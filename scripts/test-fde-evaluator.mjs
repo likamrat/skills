@@ -14,7 +14,10 @@ import { extname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { evaluateFixture, GRADER_VERSION } from "./evaluate-fde-run.mjs";
+import {
+  evaluateFixture as evaluateFixtureUnderTest,
+  GRADER_VERSION,
+} from "./evaluate-fde-run.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const fixturesRoot = join(root, "evals", "fde-e2e", "fixtures");
@@ -28,6 +31,13 @@ const htmlFinalFixture = join(fixturesRoot, htmlFinalFixtureId);
 const cli = join(root, "scripts", "evaluate-fde-run.mjs");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "fde-e2e-evaluator-"));
 const failures = [];
+
+function evaluateFixture(fixture, options = {}) {
+  return evaluateFixtureUnderTest(fixture, {
+    allowLegacyFixtureCopies: true,
+    ...options,
+  });
+}
 
 function check(condition, message) {
   if (!condition) failures.push(message);
@@ -71,6 +81,239 @@ async function copyHtmlFinalFixture(name) {
   const target = join(temporaryRoot, name);
   await cp(htmlFinalFixture, target, { recursive: true });
   return target;
+}
+
+async function makeObservedReadoutFixture(name) {
+  const fixture = await copyPassFixture(name);
+  const runPath = join(fixture, "run.json");
+  const run = await readJson(runPath);
+  run.task.class = "readout-dual-format-final";
+  Object.assign(run.metrics, {
+    wallTimeMs: 250000,
+    modelCalls: 12,
+    inputTokens: 800000,
+    outputTokens: 3000,
+    toolCalls: 12,
+    failedToolCalls: 0,
+  });
+
+  const planDescriptor = run.artifacts.find(
+    (entry) => entry.format === "plan",
+  );
+  const planPath = join(fixture, planDescriptor.path);
+  const plan = {
+    fixtureId: run.fixtureId,
+    planVersion: 1,
+    requestedFormats: ["html", "powerpoint"],
+    slides: [
+      { id: "cover", evidenceIds: ["EV-1"] },
+      { id: "decision", evidenceIds: ["EV-2"] },
+      { id: "evidence", evidenceIds: ["EV-3"] },
+    ],
+  };
+  await writeJson(planPath, plan);
+  const planSha256 = sha256(await readFile(planPath));
+  planDescriptor.sha256 = planSha256;
+
+  const htmlDescriptor = run.artifacts.find(
+    (entry) => entry.format === "html",
+  );
+  htmlDescriptor.sourcePlanSha256 = planSha256;
+  const htmlSha256 = sha256(
+    await readFile(join(fixture, htmlDescriptor.path)),
+  );
+
+  const powerpointDescriptor = run.artifacts.find(
+    (entry) => entry.format === "powerpoint",
+  );
+  const powerpointPath = join(fixture, powerpointDescriptor.path);
+  const powerpointSnapshot = {
+    fixtureId: run.fixtureId,
+    representation: "synthetic-powerpoint-snapshot",
+    sourcePlanSha256: planSha256,
+    slideCount: 3,
+    shapeCounts: [18, 20, 24],
+  };
+  await writeJson(powerpointPath, powerpointSnapshot);
+  const powerpointSha256 = sha256(await readFile(powerpointPath));
+  powerpointDescriptor.sha256 = powerpointSha256;
+  powerpointDescriptor.sourcePlanSha256 = planSha256;
+
+  const contactSheetPath = "artifacts/contact-sheet.txt";
+  await writeFile(
+    join(fixture, contactSheetPath),
+    "synthetic contact sheet evidence\n",
+  );
+  const contactSheetSha256 = sha256(
+    await readFile(join(fixture, contactSheetPath)),
+  );
+  run.artifacts.push({
+    id: "contact-sheet",
+    format: "contact-sheet",
+    path: contactSheetPath,
+    sha256: contactSheetSha256,
+    sourcePlanSha256: planSha256,
+    required: true,
+  });
+  await writeJson(runPath, run);
+
+  const htmlQaPath = join(fixture, "evidence", "html-qa.json");
+  await writeJson(htmlQaPath, {
+    schemaVersion: 1,
+    artifactId: "html",
+    artifactSha256: htmlSha256,
+    planSha256,
+    deliveryApproved: true,
+    visualApproved: true,
+    deterministicChecks: {
+      opens: true,
+      planHashMatches: true,
+      desktopAllSlides: true,
+      phoneReadable: true,
+      phoneControlsUsable: true,
+      exportAllSlides: true,
+      navigationPass: true,
+      notesPass: true,
+      fullscreenPass: true,
+      consoleClean: true,
+      faultIsolated: true,
+      noExternalWindow: true,
+    },
+    replayEvidence: {
+      finalPlanSha256: planSha256,
+      finalHtmlSha256: htmlSha256,
+      embeddedPlanSha256: planSha256,
+      finalSlideCount: 3,
+      captures: {
+        desktop: {
+          captureId: "desktop-final",
+          capturedPlanSha256: planSha256,
+          capturedHtmlSha256: htmlSha256,
+          reviewedSlideCount: 3,
+          state: { opened: true, allSlidesReviewed: true },
+        },
+        phone: {
+          captureId: "phone-final",
+          capturedPlanSha256: planSha256,
+          capturedHtmlSha256: htmlSha256,
+          reviewedSlideCount: 3,
+          state: { readable: true, controlsUsable: true },
+        },
+        export: {
+          captureId: "export-final",
+          capturedPlanSha256: planSha256,
+          capturedHtmlSha256: htmlSha256,
+          reviewedSlideCount: 3,
+          state: { allSlidesReviewed: true },
+        },
+        interactions: {
+          captureId: "interactions-final",
+          capturedPlanSha256: planSha256,
+          capturedHtmlSha256: htmlSha256,
+          state: {
+            navigationPass: true,
+            notesPass: true,
+            fullscreenPass: true,
+          },
+        },
+        console: {
+          captureId: "console-final",
+          capturedPlanSha256: planSha256,
+          capturedHtmlSha256: htmlSha256,
+          state: { clean: true },
+        },
+        fault: {
+          captureId: "fault-final",
+          capturedPlanSha256: planSha256,
+          capturedHtmlSha256: htmlSha256,
+          state: { isolated: true, externalWindowOpened: false },
+        },
+      },
+    },
+    severeDefects: [],
+  });
+
+  const powerpointQaPath = join(
+    fixture,
+    "evidence",
+    "powerpoint-qa.json",
+  );
+  await writeJson(powerpointQaPath, {
+    schemaVersion: 1,
+    artifactId: "powerpoint",
+    artifactSha256: powerpointSha256,
+    planSha256,
+    deliveryApproved: true,
+    visualApproved: true,
+    deterministicChecks: {
+      opens: true,
+      packageValid: true,
+      editable: true,
+      notesIsolated: true,
+      noOrphanedCustomerParts: true,
+      planEvidenceBound: true,
+      denseContentReadable: true,
+    },
+    replayEvidence: {
+      finalPlanSha256: planSha256,
+      finalPowerPointSha256: powerpointSha256,
+      nativeOpen: {
+        capturedPowerPointSha256: powerpointSha256,
+        opened: true,
+      },
+      contactSheet: {
+        artifactId: "contact-sheet",
+        sha256: contactSheetSha256,
+      },
+      packageInventory: {
+        activeSlideCount: 3,
+        activeNotesPartCount: 3,
+        packageSlidePartCount: 3,
+        packageNotesPartCount: 3,
+        uniqueNotesPartCount: 3,
+        orphanedCustomerSlidePartCount: 0,
+        orphanedCustomerNotesPartCount: 0,
+      },
+      slides: plan.slides.map((slide, index) => ({
+        slideId: `slide-${index + 1}`,
+        planId: slide.id,
+        notesRelationshipId: `rId${index + 1}`,
+        notesPart: `ppt/notesSlides/notesSlide${index + 1}.xml`,
+        expectedEvidenceIds: slide.evidenceIds,
+        evidenceIdsInNotes: slide.evidenceIds,
+      })),
+      editableShapeCount: 62,
+      denseContentReadable: true,
+    },
+    severeDefects: [],
+  });
+
+  const humanReviewPath = join(
+    fixture,
+    "evidence",
+    "human-review.json",
+  );
+  const humanReview = await readJson(humanReviewPath);
+  humanReview.artifactHashes.html = htmlSha256;
+  humanReview.artifactHashes.powerpoint = powerpointSha256;
+  humanReview.contactSheetSha256 = contactSheetSha256;
+  await writeJson(humanReviewPath, humanReview);
+
+  const budgets = await readJson(join(root, "evals", "fde-e2e", "budgets.json"));
+  const reliabilityPath = join(fixture, "reliability.json");
+  await writeJson(reliabilityPath, {
+    schemaVersion: 1,
+    trials: budgets.taskClasses[
+      "readout-dual-format-final"
+    ].reliability.requiredTrialIds.map((id) => ({ id, passed: true })),
+  });
+
+  await updateDescriptorHash(fixture, "evidence", "htmlQa");
+  await updateDescriptorHash(fixture, "evidence", "powerpointQa");
+  await updateDescriptorHash(fixture, "evidence", "humanReview");
+  await updateDescriptorHash(fixture, "records", "reliability");
+  await syncTraceToMetrics(fixture);
+  return fixture;
 }
 
 async function updateDescriptorHash(fixture, collection, kind) {
@@ -1426,6 +1669,357 @@ try {
   );
 
   const budgets = await readJson(join(root, "evals", "fde-e2e", "budgets.json"));
+  const calibration = await readJson(
+    join(root, "hill4-output", "hill6-budget-report.json"),
+  );
+  const observedBudget =
+    budgets.taskClasses["readout-dual-format-final"];
+  const calibrationRunIds = calibration.runs.map((run) => run.id);
+  check(
+    calibration.status === "passed" &&
+      calibration.sample.successfulRuns === 20 &&
+      calibration.runs.length === 20 &&
+      new Set(calibrationRunIds).size === 20,
+    "Hill 6 calibration must contain 20 distinct successful runs",
+  );
+  check(
+    JSON.stringify(observedBudget.reliability.requiredTrialIds) ===
+      JSON.stringify(calibrationRunIds),
+    "observed budget trial IDs must match the Hill 6 calibration report",
+  );
+  check(
+    budgets.taskClasses["full-fde-dual-format"].description.startsWith(
+      "Temporary",
+    ),
+    "full engagement composite must remain temporary",
+  );
+
+  const median = (values) => {
+    const sorted = [...values].sort((left, right) => left - right);
+    const middle = sorted.length / 2;
+    return (sorted[middle - 1] + sorted[middle]) / 2;
+  };
+  const calibrationMetrics = [
+    ["wallTimeMs", "elapsedSeconds", (value) => value * 1000],
+    ["modelCalls", "modelCalls", (value) => value],
+    ["inputTokens", "inputTokens", (value) => value],
+    ["outputTokens", "outputTokens", (value) => value],
+    ["toolCalls", "toolCalls", (value) => value],
+  ];
+  for (const [metric, runField, normalize] of calibrationMetrics) {
+    const values = calibration.runs
+      .map((run) => normalize(run[runField]))
+      .sort((left, right) => left - right);
+    const metricMedian = median(values);
+    const metricMad = median(
+      values.map((value) => Math.abs(value - metricMedian)),
+    );
+    const metricP95 = values[Math.ceil(values.length * 0.95) - 1];
+    const rawHardLimit = Math.min(
+      metricMedian + 6 * metricMad,
+      2 * metricMedian,
+    );
+    const expectedHardLimit =
+      metric === "wallTimeMs" ? Math.ceil(rawHardLimit) : rawHardLimit;
+    const statistics = calibration.statistics[metric];
+    check(
+      Math.abs(statistics.median - metricMedian) < 0.000001 &&
+        Math.abs(statistics.mad - metricMad) < 0.000001 &&
+        statistics.p95 === metricP95 &&
+        statistics.hardLimit === expectedHardLimit,
+      `${metric} calibration statistics must match the 20-run sample`,
+    );
+    check(
+      statistics.warningLimit === metricP95 &&
+        statistics.warningLimit < statistics.hardLimit &&
+        observedBudget.warningLimits[metric] === statistics.warningLimit &&
+        observedBudget.limits[metric] === statistics.hardLimit,
+      `${metric} warning and hard limits must match the calibration report`,
+    );
+  }
+  check(
+    observedBudget.limits.failedToolCalls === 0 &&
+      observedBudget.limits.failedToolRate === 0,
+    "observed readout budget must reject every failed tool call",
+  );
+
+  const observedReadoutFixture =
+    await makeObservedReadoutFixture("observed-readout-pass");
+  const observedReadout = await evaluateFixture(observedReadoutFixture);
+  check(
+    observedReadout.status === "passed" &&
+      observedReadout.axes.finalOutcome.diagnostics.htmlFinal
+        .staleCaptureIds.length === 0 &&
+      observedReadout.axes.finalOutcome.diagnostics.powerpointFinal
+        .derivedChecks.notesIsolated === true,
+    "observed dual-format class must pass evidence-derived HTML and PowerPoint QA",
+  );
+
+  const staleObservedReadoutFixture =
+    await makeObservedReadoutFixture("observed-readout-stale-html");
+  const staleObservedHtmlQaPath = join(
+    staleObservedReadoutFixture,
+    "evidence",
+    "html-qa.json",
+  );
+  const staleObservedHtmlQa = await readJson(staleObservedHtmlQaPath);
+  staleObservedHtmlQa.replayEvidence.captures.desktop.capturedHtmlSha256 =
+    "0".repeat(64);
+  await writeJson(staleObservedHtmlQaPath, staleObservedHtmlQa);
+  await updateDescriptorHash(
+    staleObservedReadoutFixture,
+    "evidence",
+    "htmlQa",
+  );
+  await expectInputError(
+    () => evaluateFixture(staleObservedReadoutFixture),
+    "combined class stale HTML replay evidence",
+  );
+
+  const consistentStaleObservedReadoutFixture =
+    await makeObservedReadoutFixture("observed-readout-consistent-stale-html");
+  const consistentStaleHtmlQaPath = join(
+    consistentStaleObservedReadoutFixture,
+    "evidence",
+    "html-qa.json",
+  );
+  const consistentStaleHtmlQa = await readJson(
+    consistentStaleHtmlQaPath,
+  );
+  consistentStaleHtmlQa.replayEvidence.captures.desktop.capturedHtmlSha256 =
+    "0".repeat(64);
+  consistentStaleHtmlQa.deterministicChecks.opens = false;
+  consistentStaleHtmlQa.deterministicChecks.desktopAllSlides = false;
+  await writeJson(consistentStaleHtmlQaPath, consistentStaleHtmlQa);
+  await updateDescriptorHash(
+    consistentStaleObservedReadoutFixture,
+    "evidence",
+    "htmlQa",
+  );
+  const consistentStaleObservedReadout = await evaluateFixture(
+    consistentStaleObservedReadoutFixture,
+  );
+  check(
+    reasonCodes(consistentStaleObservedReadout).has(
+      "trace_quality.stale_html_qa_evidence",
+    ),
+    "combined class must report consistent stale HTML capture evidence on the trace axis",
+  );
+
+  const contradictoryObservedReadoutFixture =
+    await makeObservedReadoutFixture("observed-readout-shared-notes");
+  const contradictoryPowerPointQaPath = join(
+    contradictoryObservedReadoutFixture,
+    "evidence",
+    "powerpoint-qa.json",
+  );
+  const contradictoryPowerPointQa = await readJson(
+    contradictoryPowerPointQaPath,
+  );
+  contradictoryPowerPointQa.replayEvidence.slides[1].notesPart =
+    contradictoryPowerPointQa.replayEvidence.slides[0].notesPart;
+  await writeJson(
+    contradictoryPowerPointQaPath,
+    contradictoryPowerPointQa,
+  );
+  await updateDescriptorHash(
+    contradictoryObservedReadoutFixture,
+    "evidence",
+    "powerpointQa",
+  );
+  await expectInputError(
+    () => evaluateFixture(contradictoryObservedReadoutFixture),
+    "combined class shared PowerPoint notes evidence",
+  );
+
+  const staleSnapshotObservedReadoutFixture =
+    await makeObservedReadoutFixture("observed-readout-stale-snapshot");
+  const observedStaleSnapshotRunPath = join(
+    staleSnapshotObservedReadoutFixture,
+    "run.json",
+  );
+  const observedStaleSnapshotRun = await readJson(
+    observedStaleSnapshotRunPath,
+  );
+  const observedStaleSnapshotDescriptor =
+    observedStaleSnapshotRun.artifacts.find(
+    (entry) => entry.format === "powerpoint",
+  );
+  const observedStaleSnapshotPath = join(
+    staleSnapshotObservedReadoutFixture,
+    observedStaleSnapshotDescriptor.path,
+  );
+  const observedStaleSnapshot = await readJson(
+    observedStaleSnapshotPath,
+  );
+  observedStaleSnapshot.sourcePlanSha256 = "0".repeat(64);
+  await writeJson(observedStaleSnapshotPath, observedStaleSnapshot);
+  const observedStaleSnapshotSha256 = sha256(
+    await readFile(observedStaleSnapshotPath),
+  );
+  observedStaleSnapshotDescriptor.sha256 =
+    observedStaleSnapshotSha256;
+  await writeJson(
+    observedStaleSnapshotRunPath,
+    observedStaleSnapshotRun,
+  );
+  const staleSnapshotPowerPointQaPath = join(
+    staleSnapshotObservedReadoutFixture,
+    "evidence",
+    "powerpoint-qa.json",
+  );
+  const staleSnapshotPowerPointQa = await readJson(
+    staleSnapshotPowerPointQaPath,
+  );
+  staleSnapshotPowerPointQa.artifactSha256 =
+    observedStaleSnapshotSha256;
+  staleSnapshotPowerPointQa.replayEvidence.finalPowerPointSha256 =
+    observedStaleSnapshotSha256;
+  staleSnapshotPowerPointQa.replayEvidence.nativeOpen.capturedPowerPointSha256 =
+    observedStaleSnapshotSha256;
+  await writeJson(
+    staleSnapshotPowerPointQaPath,
+    staleSnapshotPowerPointQa,
+  );
+  const staleSnapshotHumanReviewPath = join(
+    staleSnapshotObservedReadoutFixture,
+    "evidence",
+    "human-review.json",
+  );
+  const staleSnapshotHumanReview = await readJson(
+    staleSnapshotHumanReviewPath,
+  );
+  staleSnapshotHumanReview.artifactHashes.powerpoint =
+    observedStaleSnapshotSha256;
+  await writeJson(
+    staleSnapshotHumanReviewPath,
+    staleSnapshotHumanReview,
+  );
+  await updateDescriptorHash(
+    staleSnapshotObservedReadoutFixture,
+    "evidence",
+    "powerpointQa",
+  );
+  await updateDescriptorHash(
+    staleSnapshotObservedReadoutFixture,
+    "evidence",
+    "humanReview",
+  );
+  await expectInputError(
+    () => evaluateFixture(staleSnapshotObservedReadoutFixture),
+    "combined class stale PowerPoint snapshot provenance",
+  );
+
+  const aliasedObservedReadoutFixture =
+    await makeObservedReadoutFixture("observed-readout-aliased-html");
+  const aliasedRunPath = join(aliasedObservedReadoutFixture, "run.json");
+  const aliasedRun = await readJson(aliasedRunPath);
+  const observedAliasedHtmlDescriptor = aliasedRun.artifacts.find(
+    (entry) => entry.format === "html",
+  );
+  const observedAliasedContactDescriptor = aliasedRun.artifacts.find(
+    (entry) => entry.format === "contact-sheet",
+  );
+  observedAliasedHtmlDescriptor.path =
+    observedAliasedContactDescriptor.path;
+  observedAliasedHtmlDescriptor.sha256 =
+    observedAliasedContactDescriptor.sha256;
+  observedAliasedHtmlDescriptor.sourcePlanSha256 =
+    observedAliasedContactDescriptor.sourcePlanSha256;
+  await writeJson(aliasedRunPath, aliasedRun);
+  const aliasedHtmlQaPath = join(
+    aliasedObservedReadoutFixture,
+    "evidence",
+    "html-qa.json",
+  );
+  const aliasedHtmlQa = await readJson(aliasedHtmlQaPath);
+  aliasedHtmlQa.artifactSha256 =
+    observedAliasedContactDescriptor.sha256;
+  aliasedHtmlQa.replayEvidence.finalHtmlSha256 =
+    observedAliasedContactDescriptor.sha256;
+  for (const capture of Object.values(
+    aliasedHtmlQa.replayEvidence.captures,
+  )) {
+    capture.capturedHtmlSha256 =
+      observedAliasedContactDescriptor.sha256;
+  }
+  await writeJson(aliasedHtmlQaPath, aliasedHtmlQa);
+  const aliasedHumanReviewPath = join(
+    aliasedObservedReadoutFixture,
+    "evidence",
+    "human-review.json",
+  );
+  const aliasedHumanReview = await readJson(aliasedHumanReviewPath);
+  aliasedHumanReview.artifactHashes.html =
+    observedAliasedContactDescriptor.sha256;
+  await writeJson(aliasedHumanReviewPath, aliasedHumanReview);
+  await updateDescriptorHash(
+    aliasedObservedReadoutFixture,
+    "evidence",
+    "htmlQa",
+  );
+  await updateDescriptorHash(
+    aliasedObservedReadoutFixture,
+    "evidence",
+    "humanReview",
+  );
+  await expectInputError(
+    () => evaluateFixture(aliasedObservedReadoutFixture),
+    "combined class aliased required artifact paths",
+  );
+
+  const missingHtmlObservedReadoutFixture =
+    await makeObservedReadoutFixture("observed-readout-missing-html");
+  const missingHtmlRunPath = join(
+    missingHtmlObservedReadoutFixture,
+    "run.json",
+  );
+  const missingHtmlRun = await readJson(missingHtmlRunPath);
+  missingHtmlRun.artifacts = missingHtmlRun.artifacts.filter(
+    (entry) => entry.format !== "html",
+  );
+  await writeJson(missingHtmlRunPath, missingHtmlRun);
+  const missingHtmlObservedReadout = await evaluateFixture(
+    missingHtmlObservedReadoutFixture,
+  );
+  check(
+    reasonCodes(missingHtmlObservedReadout).has(
+      "final_outcome.html_missing",
+    ),
+    "combined class must grade a missing HTML descriptor as a final-outcome failure",
+  );
+
+  const legacyClassBypassFixture = await copyPassFixture(
+    "legacy-class-bypass",
+  );
+  const legacyClassBypassRunPath = join(
+    legacyClassBypassFixture,
+    "run.json",
+  );
+  const legacyClassBypassRun = await readJson(legacyClassBypassRunPath);
+  legacyClassBypassRun.fixtureId = "readout-only-spoof";
+  await writeJson(legacyClassBypassRunPath, legacyClassBypassRun);
+  await expectInputError(
+    () => evaluateFixtureUnderTest(legacyClassBypassFixture),
+    "legacy full task class fixture allowlist",
+  );
+
+  const fractionalCountFixture = await copyPassFixture(
+    "fractional-tool-count",
+  );
+  const fractionalCountRunPath = join(
+    fractionalCountFixture,
+    "run.json",
+  );
+  const fractionalCountRun = await readJson(fractionalCountRunPath);
+  fractionalCountRun.metrics.toolCalls = 12.5;
+  await writeJson(fractionalCountRunPath, fractionalCountRun);
+  await syncTraceToMetrics(fractionalCountFixture);
+  await expectInputError(
+    () => evaluateFixture(fractionalCountFixture),
+    "fractional tool call count",
+  );
+
   const limits = budgets.taskClasses["full-fde-dual-format"].limits;
   for (const [metric, limit] of Object.entries(limits).filter(
     ([metric]) => !["failedToolCalls", "failedToolRate"].includes(metric),
@@ -1452,6 +2046,63 @@ try {
       `${metric} above its budget must fail`,
     );
   }
+
+  const warningBudgetsPath = join(temporaryRoot, "warning-budgets.json");
+  const warningBudgets = structuredClone(budgets);
+  warningBudgets.taskClasses["full-fde-dual-format"].warningLimits = {
+    modelCalls: 13,
+  };
+  await writeJson(warningBudgetsPath, warningBudgets);
+  const warningFixture = await copyPassFixture("warning-model-calls");
+  const warningRunPath = join(warningFixture, "run.json");
+  const warningRun = await readJson(warningRunPath);
+  warningRun.metrics.modelCalls = 13;
+  await writeJson(warningRunPath, warningRun);
+  await syncTraceToMetrics(warningFixture);
+  const warningBoundary = await evaluateFixture(warningFixture, {
+    budgetsPath: warningBudgetsPath,
+  });
+  check(
+    warningBoundary.status === "passed" &&
+      warningBoundary.warnings.length === 0,
+    "metric equal to its warning threshold must not warn",
+  );
+  const warningOverRun = await readJson(warningRunPath);
+  warningOverRun.metrics.modelCalls = 14;
+  await writeJson(warningRunPath, warningOverRun);
+  await syncTraceToMetrics(warningFixture);
+  const warningOver = await evaluateFixture(warningFixture, {
+    budgetsPath: warningBudgetsPath,
+  });
+  check(
+    warningOver.status === "passed" &&
+      warningOver.warnings.some(
+        (warning) =>
+          warning.code ===
+          "efficiency.modelCalls_warning_threshold_exceeded",
+      ) &&
+      warningOver.operationalDiagnostics.efficiencyWarningCount === 1,
+    "metric above its warning threshold must warn without failing",
+  );
+
+  const invalidWarningBudgetsPath = join(
+    temporaryRoot,
+    "invalid-warning-budgets.json",
+  );
+  const invalidWarningBudgets = structuredClone(budgets);
+  invalidWarningBudgets.taskClasses[
+    "full-fde-dual-format"
+  ].warningLimits = {
+    modelCalls: limits.modelCalls,
+  };
+  await writeJson(invalidWarningBudgetsPath, invalidWarningBudgets);
+  await expectInputError(
+    () =>
+      evaluateFixture(passFixtureId, {
+        budgetsPath: invalidWarningBudgetsPath,
+      }),
+    "warning threshold at hard limit",
+  );
 
   const failedCountFixture = await copyPassFixture("failed-tool-count");
   const failedCountRunPath = join(failedCountFixture, "run.json");

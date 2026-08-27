@@ -3,6 +3,10 @@
   "taskClasses": {
     "full-fde-dual-format": {
       "description": "Temporary composite of the 10-minute engagement and 20-minute dual-format budgets.",
+      "allowedFixtureIds": [
+        "hill-0-observed-failure-v1",
+        "hill-0-minimal-pass-v1"
+      ],
       "requiredFormats": [
         "html",
         "powerpoint"
@@ -37,6 +41,83 @@
           "trial-4",
           "trial-5"
         ]
+      }
+    },
+    "readout-dual-format-final": {
+      "description": "Observed budget for producing final HTML and editable PowerPoint from one validated ReadoutPlan. Discovery and engagement work are outside this task class.",
+      "requiredFormats": [
+        "html",
+        "powerpoint"
+      ],
+      "warningLimits": {
+        "wallTimeMs": 295112,
+        "modelCalls": 14,
+        "inputTokens": 1033876,
+        "outputTokens": 3240,
+        "toolCalls": 12
+      },
+      "limits": {
+        "wallTimeMs": 358154,
+        "modelCalls": 17,
+        "inputTokens": 1246579,
+        "outputTokens": 4205,
+        "toolCalls": 12.5,
+        "failedToolCalls": 0,
+        "failedToolRate": 0
+      },
+      "requiredQaChecks": {
+        "html": [
+          "opens",
+          "planHashMatches",
+          "desktopAllSlides",
+          "phoneReadable",
+          "phoneControlsUsable",
+          "exportAllSlides",
+          "navigationPass",
+          "notesPass",
+          "fullscreenPass",
+          "consoleClean",
+          "faultIsolated",
+          "noExternalWindow"
+        ],
+        "powerpoint": [
+          "opens",
+          "packageValid",
+          "editable",
+          "notesIsolated",
+          "noOrphanedCustomerParts",
+          "planEvidenceBound",
+          "denseContentReadable"
+        ]
+      },
+      "reliability": {
+        "requiredTrialIds": [
+          "hill4-final-baseline",
+          "hill5-v5-trial-1",
+          "hill5-v5-trial-2",
+          "hill5-v5-trial-3",
+          "hill5-v5-trial-4",
+          "hill5-v5-trial-5",
+          "hill6-run-7",
+          "hill6-run-8",
+          "hill6-run-10",
+          "hill6-run-11",
+          "hill6-run-13",
+          "hill6-run-14",
+          "hill6-run-17",
+          "hill6-run-18",
+          "hill6-run-19",
+          "hill6-run-20",
+          "hill6-run-21",
+          "hill6-run-22",
+          "hill6-run-23",
+          "hill6-run-24"
+        ]
+      },
+      "calibration": {
+        "successfulRuns": 20,
+        "report": "hill4-output/hill6-budget-report.json",
+        "method": "nearest-rank p95 warning thresholds and median plus six MAD hard limits capped at twice the median"
       }
     },
     "readout-pptx-smoke": {

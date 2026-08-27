@@ -38,7 +38,7 @@ Exit code `0` means every hard gate passed. Exit code `1` means the fixture was 
 | Final outcome | Every requested format exists, matches its frozen hash and final plan, passes deterministic checks, and has current approved QA |
 | Artifact quality | Visual QA is approved with zero severe defects |
 | Trace quality | Capture reconciles with raw metrics and has no stale QA, wake/resend loop, repeated structural retry, or premature validation |
-| Efficiency | Every raw metric with a task-class limit is at or below that limit |
+| Efficiency | Every raw metric is at or below its task-class hard limit; warning thresholds remain diagnostic |
 | Reliability | Every required critical trial is present and passed |
 | Human approval | Explicit approval is bound to every final requested artifact hash |
 
@@ -61,7 +61,7 @@ The evaluator requires the frozen plan file to exist and match its declared hash
 
 The PowerPoint file in each committed fixture is a synthetic structural snapshot, not a customer deck. Structural snapshots are replay evidence only; Hill 0 never certifies a live artifact. The failure fixture preserves only the slide and shape evidence needed to reproduce the visual hard gate. No raw transcript, customer source, screenshot, or generated presentation package is committed.
 
-Trusted task-class policy in `budgets.json` defines required formats, the exact deterministic check set, experiment or reliability trial IDs, and hard limits. A fixture cannot weaken or extend those requirements. Missing or unknown QA checks, missing, extra, or duplicate requested formats, duplicate artifact formats, and duplicate trial IDs are invalid evaluator input. Requested format order does not matter.
+Trusted task-class policy in `budgets.json` defines required formats, the exact deterministic check set, experiment or reliability trial IDs, warning thresholds, and hard limits. Warning thresholds are diagnostic and do not change release status. A fixture cannot weaken or extend those requirements. Missing or unknown QA checks, missing, extra, or duplicate requested formats, duplicate artifact formats, and duplicate trial IDs are invalid evaluator input. Requested format order does not matter.
 
 ## Frozen fixtures
 
@@ -98,6 +98,26 @@ The observed fixture must report, at minimum:
 Output tokens and AI units remain raw metrics because the source plan does not define hard limits for them.
 
 The evaluator calculates `failedToolRate` as failed tool calls divided by total tool calls, or zero when no tool calls occurred. Failed tool calls cannot exceed total tool calls.
+
+This legacy composite is restricted to the two frozen Hill 0 fixtures. New replay bundles cannot select it to bypass the observed readout policy.
+
+## Observed dual-format readout policy
+
+`readout-dual-format-final` covers final HTML and editable PowerPoint generation from one already validated `ReadoutPlan`. It does not include discovery, workflow auditing, evaluation design, rollout, or handoff. The broader `full-fde-dual-format` composite therefore remains temporary.
+
+Twenty successful, trace-reviewed runs calibrated this task class. The report at `hill4-output/hill6-budget-report.json` records every included run, the nearest-rank p95, median absolute deviation, stability check, and selected thresholds.
+
+| Metric | Median | MAD | p95 | Warn above | Hard limit |
+|---|---:|---:|---:|---:|---:|
+| Wall time | 179.077 s | 37.736 s | 295.112 s | 295.112 s | 358.154 s |
+| Model calls | 11 | 1 | 14 | 14 | 17 |
+| Input tokens | 812,578 | 72,333.5 | 1,033,876 | 1,033,876 | 1,246,579 |
+| Output tokens | 2,102.5 | 767 | 3,240 | 3,240 | 4,205 |
+| Tool calls | 9.5 | 0.5 | 12 | 12 | 12.5 |
+
+The warning threshold is the observed p95. The evaluator warns only when a metric is greater than that threshold and fails only when it is greater than its hard limit. Tool counts are integral, so 13 calls cross both the 12-call warning threshold and the 12.5-call hard limit. Failed tool calls and failed-tool rate remain hard zero for this task class.
+
+The combined class derives its HTML checks from hash-bound desktop, phone, export, interaction, console, and fault captures. It derives PowerPoint checks from the frozen plan, snapshot shape inventory, unique notes relationships and parts, package counts, contact-sheet hash, and note evidence IDs. Self-declared deterministic booleans cannot override contradictory replay evidence.
 
 ## PowerPoint smoke policy
 
@@ -144,7 +164,7 @@ The JSON result includes:
 - evaluation mode;
 - overall binary status and all seven axis statuses;
 - stable failure codes with supporting evidence;
-- raw metrics and the selected task-class limits;
+- raw metrics, selected warning and hard limits, and any efficiency warnings;
 - operational counts for wake-only turns, premature validators, repeated retries, failed tools, failed-tool rate, and leaked processes;
 - recomputed artifact, evidence, and record hashes;
 - environment versions and the ignored agent claim.
