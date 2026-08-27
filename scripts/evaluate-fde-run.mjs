@@ -10,7 +10,7 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const GRADER_VERSION = "hill-0-evaluator/1.3.0";
+export const GRADER_VERSION = "hill-0-evaluator/1.4.0";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const defaultFixturesRoot = resolve(root, "evals", "fde-e2e", "fixtures");
@@ -37,6 +37,18 @@ const htmlFinalFailureCodes = {
   consoleClean: "final_outcome.html_console_not_clean",
   faultIsolated: "final_outcome.html_fault_not_isolated",
   noExternalWindow: "final_outcome.html_external_window_opened",
+};
+const powerpointFinalFailureCodes = {
+  opens: "final_outcome.powerpoint_open_failed",
+  packageValid: "final_outcome.powerpoint_package_invalid",
+  editable: "final_outcome.powerpoint_not_editable",
+  notesIsolated: "final_outcome.powerpoint_notes_not_isolated",
+  noOrphanedCustomerParts:
+    "final_outcome.powerpoint_orphaned_customer_parts",
+  planEvidenceBound:
+    "final_outcome.powerpoint_plan_evidence_binding_failed",
+  denseContentReadable:
+    "final_outcome.powerpoint_dense_content_unreadable",
 };
 
 function hash(bytes) {
@@ -71,6 +83,13 @@ function requireArray(value, label) {
 function requireNonNegativeNumber(value, label) {
   if (typeof value !== "number" || value < 0) {
     throw new Error(`${label} must be a non-negative number`);
+  }
+  return value;
+}
+
+function requireNonNegativeInteger(value, label) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
   }
   return value;
 }
@@ -429,11 +448,11 @@ function validateSmokeEvidence({
     snapshotNativeTable.slideId,
     "PowerPoint smoke candidate snapshot.nativeTable.slideId",
   );
-  requireNonNegativeNumber(
+  requireNonNegativeInteger(
     snapshotNativeTable.rows,
     "PowerPoint smoke candidate snapshot.nativeTable.rows",
   );
-  requireNonNegativeNumber(
+  requireNonNegativeInteger(
     snapshotNativeTable.columns,
     "PowerPoint smoke candidate snapshot.nativeTable.columns",
   );
@@ -456,11 +475,11 @@ function validateSmokeEvidence({
         slide.denseRepresentative,
         `${label}.denseRepresentative`,
       ),
-      shapeCount: requireNonNegativeNumber(
+      shapeCount: requireNonNegativeInteger(
         slide.shapeCount,
         `${label}.shapeCount`,
       ),
-      tableCount: requireNonNegativeNumber(
+      tableCount: requireNonNegativeInteger(
         slide.tableCount,
         `${label}.tableCount`,
       ),
@@ -496,7 +515,7 @@ function validateSmokeEvidence({
     "orphanedCustomerSlidePartCount",
     "orphanedCustomerNotesPartCount",
   ]) {
-    requireNonNegativeNumber(
+    requireNonNegativeInteger(
       inventory[field],
       `powerpointQa.smokeEvidence.packageInventory.${field}`,
     );
@@ -515,7 +534,7 @@ function validateSmokeEvidence({
     "otherToolCalls",
     "otherToolFailures",
   ]) {
-    requireNonNegativeNumber(
+    requireNonNegativeInteger(
       canvas[field],
       `powerpointQa.smokeEvidence.canvas.${field}`,
     );
@@ -526,7 +545,7 @@ function validateSmokeEvidence({
     "powerpointQa.smokeEvidence.usage",
   );
   for (const field of ["elapsedTimeMs", "modelCalls", "inputTokens"]) {
-    requireNonNegativeNumber(
+    requireNonNegativeInteger(
       usage[field],
       `powerpointQa.smokeEvidence.usage.${field}`,
     );
@@ -544,23 +563,25 @@ function validateSmokeEvidence({
     "powerpointQa.smokeEvidence.nativeTable",
   );
   requireString(nativeTable.slideId, "powerpointQa.smokeEvidence.nativeTable.slideId");
-  requireNonNegativeNumber(
+  requireNonNegativeInteger(
     nativeTable.rows,
     "powerpointQa.smokeEvidence.nativeTable.rows",
   );
-  requireNonNegativeNumber(
+  requireNonNegativeInteger(
     nativeTable.columns,
     "powerpointQa.smokeEvidence.nativeTable.columns",
   );
   const shapeStats = requireObject(qa.shapeStats, "powerpointQa.shapeStats");
-  for (const field of [
-    "slideCount",
-    "totalShapes",
-    "medianShapesPerSlide",
-    "nativeTables",
-  ]) {
-    requireNonNegativeNumber(shapeStats[field], `powerpointQa.shapeStats.${field}`);
+  for (const field of ["slideCount", "totalShapes", "nativeTables"]) {
+    requireNonNegativeInteger(
+      shapeStats[field],
+      `powerpointQa.shapeStats.${field}`,
+    );
   }
+  requireNonNegativeNumber(
+    shapeStats.medianShapesPerSlide,
+    "powerpointQa.shapeStats.medianShapesPerSlide",
+  );
 
   const snapshotMatchesSlides =
     snapshotSlides.length === activeSlides.length &&
@@ -598,7 +619,7 @@ function validateSmokeEvidence({
     "orphanedCustomerSlidePartCount",
     "orphanedCustomerNotesPartCount",
   ].every((field) => {
-    requireNonNegativeNumber(
+    requireNonNegativeInteger(
       snapshotInventory[field],
       `PowerPoint smoke candidate snapshot.packageInventory.${field}`,
     );
@@ -728,6 +749,283 @@ function validateSmokeEvidence({
   };
 }
 
+function validatePowerPointFinalEvidence({
+  qa,
+  artifact,
+  artifacts,
+  currentPlanHash,
+  humanReview,
+}) {
+  const replay = requireObject(
+    qa.replayEvidence,
+    "powerpointQa.replayEvidence",
+  );
+  const finalPlanSha256 = requireString(
+    replay.finalPlanSha256,
+    "powerpointQa.replayEvidence.finalPlanSha256",
+  );
+  const finalPowerPointSha256 = requireString(
+    replay.finalPowerPointSha256,
+    "powerpointQa.replayEvidence.finalPowerPointSha256",
+  );
+  if (!isSha256(finalPlanSha256) || !isSha256(finalPowerPointSha256)) {
+    throw new Error(
+      "powerpointQa.replayEvidence final hashes must be lowercase SHA-256 values",
+    );
+  }
+
+  const planArtifact = artifactForFormat(artifacts, "plan");
+  const plan = parseArtifactJson(
+    planArtifact,
+    "Final PowerPoint replay plan artifact",
+  );
+  const planSlides = requireArray(
+    plan.slides,
+    "Final PowerPoint replay plan artifact.slides",
+  );
+  if (planSlides.length === 0) {
+    throw new Error("Final PowerPoint replay plan must contain slides");
+  }
+  const planSlideEntries = planSlides.map((slide, index) => {
+    const label = `Final PowerPoint replay plan artifact.slides[${index}]`;
+    requireObject(slide, label);
+    const id = requireString(slide.id, `${label}.id`);
+    return [
+      id,
+      requireStringSet(slide.evidenceIds, `${label}.evidenceIds`),
+    ];
+  });
+  const planSlideIds = planSlideEntries.map(([id]) => id);
+  const planSlidesById = new Map(
+    planSlideEntries,
+  );
+  if (planSlidesById.size !== planSlides.length) {
+    throw new Error("Final PowerPoint replay plan slide IDs must be distinct");
+  }
+
+  const snapshot = parseArtifactJson(
+    artifact,
+    "Final PowerPoint replay snapshot",
+  );
+  const snapshotSourcePlanSha256 = requireString(
+    snapshot.sourcePlanSha256,
+    "Final PowerPoint replay snapshot.sourcePlanSha256",
+  );
+  if (!isSha256(snapshotSourcePlanSha256)) {
+    throw new Error(
+      "Final PowerPoint replay snapshot.sourcePlanSha256 must be a lowercase SHA-256 value",
+    );
+  }
+  const snapshotSlideCount = requireNonNegativeInteger(
+    snapshot.slideCount,
+    "Final PowerPoint replay snapshot.slideCount",
+  );
+  const shapeCounts = requireArray(
+    snapshot.shapeCounts,
+    "Final PowerPoint replay snapshot.shapeCounts",
+  ).map((count, index) =>
+    requireNonNegativeInteger(
+      count,
+      `Final PowerPoint replay snapshot.shapeCounts[${index}]`,
+    ),
+  );
+
+  const contactSheet = requireObject(
+    replay.contactSheet,
+    "powerpointQa.replayEvidence.contactSheet",
+  );
+  const contactSheetArtifactId = requireString(
+    contactSheet.artifactId,
+    "powerpointQa.replayEvidence.contactSheet.artifactId",
+  );
+  const contactSheetSha256 = requireString(
+    contactSheet.sha256,
+    "powerpointQa.replayEvidence.contactSheet.sha256",
+  );
+  if (!isSha256(contactSheetSha256)) {
+    throw new Error(
+      "powerpointQa.replayEvidence.contactSheet.sha256 must be a lowercase SHA-256 value",
+    );
+  }
+  const contactSheetArtifact = artifacts.get(contactSheetArtifactId);
+  if (
+    !contactSheetArtifact?.exists ||
+    contactSheetArtifact.descriptor.format !== "contact-sheet"
+  ) {
+    throw new Error(
+      "Final PowerPoint replay contact-sheet artifact must exist",
+    );
+  }
+  const htmlArtifact = artifactForFormat(artifacts, "html");
+  const requiredArtifactPaths = [
+    planArtifact.canonicalPath,
+    artifact.canonicalPath,
+    contactSheetArtifact.canonicalPath,
+  ];
+  if (htmlArtifact) {
+    requiredArtifactPaths.push(htmlArtifact.canonicalPath);
+  }
+  if (new Set(requiredArtifactPaths).size !== requiredArtifactPaths.length) {
+    throw new Error(
+      "Final readout plan, HTML, PowerPoint snapshot, and contact sheet must use distinct artifact paths",
+    );
+  }
+
+  const nativeOpen = requireObject(
+    replay.nativeOpen,
+    "powerpointQa.replayEvidence.nativeOpen",
+  );
+  const nativeOpenSha256 = requireString(
+    nativeOpen.capturedPowerPointSha256,
+    "powerpointQa.replayEvidence.nativeOpen.capturedPowerPointSha256",
+  );
+  if (!isSha256(nativeOpenSha256)) {
+    throw new Error(
+      "powerpointQa.replayEvidence.nativeOpen.capturedPowerPointSha256 must be a lowercase SHA-256 value",
+    );
+  }
+  const nativeOpened = requireBoolean(
+    nativeOpen.opened,
+    "powerpointQa.replayEvidence.nativeOpen.opened",
+  );
+
+  const inventory = requireObject(
+    replay.packageInventory,
+    "powerpointQa.replayEvidence.packageInventory",
+  );
+  for (const field of [
+    "activeSlideCount",
+    "activeNotesPartCount",
+    "packageSlidePartCount",
+    "packageNotesPartCount",
+    "uniqueNotesPartCount",
+    "orphanedCustomerSlidePartCount",
+    "orphanedCustomerNotesPartCount",
+  ]) {
+    requireNonNegativeInteger(
+      inventory[field],
+      `powerpointQa.replayEvidence.packageInventory.${field}`,
+    );
+  }
+
+  const slides = requireArray(
+    replay.slides,
+    "powerpointQa.replayEvidence.slides",
+  ).map((slide, index) => {
+    const label = `powerpointQa.replayEvidence.slides[${index}]`;
+    requireObject(slide, label);
+    return {
+      slideId: requireString(slide.slideId, `${label}.slideId`),
+      planId: requireString(slide.planId, `${label}.planId`),
+      notesRelationshipId: requireString(
+        slide.notesRelationshipId,
+        `${label}.notesRelationshipId`,
+      ),
+      notesPart: requireString(slide.notesPart, `${label}.notesPart`),
+      expectedEvidenceIds: requireStringSet(
+        slide.expectedEvidenceIds,
+        `${label}.expectedEvidenceIds`,
+      ),
+      evidenceIdsInNotes: requireStringSet(
+        slide.evidenceIdsInNotes,
+        `${label}.evidenceIdsInNotes`,
+      ),
+    };
+  });
+  const editableShapeCount = requireNonNegativeInteger(
+    replay.editableShapeCount,
+    "powerpointQa.replayEvidence.editableShapeCount",
+  );
+  const denseContentReadable = requireBoolean(
+    replay.denseContentReadable,
+    "powerpointQa.replayEvidence.denseContentReadable",
+  );
+
+  const finalHashesMatch =
+    finalPlanSha256 === currentPlanHash &&
+    finalPowerPointSha256 === artifact.actualSha256;
+  const opens =
+    finalHashesMatch &&
+    nativeOpenSha256 === finalPowerPointSha256 &&
+    nativeOpened;
+  const notesIsolated =
+    new Set(
+      slides.map(
+        (slide) => `${slide.slideId}:${slide.notesRelationshipId}`,
+      ),
+    ).size ===
+      slides.length &&
+    new Set(slides.map((slide) => slide.notesPart)).size === slides.length;
+  const noOrphanedCustomerParts =
+    inventory.orphanedCustomerSlidePartCount === 0 &&
+    inventory.orphanedCustomerNotesPartCount === 0;
+  const packageValid =
+    snapshotSlideCount === planSlides.length &&
+    shapeCounts.length === planSlides.length &&
+    slides.length === planSlides.length &&
+    inventory.activeSlideCount === planSlides.length &&
+    inventory.activeNotesPartCount === planSlides.length &&
+    inventory.packageSlidePartCount === planSlides.length &&
+    inventory.packageNotesPartCount === planSlides.length &&
+    inventory.uniqueNotesPartCount === planSlides.length &&
+    notesIsolated &&
+    noOrphanedCustomerParts;
+  const editable =
+    editableShapeCount > 0 &&
+    editableShapeCount ===
+      shapeCounts.reduce((total, count) => total + count, 0);
+  const planEvidenceBound =
+    finalHashesMatch &&
+    snapshotSourcePlanSha256 === currentPlanHash &&
+    qa.planSha256 === currentPlanHash &&
+    artifact.descriptor.sourcePlanSha256 === currentPlanHash &&
+    contactSheetSha256 === contactSheetArtifact.actualSha256 &&
+    contactSheetArtifact.descriptor.sha256 ===
+      contactSheetArtifact.actualSha256 &&
+    contactSheetArtifact.descriptor.sourcePlanSha256 === currentPlanHash &&
+    humanReview.contactSheetSha256 === contactSheetArtifact.actualSha256 &&
+    new Set(slides.map((slide) => slide.slideId)).size === slides.length &&
+    slides.every((slide, index) => {
+      const expectedEvidenceIds = planSlidesById.get(slide.planId);
+      return (
+        slide.planId === planSlideIds[index] &&
+        expectedEvidenceIds &&
+        setsEqual(expectedEvidenceIds, slide.expectedEvidenceIds) &&
+        setsEqual(slide.expectedEvidenceIds, slide.evidenceIdsInNotes)
+      );
+    });
+  const derivedChecks = {
+    opens,
+    packageValid,
+    editable,
+    notesIsolated,
+    noOrphanedCustomerParts,
+    planEvidenceBound,
+    denseContentReadable,
+  };
+  const contradictions = Object.entries(derivedChecks)
+    .filter(([check, derived]) => qa.deterministicChecks[check] !== derived)
+    .map(([check]) => check);
+  if (contradictions.length > 0) {
+    throw new Error(
+      `powerpointQa.deterministicChecks contradict replay evidence: ${contradictions.join(", ")}`,
+    );
+  }
+
+  return {
+    finalPlanSha256,
+    finalPowerPointSha256,
+    snapshotSourcePlanSha256,
+    contactSheetSha256,
+    nativeOpen: {
+      capturedPowerPointSha256: nativeOpenSha256,
+      opened: nativeOpened,
+    },
+    packageInventory: inventory,
+    derivedChecks,
+  };
+}
+
 function validateHtmlFinalEvidence({
   qa,
   artifact,
@@ -774,7 +1072,7 @@ function validateHtmlFinalEvidence({
       "htmlQa.replayEvidence final plan and HTML hashes must be lowercase SHA-256 values",
     );
   }
-  const declaredFinalSlideCount = requireNonNegativeNumber(
+  const declaredFinalSlideCount = requireNonNegativeInteger(
     replay.finalSlideCount,
     "htmlQa.replayEvidence.finalSlideCount",
   );
@@ -834,7 +1132,7 @@ function validateHtmlFinalEvidence({
       reviewedSlideCount =
         capture.reviewedSlideCount === null
           ? null
-          : requireNonNegativeNumber(
+          : requireNonNegativeInteger(
               capture.reviewedSlideCount,
               `${label}.reviewedSlideCount`,
             );
@@ -978,6 +1276,7 @@ function metricLabel(metric) {
     wallTimeMs: "wall time",
     modelCalls: "model calls",
     inputTokens: "input tokens",
+    outputTokens: "output tokens",
     toolCalls: "tool calls",
     canvasCalls: "PowerPoint canvas calls",
     failedToolCalls: "failed tool calls",
@@ -991,6 +1290,7 @@ export async function evaluateFixture(
   {
     fixturesRoot = defaultFixturesRoot,
     budgetsPath = defaultBudgetsPath,
+    allowLegacyFixtureCopies = false,
   } = {},
 ) {
   requireString(fixture, "fixture");
@@ -1071,6 +1371,23 @@ export async function evaluateFixture(
       throw new Error(`run.metrics.${field} must be a non-negative number`);
     }
   }
+  for (const field of [
+    "wallTimeMs",
+    "modelCalls",
+    "inputTokens",
+    "outputTokens",
+    "nanoAiUnits",
+    "toolCalls",
+    "failedToolCalls",
+  ]) {
+    requireNonNegativeInteger(metrics[field], `run.metrics.${field}`);
+  }
+  if (metrics.canvasCalls !== undefined) {
+    requireNonNegativeInteger(
+      metrics.canvasCalls,
+      "run.metrics.canvasCalls",
+    );
+  }
   if (metrics.failedToolCalls > metrics.toolCalls) {
     throw new Error(
       "run.metrics.failedToolCalls must not exceed run.metrics.toolCalls",
@@ -1092,6 +1409,39 @@ export async function evaluateFixture(
     requireObject(budgets.taskClasses, "budgets.taskClasses")[taskClass],
     `budget task class ${taskClass}`,
   );
+  if (budget.allowedFixtureIds !== undefined) {
+    const allowedFixtureIds = requireArray(
+      budget.allowedFixtureIds,
+      `budget ${taskClass}.allowedFixtureIds`,
+    );
+    if (
+      allowedFixtureIds.length === 0 ||
+      allowedFixtureIds.some(
+        (fixtureId) => typeof fixtureId !== "string" || fixtureId.length === 0,
+      ) ||
+      new Set(allowedFixtureIds).size !== allowedFixtureIds.length
+    ) {
+      throw new Error(
+        `budget ${taskClass}.allowedFixtureIds must contain distinct non-empty fixture IDs`,
+      );
+    }
+    if (!allowedFixtureIds.includes(run.fixtureId)) {
+      throw new Error(
+        `budget ${taskClass} is restricted to frozen legacy fixtures`,
+      );
+    }
+    if (!allowLegacyFixtureCopies) {
+      const trustedFixtureDirectory = await realpath(
+        resolve(defaultFixturesRoot, run.fixtureId),
+      );
+      const actualFixtureDirectory = await realpath(fixtureDirectory);
+      if (actualFixtureDirectory !== trustedFixtureDirectory) {
+        throw new Error(
+          `budget ${taskClass} is restricted to its canonical committed fixture path`,
+        );
+      }
+    }
+  }
   const requiredFormats = requireArray(
     budget.requiredFormats,
     `budget ${taskClass}.requiredFormats`,
@@ -1121,6 +1471,13 @@ export async function evaluateFixture(
     );
   }
   const limits = requireObject(budget.limits, `budget ${taskClass}.limits`);
+  const warningLimits =
+    budget.warningLimits === undefined
+      ? {}
+      : requireObject(
+          budget.warningLimits,
+          `budget ${taskClass}.warningLimits`,
+        );
   const requiredQaChecks = requireObject(
     budget.requiredQaChecks,
     `budget ${taskClass}.requiredQaChecks`,
@@ -1178,6 +1535,25 @@ export async function evaluateFixture(
     "run.records",
   ).value;
   const trace = requireKind(records, "trace", "run.records").value;
+  for (const field of [
+    "modelCallsCaptured",
+    "toolCallsCaptured",
+    "failedToolCallsCaptured",
+  ]) {
+    requireNonNegativeInteger(trace[field], `trace.${field}`);
+  }
+  for (const field of [
+    "canvasCallsCaptured",
+    "canvasActionsCaptured",
+    "canvasFailuresCaptured",
+    "getModelFailuresCaptured",
+    "otherToolCallsCaptured",
+    "otherToolFailuresCaptured",
+  ]) {
+    if (trace[field] !== undefined) {
+      requireNonNegativeInteger(trace[field], `trace.${field}`);
+    }
+  }
   const reliability = requireKind(
     records,
     "reliability",
@@ -1239,6 +1615,7 @@ export async function evaluateFixture(
   const qaByFormat = new Map();
   let smokeDiagnostics = null;
   let htmlFinalDiagnostics = null;
+  let powerpointFinalDiagnostics = null;
 
   for (const format of task.requestedFormats) {
     const artifact = artifactForFormat(artifacts, format);
@@ -1323,7 +1700,7 @@ export async function evaluateFixture(
       });
     }
     if (
-      taskClass === "readout-html-final" &&
+      ["readout-html-final", "readout-dual-format-final"].includes(taskClass) &&
       format === "html" &&
       artifact.actualSha256 === artifact.descriptor.sha256 &&
       artifact.descriptor.sourcePlanSha256 === currentPlanHash &&
@@ -1334,6 +1711,21 @@ export async function evaluateFixture(
         artifact,
         planArtifact: plan,
         currentPlanHash,
+      });
+    }
+    if (
+      taskClass === "readout-dual-format-final" &&
+      format === "powerpoint" &&
+      artifact.actualSha256 === artifact.descriptor.sha256 &&
+      artifact.descriptor.sourcePlanSha256 === currentPlanHash &&
+      qa.planSha256 === currentPlanHash
+    ) {
+      powerpointFinalDiagnostics = validatePowerPointFinalEvidence({
+        qa,
+        artifact,
+        artifacts,
+        currentPlanHash,
+        humanReview,
       });
     }
     if (artifact.actualSha256 !== artifact.descriptor.sha256) {
@@ -1388,7 +1780,12 @@ export async function evaluateFixture(
             `Required PowerPoint smoke check ${check} failed`,
           );
         }
-      } else if (taskClass === "readout-html-final" && format === "html") {
+      } else if (
+        ["readout-html-final", "readout-dual-format-final"].includes(
+          taskClass,
+        ) &&
+        format === "html"
+      ) {
         for (const check of formatRequiredChecks.filter(
           (checkName) => deterministicChecks[checkName] !== true,
         )) {
@@ -1398,6 +1795,21 @@ export async function evaluateFixture(
             htmlFinalFailureCodes[check] ??
               `final_outcome.html_${check}_failed`,
             `Required final HTML check ${check} failed`,
+          );
+        }
+      } else if (
+        taskClass === "readout-dual-format-final" &&
+        format === "powerpoint"
+      ) {
+        for (const check of formatRequiredChecks.filter(
+          (checkName) => deterministicChecks[checkName] !== true,
+        )) {
+          addFailure(
+            axes,
+            "finalOutcome",
+            powerpointFinalFailureCodes[check] ??
+              `final_outcome.powerpoint_${check}_failed`,
+            `Required final PowerPoint check ${check} failed`,
           );
         }
       } else {
@@ -1445,6 +1857,7 @@ export async function evaluateFixture(
     requestedFormats: task.requestedFormats,
     finalPlanSha256: currentPlanHash,
     smoke: smokeDiagnostics,
+    powerpointFinal: powerpointFinalDiagnostics,
   };
   if (htmlFinalDiagnostics) {
     axes.finalOutcome.diagnostics.htmlFinal = htmlFinalDiagnostics;
@@ -1462,14 +1875,18 @@ export async function evaluateFixture(
   const staleQaFormats = task.requestedFormats.filter((format) => {
     const artifact = artifactForFormat(artifacts, format);
     const qa = qaByFormat.get(format);
+    const htmlFinalTaskClass = [
+      "readout-html-final",
+      "readout-dual-format-final",
+    ].includes(taskClass);
     const staleHtmlFinalCapture =
-      taskClass === "readout-html-final" &&
+      htmlFinalTaskClass &&
       format === "html" &&
       htmlFinalDiagnostics?.staleCaptureIds.length > 0;
     return (
       artifact &&
       (qa?.artifactSha256 !== artifact.actualSha256 ||
-        (taskClass === "readout-html-final" &&
+        (htmlFinalTaskClass &&
           format === "html" &&
           qa?.planSha256 !== currentPlanHash) ||
         staleHtmlFinalCapture)
@@ -1479,11 +1896,11 @@ export async function evaluateFixture(
     trace.structuralRetryGroups,
     "trace.structuralRetryGroups",
   );
-  const wakeOnlyCoordinatorTurns = requireNonNegativeNumber(
+  const wakeOnlyCoordinatorTurns = requireNonNegativeInteger(
     trace.wakeOnlyCoordinatorTurns,
     "trace.wakeOnlyCoordinatorTurns",
   );
-  const prematureValidationAttempts = requireNonNegativeNumber(
+  const prematureValidationAttempts = requireNonNegativeInteger(
     trace.prematureValidationAttempts,
     "trace.prematureValidationAttempts",
   );
@@ -1493,11 +1910,11 @@ export async function evaluateFixture(
       group.operation,
       `trace.structuralRetryGroups[${index}].operation`,
     );
-    requireNonNegativeNumber(
+    requireNonNegativeInteger(
       group.attempts,
       `trace.structuralRetryGroups[${index}].attempts`,
     );
-    requireNonNegativeNumber(
+    requireNonNegativeInteger(
       group.failures,
       `trace.structuralRetryGroups[${index}].failures`,
     );
@@ -1566,10 +1983,6 @@ export async function evaluateFixture(
     );
   }
 
-  axes.efficiency.diagnostics = {
-    metrics: computedMetrics,
-    limits,
-  };
   for (const [metric, limit] of Object.entries(limits)) {
     if (typeof limit !== "number" || limit < 0) {
       throw new Error(`budget ${taskClass}.${metric} must be a non-negative number`);
@@ -1579,6 +1992,47 @@ export async function evaluateFixture(
         `computed metric ${metric} is required by budget ${taskClass}`,
       );
     }
+  }
+
+  const efficiencyWarnings = [];
+  for (const [metric, warningLimit] of Object.entries(warningLimits)) {
+    if (typeof warningLimit !== "number" || warningLimit < 0) {
+      throw new Error(
+        `budget ${taskClass}.warningLimits.${metric} must be a non-negative number`,
+      );
+    }
+    if (typeof limits[metric] !== "number") {
+      throw new Error(
+        `budget ${taskClass}.warningLimits.${metric} requires a hard limit`,
+      );
+    }
+    if (warningLimit >= limits[metric]) {
+      throw new Error(
+        `budget ${taskClass}.warningLimits.${metric} must be below its hard limit`,
+      );
+    }
+    if (typeof computedMetrics[metric] !== "number") {
+      throw new Error(
+        `computed metric ${metric} is required by budget ${taskClass}`,
+      );
+    }
+    if (computedMetrics[metric] > warningLimit) {
+      efficiencyWarnings.push({
+        code: `efficiency.${metric}_warning_threshold_exceeded`,
+        metric,
+        actual: computedMetrics[metric],
+        threshold: warningLimit,
+      });
+    }
+  }
+
+  axes.efficiency.diagnostics = {
+    metrics: computedMetrics,
+    warningLimits,
+    limits,
+    warnings: efficiencyWarnings,
+  };
+  for (const [metric, limit] of Object.entries(limits)) {
     if (computedMetrics[metric] > limit) {
       addFailure(
         axes,
@@ -1678,6 +2132,7 @@ export async function evaluateFixture(
     failedToolRate,
     leakedProcessCount: leakedProcesses.length,
     canvasCalls: metrics.canvasCalls ?? null,
+    efficiencyWarningCount: efficiencyWarnings.length,
   };
   return {
     schemaVersion: 1,
@@ -1692,8 +2147,10 @@ export async function evaluateFixture(
     budget: {
       taskClass,
       requiredFormats,
+      warningLimits,
       limits,
     },
+    warnings: efficiencyWarnings,
     artifactHashes: currentArtifactHashes,
     evidenceHashes: descriptorHashes(evidence),
     recordHashes: descriptorHashes(records),

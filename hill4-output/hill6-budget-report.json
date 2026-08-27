@@ -1,0 +1,252 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "hill": "Hill 6",
+  "taskClass": "readout-dual-format-final",
+  "scope": {
+    "included": "Final HTML and editable PowerPoint generation from one validated ReadoutPlan, including native package checks and final browser QA.",
+    "excluded": "Discovery, workflow audit, evaluation design, deployment, adoption, and handoff.",
+    "reason": "The 20-run evidence set exercises the deterministic readout path, not the broader engagement-plus-readout composite."
+  },
+  "sample": {
+    "successfulRuns": 20,
+    "failedRunsExcluded": [
+      "hill6-run-9",
+      "hill6-run-12",
+      "hill6-run-15",
+      "hill6-run-16"
+    ],
+    "stablePlanSha256": "ce09b33f41a61432c17a80ff6b180f11f2eee0078fd508e559ee0d1dd1b6a42c",
+    "stableHtmlSha256": "6a3256912ce07a768253ec6768ec8babff1461f46376287632a6a7bc5fc31e81",
+    "stableContactSheetSha256": "a59d6cbe8578000995e0ab3a942ad105466a1065851322811c6d875f470af318",
+    "toolFailures": 0,
+    "qaViolations": 0
+  },
+  "method": {
+    "p95": "nearest-rank",
+    "warning": "The nearest-rank p95 is the threshold; values above it warn.",
+    "hardLimit": "median + 6 * MAD, capped at 2 * median.",
+    "integerMetrics": "Exact robust thresholds are retained. Actual model and tool counts are integral.",
+    "stability": "Stable when p95 does not exceed 2 * median."
+  },
+  "statistics": {
+    "wallTimeMs": {
+      "median": 179076.83305,
+      "mad": 37736.16695,
+      "p95": 295112,
+      "twiceMedian": 358153.6661,
+      "stable": true,
+      "warningLimit": 295112,
+      "hardLimit": 358154
+    },
+    "modelCalls": {
+      "median": 11,
+      "mad": 1,
+      "p95": 14,
+      "twiceMedian": 22,
+      "stable": true,
+      "warningLimit": 14,
+      "hardLimit": 17
+    },
+    "inputTokens": {
+      "median": 812578,
+      "mad": 72333.5,
+      "p95": 1033876,
+      "twiceMedian": 1625156,
+      "stable": true,
+      "warningLimit": 1033876,
+      "hardLimit": 1246579
+    },
+    "outputTokens": {
+      "median": 2102.5,
+      "mad": 767,
+      "p95": 3240,
+      "twiceMedian": 4205,
+      "stable": true,
+      "warningLimit": 3240,
+      "hardLimit": 4205
+    },
+    "toolCalls": {
+      "median": 9.5,
+      "mad": 0.5,
+      "p95": 12,
+      "twiceMedian": 19,
+      "stable": true,
+      "warningLimit": 12,
+      "hardLimit": 12.5,
+      "note": "Because calls are integral, 13 calls cross both the 12-call warning threshold and the 12.5-call hard limit."
+    }
+  },
+  "hardFailurePolicy": {
+    "failedToolCalls": 0,
+    "failedToolRate": 0
+  },
+  "runs": [
+    {
+      "id": "hill4-final-baseline",
+      "elapsedSeconds": 181.2956661,
+      "modelCalls": 15,
+      "inputTokens": 1189396,
+      "outputTokens": 4215,
+      "toolCalls": 19
+    },
+    {
+      "id": "hill5-v5-trial-1",
+      "elapsedSeconds": 227.891,
+      "modelCalls": 12,
+      "inputTokens": 888440,
+      "outputTokens": 2848,
+      "toolCalls": 12
+    },
+    {
+      "id": "hill5-v5-trial-2",
+      "elapsedSeconds": 142.294,
+      "modelCalls": 11,
+      "inputTokens": 813744,
+      "outputTokens": 3240,
+      "toolCalls": 11
+    },
+    {
+      "id": "hill5-v5-trial-3",
+      "elapsedSeconds": 167.09,
+      "modelCalls": 12,
+      "inputTokens": 886849,
+      "outputTokens": 2967,
+      "toolCalls": 12
+    },
+    {
+      "id": "hill5-v5-trial-4",
+      "elapsedSeconds": 176.858,
+      "modelCalls": 11,
+      "inputTokens": 811412,
+      "outputTokens": 3137,
+      "toolCalls": 10
+    },
+    {
+      "id": "hill5-v5-trial-5",
+      "elapsedSeconds": 216.275,
+      "modelCalls": 12,
+      "inputTokens": 887668,
+      "outputTokens": 2586,
+      "toolCalls": 12
+    },
+    {
+      "id": "hill6-run-7",
+      "elapsedSeconds": 110.911,
+      "modelCalls": 10,
+      "inputTokens": 737394,
+      "outputTokens": 2755,
+      "toolCalls": 9
+    },
+    {
+      "id": "hill6-run-8",
+      "elapsedSeconds": 159.132,
+      "modelCalls": 11,
+      "inputTokens": 808306,
+      "outputTokens": 2765,
+      "toolCalls": 9,
+      "toolCallsSource": "Reconstructed from the fixed nine-call harness because the completion message omitted the count."
+    },
+    {
+      "id": "hill6-run-10",
+      "elapsedSeconds": 212.752,
+      "modelCalls": 13,
+      "inputTokens": 959869,
+      "outputTokens": 2805,
+      "toolCalls": 10
+    },
+    {
+      "id": "hill6-run-11",
+      "elapsedSeconds": 343.837,
+      "modelCalls": 13,
+      "inputTokens": 957663,
+      "outputTokens": 2551,
+      "toolCalls": 10
+    },
+    {
+      "id": "hill6-run-13",
+      "elapsedSeconds": 238.037,
+      "modelCalls": 14,
+      "inputTokens": 1033579,
+      "outputTokens": 1609,
+      "toolCalls": 9
+    },
+    {
+      "id": "hill6-run-14",
+      "elapsedSeconds": 164.856,
+      "modelCalls": 11,
+      "inputTokens": 811091,
+      "outputTokens": 1521,
+      "toolCalls": 9
+    },
+    {
+      "id": "hill6-run-17",
+      "elapsedSeconds": 217.351,
+      "modelCalls": 12,
+      "inputTokens": 882974,
+      "outputTokens": 1314,
+      "toolCalls": 10
+    },
+    {
+      "id": "hill6-run-18",
+      "elapsedSeconds": 105.751,
+      "modelCalls": 11,
+      "inputTokens": 809631,
+      "outputTokens": 1258,
+      "toolCalls": 9
+    },
+    {
+      "id": "hill6-run-19",
+      "elapsedSeconds": 295.112,
+      "modelCalls": 10,
+      "inputTokens": 735246,
+      "outputTokens": 1465,
+      "toolCalls": 9
+    },
+    {
+      "id": "hill6-run-20",
+      "elapsedSeconds": 98.359,
+      "modelCalls": 11,
+      "inputTokens": 809227,
+      "outputTokens": 1064,
+      "toolCalls": 9
+    },
+    {
+      "id": "hill6-run-21",
+      "elapsedSeconds": 156.77,
+      "modelCalls": 11,
+      "inputTokens": 809139,
+      "outputTokens": 1092,
+      "toolCalls": 9
+    },
+    {
+      "id": "hill6-run-22",
+      "elapsedSeconds": 166.15,
+      "modelCalls": 11,
+      "inputTokens": 809557,
+      "outputTokens": 1206,
+      "toolCalls": 9
+    },
+    {
+      "id": "hill6-run-23",
+      "elapsedSeconds": 233.142,
+      "modelCalls": 11,
+      "inputTokens": 809599,
+      "outputTokens": 1088,
+      "toolCalls": 9
+    },
+    {
+      "id": "hill6-run-24",
+      "elapsedSeconds": 237.924,
+      "modelCalls": 14,
+      "inputTokens": 1033876,
+      "outputTokens": 1654,
+      "toolCalls": 10
+    }
+  ],
+  "decision": {
+    "baselineStable": true,
+    "replaceTemporaryReadoutBudget": true,
+    "replaceFullEngagementComposite": false
+  }
+}
