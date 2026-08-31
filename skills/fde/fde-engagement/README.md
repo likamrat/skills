@@ -239,17 +239,7 @@ For reports and decks, also copy:
 assets/readout-brief.template.json
 ```
 
-For a trusted multi-turn driver, replay explicit records with runtime verifiers:
-
-```js
-const checkpoint = await replayEngagement(records, {
-  verifyAuthority,
-  verifyCaseSubmission,
-});
-```
-
-The verifiers, not record actor labels or self-hashes, establish accepted human authority and source submission. A checkpoint is a deterministic cache projection, not tamper proof. The caller must provide append-only storage. The reducer reads no sources and executes no authorized action.
-
+For a trusted multi-turn driver, call `replayEngagement(records, { verifyAuthority, verifyCaseSubmission })`. The verifiers, not actor labels or self-hashes, establish accepted human authority and source submission. The checkpoint is a cache projection, not tamper proof. The caller owns append-only storage. The reducer reads no sources and executes no authorized action.
 Validate the audience, evidence links, findings, recommendations, risks, and next steps:
 
 ```text

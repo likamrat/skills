@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateDomainModelLifecycle } from "./domain-model-lifecycle.mjs";
+import { encodeJson, snapshotJson } from "./protocol-json.mjs";
 
 const phases = [
   "qualify",
@@ -119,6 +120,9 @@ const retrospectiveStatuses = new Set([
   "none-observed",
 ]);
 const humanOrigins = new Set(["human-provided", "human-confirmed"]);
+const virtualCasePath = fileURLToPath(
+  new URL("../.virtual/case-file.json", import.meta.url),
+);
 
 let errors = [];
 
@@ -306,7 +310,7 @@ async function validateSourceIntake(
 
   const { manifestSha256, ...manifestBody } = manifest;
   const computedManifestSha256 = createHash("sha256")
-    .update(JSON.stringify(manifestBody))
+    .update(encodeJson(manifestBody))
     .digest("hex");
   requireValue(
     manifestSha256 === computedManifestSha256,
@@ -1015,9 +1019,7 @@ function validateAudit(data) {
     Array.isArray(data.domainModel?.conflicts),
     "domainModel.conflicts must be an array",
   );
-  for (const [index, conflict] of (
-    data.domainModel?.conflicts ?? []
-  ).entries()) {
+  for (const [index, conflict] of (Array.isArray(data.domainModel?.conflicts) ? data.domainModel.conflicts : []).entries()) {
     const prefix = `domainModel.conflicts[${index}]`;
     requireValue(
       nonEmpty(conflict?.description),
@@ -1253,35 +1255,36 @@ const validators = [
   validateHandoff,
 ];
 
-async function validateCaseFileDataUnsafe(
-  data,
-  {
-    casePath = "case-file.json",
-    sourceManifest,
-    verifySourceBytes = false,
-    requireSourceIntake = false,
-  } = {},
-) {
+async function validateCaseFileDataUnsafe(data, options = {}) {
+  const {
+    casePath = virtualCasePath, sourceManifest,
+    verifySourceBytes = false, requireSourceIntake = false,
+  } = options;
   errors = [];
   requireValue(data?.version === "1.0", 'version must be "1.0"');
-  requireValue(
-    ["coach", "engage", "review"].includes(data?.mode),
-    "mode must be coach, engage, or review",
-  );
-  requireValue(
-    phases.includes(data?.phase),
-    `phase must be one of: ${phases.join(", ")}`,
-  );
+  requireValue(["coach", "engage", "review"].includes(data?.mode), "mode must be coach, engage, or review");
+  requireValue(phases.includes(data?.phase), `phase must be one of: ${phases.join(", ")}`);
+  requireValue(data?.unknowns === undefined || stringArray(data.unknowns), "unknowns must be an array of non-empty strings");
+  requireValue(data?.domainModel?.conflicts === undefined ||
+    Array.isArray(data.domainModel.conflicts), "domainModel.conflicts must be an array");
+  requireValue(data?.evalPlan?.unresolvedSevereFailures === undefined ||
+    stringArray(data.evalPlan.unresolvedSevereFailures), "evalPlan.unresolvedSevereFailures must be an array of non-empty strings");
   validateEvidence(data?.evidence);
-  requireValue(
-    gateStatuses.has(data?.gate?.status),
-    `gate.status must be one of: ${[...gateStatuses].join(", ")}`,
-  );
+  const evidenceById = new Map((data?.evidence ?? []).map((item) => [item.id, item]));
+  for (const [index, conflict] of (Array.isArray(data?.domainModel?.conflicts) ? data.domainModel.conflicts : []).entries()) {
+    const prefix = `domainModel.conflicts[${index}]`;
+    requireValue(nonEmpty(conflict?.description), `${prefix}.description is required`);
+    requireValue(["resolved", "deferred"].includes(conflict?.status), `${prefix}.status must be resolved or deferred`);
+    validateEvidenceReferences(conflict?.evidenceIds, `${prefix}.evidenceIds`, evidenceById, data?.mode === "engage");
+    if (conflict?.status === "resolved") requireValue(nonEmpty(conflict?.resolution), `${prefix}.resolution is required`);
+    if (conflict?.status === "deferred") {
+      requireValue(nonEmpty(conflict?.owner), `${prefix}.owner is required`);
+      requireValue(nonEmpty(conflict?.revisitWhen), `${prefix}.revisitWhen is required`);
+    }
+  }
+  requireValue(gateStatuses.has(data?.gate?.status), `gate.status must be one of: ${[...gateStatuses].join(", ")}`);
   requireValue(nonEmpty(data?.gate?.reason), "gate.reason is required");
-  requireValue(
-    data?.gate?.status === "passed",
-    `gate.status must be passed to satisfy the ${data?.phase ?? "current"} gate`,
-  );
+  requireValue(data?.gate?.status === "passed", `gate.status must be passed to satisfy the ${data?.phase ?? "current"} gate`);
   validateEvidenceReferences(
     data?.gate?.evidenceIds,
     "gate.evidenceIds",
@@ -1307,17 +1310,10 @@ async function validateCaseFileDataUnsafe(
     );
     assignmentIds.add(assignment?.id);
   }
-  requireValue(
-    assignmentIds.size === (data?.assignments ?? []).length,
-    "assignment IDs must be unique",
-  );
-
+  requireValue(assignmentIds.size === (data?.assignments ?? []).length, "assignment IDs must be unique");
   const phaseIndex = phases.indexOf(data?.phase);
   if (phaseIndex > 0) {
-    requireValue(
-      data?.classification?.verdict === "FDE",
-      "only an FDE verdict can advance beyond qualification",
-    );
+    requireValue(data?.classification?.verdict === "FDE", "only an FDE verdict can advance beyond qualification");
   }
   if (phaseIndex > 0 || requireSourceIntake) {
     await validateSourceIntake(data, {
@@ -1331,14 +1327,13 @@ async function validateCaseFileDataUnsafe(
   }
   return [...errors];
 }
-
 let validationQueue = Promise.resolve();
 export function validateCaseFileData(data, options) {
-  const next = validationQueue.then(() => validateCaseFileDataUnsafe(data, options));
+  const input = snapshotJson({ data, options: options ?? {} });
+  const next = validationQueue.then(() => validateCaseFileDataUnsafe(input.data, input.options));
   validationQueue = next.catch(() => {});
   return next;
 }
-
 async function runCli() {
   const path = process.argv[2];
   if (!path || process.argv.includes("--help")) {
@@ -1355,7 +1350,6 @@ async function runCli() {
     process.exitCode = 2;
     return;
   }
-
   const validationErrors = await validateCaseFileData(data, {
     casePath: path,
     verifySourceBytes: true,

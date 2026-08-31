@@ -242,7 +242,6 @@ if (protocolTests.status !== 0) {
     `engagement protocol tests failed:\n${protocolTests.stdout}${protocolTests.stderr}`,
   );
 }
-
 const reportingTests = spawnSync(
   process.execPath,
   [join(skillRoot, "scripts", "test-reporting.mjs")],
