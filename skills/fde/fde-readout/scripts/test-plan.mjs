@@ -230,6 +230,128 @@ const tests = [
     expectedText: "5 slides; html + pptx",
   },
   {
+    name: "accepts authorized fictional unbranded plan",
+    mutate: (data) => {
+      data.brand.source = "unbranded";
+      data.brand.wordmark = "";
+      data.evidence[3].statement =
+        "The readout owner approved a neutral original design.";
+    },
+    expectedStatus: 0,
+    expectedText: "5 slides; html + pptx",
+  },
+  {
+    name: "accepts evidence-bound real external unbranded plan",
+    mutate: (data) => {
+      data.fictional = false;
+      data.brand.source = "unbranded";
+      data.brand.wordmark = "";
+      for (const item of data.evidence) {
+        item.class = "stakeholder_report";
+        item.source = "Authorized customer source";
+      }
+    },
+    expectedStatus: 0,
+    expectedText: "5 slides; html + pptx",
+  },
+  {
+    name: "rejects synthetic evidence in real external unbranded plan",
+    mutate: (data) => {
+      data.fictional = false;
+      data.brand.source = "unbranded";
+      data.brand.wordmark = "";
+    },
+    expectedStatus: 1,
+    expectedText: "cannot be synthetic for a real external readout",
+  },
+  {
+    name: "rejects unbranded wordmark",
+    mutate: (data) => {
+      data.brand.source = "unbranded";
+      data.brand.wordmark = "PSEUDO BRAND";
+    },
+    expectedStatus: 1,
+    expectedText: "brand.wordmark to be an empty string",
+  },
+  {
+    name: "rejects unbranded logo",
+    mutate: (data) => {
+      data.brand.source = "unbranded";
+      data.brand.wordmark = "";
+      data.brand.logo = "logo.svg";
+    },
+    expectedStatus: 1,
+    expectedText: "unbranded treatment cannot define a logo",
+  },
+  {
+    name: "rejects unauthorized unbranded treatment",
+    mutate: (data) => {
+      data.brand.source = "unbranded";
+      data.brand.wordmark = "";
+      data.brand.authorized = false;
+    },
+    expectedStatus: 1,
+    expectedText: "authorized brand treatment",
+  },
+  {
+    name: "rejects fictional-defined empty wordmark",
+    mutate: (data) => {
+      data.brand.wordmark = "";
+    },
+    expectedStatus: 1,
+    expectedText: "fictional-defined treatment requires brand.wordmark",
+  },
+  ...["customer-provided", "authorized-public"].flatMap((source) => [
+    {
+      name: `rejects ${source} empty wordmark`,
+      mutate: (data) => {
+        data.fictional = false;
+        data.brand.source = source;
+        data.brand.wordmark = "";
+      },
+      expectedStatus: 1,
+      expectedText: `${source} treatment requires brand.wordmark`,
+    },
+    {
+      name: `rejects unauthorized ${source} treatment`,
+      mutate: (data) => {
+        data.fictional = false;
+        data.brand.source = source;
+        data.brand.authorized = false;
+      },
+      expectedStatus: 1,
+      expectedText: "authorized brand treatment",
+    },
+  ]),
+  {
+    name: "rejects unbranded asset reuse",
+    mutate: (data) => {
+      data.brand.source = "unbranded";
+      data.brand.wordmark = "";
+      data.brand.styleReference = {
+        source: "reference.pptx",
+        authorized: true,
+        scope: "approved-asset-reuse",
+        reusedAssets: ["logo.svg"],
+      };
+    },
+    expectedStatus: 1,
+    expectedText: "unbranded treatment cannot list reused assets",
+  },
+  {
+    name: "keeps style reference authorization required",
+    mutate: (data) => {
+      data.brand.styleReference = {
+        source: "reference.pptx",
+        authorized: false,
+        scope: "design-language-only",
+        reusedAssets: [],
+      };
+    },
+    expectedStatus: 1,
+    expectedText: "styleReference requires authorization",
+  },
+  {
     name: "rejects unknown evidence",
     mutate: (data) => {
       data.slides[2].evidenceIds = ["missing-001"];

@@ -4,6 +4,8 @@ Create evidence-bound customer and leadership readouts as interactive HTML, edit
 
 The skill uses one validated `ReadoutPlan` for content, evidence, slide structure, speaker notes, brand, and delivery requirements. HTML and PPTX render the same narrative from one plan.
 
+The plan may use approved branding or an explicitly authorized unbranded neutral original design. Unbranded readouts keep an empty wordmark and do not fabricate a logo, pseudo-brand, or reusable identity.
+
 ## Human context
 
 The plan keeps two source types separate:
