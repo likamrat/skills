@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createReadoutServer } from "./serve.mjs";
 
@@ -20,6 +20,126 @@ const failures = [];
 
 function check(condition, message) {
   if (!condition) failures.push(message);
+}
+
+async function findBrowser() {
+  const candidates = [
+    process.env.FDE_READOUT_BROWSER,
+    process.platform === "win32"
+      ? join(
+          process.env["PROGRAMFILES(X86)"] ?? "",
+          "Microsoft",
+          "Edge",
+          "Application",
+          "msedge.exe",
+        )
+      : "/usr/bin/microsoft-edge",
+    process.platform === "win32"
+      ? join(
+          process.env.PROGRAMFILES ?? "",
+          "Google",
+          "Chrome",
+          "Application",
+          "chrome.exe",
+        )
+      : "/usr/bin/google-chrome",
+    process.platform === "darwin"
+      ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+      : "/usr/bin/chromium",
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      // Try the next supported local browser.
+    }
+  }
+  return null;
+}
+
+async function waitForDevtoolsPort(profile) {
+  const path = join(profile, "DevToolsActivePort");
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      const [port] = (await readFile(path, "utf8")).split(/\r?\n/);
+      if (port) return Number.parseInt(port, 10);
+    } catch {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+    }
+  }
+  throw new Error("Timed out waiting for the browser debugging port.");
+}
+
+async function createCdpClient(port) {
+  const targets = await (
+    await fetch(`http://127.0.0.1:${port}/json/list`)
+  ).json();
+  const target = targets.find((candidate) => candidate.type === "page");
+  if (!target) throw new Error("Browser did not expose a page target.");
+  const socket = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((open, reject) => {
+    socket.addEventListener("open", open, { once: true });
+    socket.addEventListener("error", reject, { once: true });
+  });
+  let sequence = 0;
+  const pending = new Map();
+  socket.addEventListener("message", (event) => {
+    const message = JSON.parse(event.data);
+    if (!message.id) return;
+    const request = pending.get(message.id);
+    pending.delete(message.id);
+    if (message.error) request.reject(new Error(message.error.message));
+    else request.resolve(message.result);
+  });
+  return {
+    close: () => socket.close(),
+    send(method, params = {}) {
+      const id = (sequence += 1);
+      return new Promise((resolveRequest, reject) => {
+        pending.set(id, { resolve: resolveRequest, reject });
+        socket.send(JSON.stringify({ id, method, params }));
+      });
+    },
+  };
+}
+
+async function inspectPage(client, url, width, height) {
+  await client.send("Emulation.setDeviceMetricsOverride", {
+    width,
+    height,
+    deviceScaleFactor: 1,
+    mobile: width <= 760,
+  });
+  await client.send("Page.navigate", { url });
+  const expectedUrl = url.split("#")[0];
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const ready = await client.send("Runtime.evaluate", {
+      expression: `location.href.startsWith(${JSON.stringify(expectedUrl)}) && document.body?.dataset.ready`,
+      returnByValue: true,
+    });
+    if (ready.result.value === "true") break;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+  }
+  const inspected = await client.send("Runtime.evaluate", {
+    expression: `(() => {
+      const riskText = [...document.querySelectorAll(".slide--risks .risk h2, .slide--risks .risk dt, .slide--risks .risk dd, .slide--risks .risk small")];
+      const risks = [...document.querySelectorAll(".slide--risks .risk")];
+      const controls = [...document.querySelectorAll(".deck-controls button")];
+      const riskRects = risks.map((element) => element.getBoundingClientRect());
+      return {
+        qa: window.__fdeReadoutQa(),
+        horizontalOverflow: document.documentElement.scrollWidth > innerWidth,
+        riskColumnCount: getComputedStyle(document.querySelector(".slide--risks .risks")).gridTemplateColumns.split(" ").length,
+        riskClipping: risks.some((element) => element.scrollHeight > element.clientHeight + 2),
+        riskOverlap: riskRects.some((rect, index) => index > 0 && rect.top < riskRects[index - 1].bottom - 2),
+        minimumRiskTextPx: Math.min(...riskText.map((element) => Number.parseFloat(getComputedStyle(element).fontSize))),
+        minimumControlHeight: Math.min(...controls.map((element) => element.getBoundingClientRect().height)),
+      };
+    })()`,
+    returnByValue: true,
+  });
+  return inspected.result.value;
 }
 
 try {
@@ -115,6 +235,66 @@ try {
     "timeline rails must connect milestone centers without endpoint overhang",
   );
 
+  const riskPlan = JSON.parse(await readFile(examplePlan, "utf8"));
+  const riskSlide = riskPlan.slides.find((slide) => slide.family === "risks");
+  const riskSlideNumber = riskPlan.slides.indexOf(riskSlide) + 1;
+  const riskEvidenceIds = riskSlide.content.items[0].evidenceIds;
+  const reproducedRiskItems = [
+    {
+      risk: "Conflicting or stale evidence produces a plausible queue",
+      impact: "The claim may be routed on outdated ownership guidance.",
+      control: "Suppress the recommendation and use the named human route.",
+      residualRisk: "Source precedence remains unresolved.",
+    },
+    {
+      risk: "Missing identity is filled probabilistically",
+      impact: "A recommendation may attach to the wrong claim.",
+      control: "Keep missing identity visible and require clarification.",
+      residualRisk: "Manual clarification still adds review time.",
+    },
+    {
+      risk: "Queue routing is treated as financial authority",
+      impact: "The workflow could cross the duty-manager boundary.",
+      control:
+        "Keep the model to one explained recommendation and preserve adjuster authority.",
+      residualRisk: "Production remains unauthorized.",
+    },
+    {
+      risk: "A recovery failure leaves the recommendation path active",
+      impact: "Adjusters may continue relying on a degraded workflow.",
+      control:
+        "Disable the recommendation path and return every claim to manual triage.",
+      residualRisk: "Manual triage increases review time during recovery.",
+    },
+  ].map((item) => ({ ...item, evidenceIds: riskEvidenceIds }));
+  for (const count of [1, 2, 3, 4]) {
+    const countPlan = structuredClone(riskPlan);
+    countPlan.slides.find(
+      (slide) => slide.family === "risks",
+    ).content.items = reproducedRiskItems.slice(0, count);
+    const countPlanPath = join(directory, `risk-${count}-plan.json`);
+    const countDirectory = join(directory, `risk-${count}`);
+    await writeFile(countPlanPath, JSON.stringify(countPlan));
+    const countResult = spawnSync(
+      process.execPath,
+      [renderer, countPlanPath, countDirectory],
+      { encoding: "utf8" },
+    );
+    check(
+      countResult.status === 0,
+      `${count}-risk renderer failed:\n${countResult.stdout}${countResult.stderr}`,
+    );
+    if (countResult.status === 0) {
+      const countHtml = await readFile(join(countDirectory, "index.html"), "utf8");
+      check(
+        countHtml.includes(
+          `class="risks risks--count-${count}" style="--risk-count:${count}"`,
+        ),
+        `${count}-risk HTML must expose its explicit count`,
+      );
+    }
+  }
+
   const extendedPlan = JSON.parse(await readFile(examplePlan, "utf8"));
   extendedPlan.slides.splice(
     extendedPlan.slides.length - 1,
@@ -207,6 +387,81 @@ try {
     const body = await page.text();
     check(page.status === 200, "localhost server must return the deck");
     check(body.includes("Lattice Harbor"), "served deck must contain the example");
+    const browser = await findBrowser();
+    if (browser) {
+      const profile = await mkdtemp(join(tmpdir(), "fde-readout-browser-"));
+      const processHandle = spawn(
+        browser,
+        [
+          "--headless=new",
+          "--disable-gpu",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--remote-debugging-port=0",
+          `--user-data-dir=${profile}`,
+          "about:blank",
+        ],
+        { stdio: "ignore" },
+      );
+      let client;
+      try {
+        const port = await waitForDevtoolsPort(profile);
+        client = await createCdpClient(port);
+        await client.send("Page.enable");
+        await client.send("Runtime.enable");
+        for (const count of [1, 2, 3, 4]) {
+          const desktop = await inspectPage(
+            client,
+            `${running.url}risk-${count}/#slide=${riskSlideNumber}`,
+            1600,
+            1000,
+          );
+          check(
+            desktop.qa.length === 0,
+            `${count}-risk desktop QA failed: ${JSON.stringify(desktop.qa)}`,
+          );
+        }
+        const phone = await inspectPage(
+          client,
+          `${running.url}risk-4/#slide=${riskSlideNumber}`,
+          390,
+          844,
+        );
+        check(
+          phone.qa.length === 0 &&
+            !phone.horizontalOverflow &&
+            phone.riskColumnCount === 1 &&
+            !phone.riskClipping &&
+            !phone.riskOverlap,
+          `phone risk layout failed: ${JSON.stringify(phone)}`,
+        );
+        check(
+          phone.minimumRiskTextPx >= 12 && phone.minimumControlHeight >= 44,
+          `phone risk text and controls must remain usable: ${JSON.stringify(phone)}`,
+        );
+        const exported = await inspectPage(
+          client,
+          `${running.url}risk-4/?export=1`,
+          1600,
+          1000,
+        );
+        check(
+          exported.qa.length === 0,
+          `four-risk export QA failed: ${JSON.stringify(exported.qa)}`,
+        );
+      } finally {
+        client?.close();
+        if (processHandle.exitCode === null) {
+          processHandle.kill();
+          await new Promise((exit) => processHandle.once("exit", exit));
+        }
+        await rm(profile, { recursive: true, force: true, maxRetries: 5 });
+      }
+    } else {
+      console.warn(
+        "Skipping rendered geometry checks: set FDE_READOUT_BROWSER to a Chromium executable.",
+      );
+    }
   } finally {
     await new Promise((close) => server?.close(close));
   }
