@@ -116,7 +116,7 @@
       },
       "calibration": {
         "successfulRuns": 20,
-        "report": "hill4-output/hill6-budget-report.json",
+        "report": "evals/fde-e2e/calibration/readout-dual-format-final.json",
         "method": "nearest-rank p95 warning thresholds and median plus six MAD hard limits capped at twice the median"
       }
     },

@@ -105,7 +105,7 @@ This legacy composite is restricted to the two frozen Hill 0 fixtures. New repla
 
 `readout-dual-format-final` covers final HTML and editable PowerPoint generation from one already validated `ReadoutPlan`. It does not include discovery, workflow auditing, evaluation design, rollout, or handoff. The broader `full-fde-dual-format` composite therefore remains temporary.
 
-Twenty successful, trace-reviewed runs calibrated this task class. The report at `hill4-output/hill6-budget-report.json` records every included run, the nearest-rank p95, median absolute deviation, stability check, and selected thresholds.
+Twenty successful, trace-reviewed runs calibrated this task class. The report at `evals/fde-e2e/calibration/readout-dual-format-final.json` records every included run, the nearest-rank p95, median absolute deviation, stability check, and selected thresholds.
 
 | Metric | Median | MAD | p95 | Warn above | Hard limit |
 |---|---:|---:|---:|---:|---:|

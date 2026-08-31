@@ -1670,7 +1670,13 @@ try {
 
   const budgets = await readJson(join(root, "evals", "fde-e2e", "budgets.json"));
   const calibration = await readJson(
-    join(root, "hill4-output", "hill6-budget-report.json"),
+    join(
+      root,
+      "evals",
+      "fde-e2e",
+      "calibration",
+      "readout-dual-format-final.json",
+    ),
   );
   const observedBudget =
     budgets.taskClasses["readout-dual-format-final"];
