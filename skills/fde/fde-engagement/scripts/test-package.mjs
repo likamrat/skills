@@ -232,6 +232,16 @@ if (validatorTests.status !== 0) {
   );
 }
 
+const protocolTests = spawnSync(
+  process.execPath,
+  [join(skillRoot, "scripts", "test-engagement-protocol.mjs")],
+  { encoding: "utf8" },
+);
+if (protocolTests.status !== 0) {
+  failures.push(
+    `engagement protocol tests failed:\n${protocolTests.stdout}${protocolTests.stderr}`,
+  );
+}
 const reportingTests = spawnSync(
   process.execPath,
   [join(skillRoot, "scripts", "test-reporting.mjs")],

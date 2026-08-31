@@ -3,7 +3,9 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { validateDomainModelLifecycle } from "./domain-model-lifecycle.mjs";
+import { encodeJson, snapshotJson } from "./protocol-json.mjs";
 
 const phases = [
   "qualify",
@@ -118,15 +120,11 @@ const retrospectiveStatuses = new Set([
   "none-observed",
 ]);
 const humanOrigins = new Set(["human-provided", "human-confirmed"]);
+const virtualCasePath = fileURLToPath(
+  new URL("../.virtual/case-file.json", import.meta.url),
+);
 
-const path = process.argv[2];
-
-if (!path || process.argv.includes("--help")) {
-  console.log("Usage: node scripts/validate-case-file.mjs <case-file.json>");
-  process.exit(path ? 0 : 2);
-}
-
-const errors = [];
+let errors = [];
 
 function requireValue(condition, message) {
   if (!condition) errors.push(message);
@@ -240,7 +238,10 @@ function insideRoot(root, path) {
   );
 }
 
-async function validateSourceIntake(data) {
+async function validateSourceIntake(
+  data,
+  { casePath, sourceManifest, verifySourceBytes },
+) {
   const intake = data.sourceIntake;
   requireValue(
     intake && typeof intake === "object",
@@ -274,7 +275,7 @@ async function validateSourceIntake(data) {
     );
   }
 
-  const caseDirectory = dirname(resolve(path));
+  const caseDirectory = dirname(resolve(casePath));
   const approvedRoot = resolve(caseDirectory, intake.approvedRoot ?? "");
   const manifestPath = resolve(caseDirectory, intake.manifestPath ?? "");
   requireValue(
@@ -292,17 +293,24 @@ async function validateSourceIntake(data) {
     return;
   }
 
-  let manifest;
-  try {
-    manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  } catch (error) {
-    requireValue(false, `sourceIntake manifest cannot be read: ${error.message}`);
-    return;
+  let manifest = sourceManifest;
+  if (!manifest && verifySourceBytes) {
+    try {
+      manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    } catch (error) {
+      requireValue(false, `sourceIntake manifest cannot be read: ${error.message}`);
+      return;
+    }
   }
+  requireValue(
+    manifest && typeof manifest === "object",
+    "sourceIntake requires a supplied preflight manifest",
+  );
+  if (!manifest || typeof manifest !== "object") return;
 
   const { manifestSha256, ...manifestBody } = manifest;
   const computedManifestSha256 = createHash("sha256")
-    .update(JSON.stringify(manifestBody))
+    .update(encodeJson(manifestBody))
     .digest("hex");
   requireValue(
     manifestSha256 === computedManifestSha256,
@@ -347,15 +355,17 @@ async function validateSourceIntake(data) {
     );
     if (!source || !insideRoot(approvedRoot, sourcePath)) continue;
 
-    try {
-      const bytes = await readFile(sourcePath);
-      const currentSha256 = createHash("sha256").update(bytes).digest("hex");
-      requireValue(
-        source.sha256 === currentSha256,
-        `${prefix}.path no longer matches its preflight hash`,
-      );
-    } catch (error) {
-      requireValue(false, `${prefix}.path cannot be read: ${error.message}`);
+    if (verifySourceBytes) {
+      try {
+        const bytes = await readFile(sourcePath);
+        const currentSha256 = createHash("sha256").update(bytes).digest("hex");
+        requireValue(
+          source.sha256 === currentSha256,
+          `${prefix}.path no longer matches its preflight hash`,
+        );
+      } catch (error) {
+        requireValue(false, `${prefix}.path cannot be read: ${error.message}`);
+      }
     }
     mappedIds.add(mapping.sourceId);
   }
@@ -1009,9 +1019,7 @@ function validateAudit(data) {
     Array.isArray(data.domainModel?.conflicts),
     "domainModel.conflicts must be an array",
   );
-  for (const [index, conflict] of (
-    data.domainModel?.conflicts ?? []
-  ).entries()) {
+  for (const [index, conflict] of (Array.isArray(data.domainModel?.conflicts) ? data.domainModel.conflicts : []).entries()) {
     const prefix = `domainModel.conflicts[${index}]`;
     requireValue(
       nonEmpty(conflict?.description),
@@ -1237,57 +1245,6 @@ function validateHandoff(data) {
   }
 }
 
-let data;
-try {
-  data = JSON.parse(await readFile(resolve(path), "utf8"));
-} catch (error) {
-  console.error(`Cannot read case file: ${error.message}`);
-  process.exit(2);
-}
-
-requireValue(data.version === "1.0", 'version must be "1.0"');
-requireValue(["coach", "engage", "review"].includes(data.mode), "mode must be coach, engage, or review");
-requireValue(phases.includes(data.phase), `phase must be one of: ${phases.join(", ")}`);
-validateEvidence(data.evidence);
-requireValue(
-  gateStatuses.has(data.gate?.status),
-  `gate.status must be one of: ${[...gateStatuses].join(", ")}`,
-);
-requireValue(nonEmpty(data.gate?.reason), "gate.reason is required");
-requireValue(
-  data.gate?.status === "passed",
-  `gate.status must be passed to satisfy the ${data.phase ?? "current"} gate`,
-);
-validateEvidenceReferences(
-  data.gate?.evidenceIds,
-  "gate.evidenceIds",
-  new Map((data.evidence ?? []).map((item) => [item.id, item])),
-  data.mode === "engage",
-);
-requireValue(Array.isArray(data.assignments), "assignments must be an array");
-const assignmentIds = new Set();
-const assignmentEvidenceById = new Map(
-  (data.evidence ?? []).map((item) => [item.id, item]),
-);
-for (const [index, assignment] of (data.assignments ?? []).entries()) {
-  const prefix = `assignments[${index}]`;
-  requireValue(nonEmpty(assignment?.id), `${prefix}.id is required`);
-  requireValue(nonEmpty(assignment?.subject), `${prefix}.subject is required`);
-  requireValue(nonEmpty(assignment?.owner), `${prefix}.owner is required`);
-  requireValue(nonEmpty(assignment?.timing), `${prefix}.timing is required`);
-  validateEvidenceReferences(
-    assignment?.evidenceIds,
-    `${prefix}.evidenceIds`,
-    assignmentEvidenceById,
-    data.mode === "engage",
-  );
-  assignmentIds.add(assignment?.id);
-}
-requireValue(
-  assignmentIds.size === (data.assignments ?? []).length,
-  "assignment IDs must be unique",
-);
-
 const validators = [
   validateQualify,
   validateAudit,
@@ -1297,24 +1254,117 @@ const validators = [
   validateDeploy,
   validateHandoff,
 ];
-const phaseIndex = phases.indexOf(data.phase);
 
-if (phaseIndex > 0) {
-  requireValue(
-    data.classification?.verdict === "FDE",
-    "only an FDE verdict can advance beyond qualification",
+async function validateCaseFileDataUnsafe(data, options = {}) {
+  const {
+    casePath = virtualCasePath, sourceManifest,
+    verifySourceBytes = false, requireSourceIntake = false,
+  } = options;
+  errors = [];
+  requireValue(data?.version === "1.0", 'version must be "1.0"');
+  requireValue(["coach", "engage", "review"].includes(data?.mode), "mode must be coach, engage, or review");
+  requireValue(phases.includes(data?.phase), `phase must be one of: ${phases.join(", ")}`);
+  requireValue(data?.unknowns === undefined || stringArray(data.unknowns), "unknowns must be an array of non-empty strings");
+  requireValue(data?.domainModel?.conflicts === undefined ||
+    Array.isArray(data.domainModel.conflicts), "domainModel.conflicts must be an array");
+  requireValue(data?.evalPlan?.unresolvedSevereFailures === undefined ||
+    stringArray(data.evalPlan.unresolvedSevereFailures), "evalPlan.unresolvedSevereFailures must be an array of non-empty strings");
+  validateEvidence(data?.evidence);
+  const evidenceById = new Map((data?.evidence ?? []).map((item) => [item.id, item]));
+  for (const [index, conflict] of (Array.isArray(data?.domainModel?.conflicts) ? data.domainModel.conflicts : []).entries()) {
+    const prefix = `domainModel.conflicts[${index}]`;
+    requireValue(nonEmpty(conflict?.description), `${prefix}.description is required`);
+    requireValue(["resolved", "deferred"].includes(conflict?.status), `${prefix}.status must be resolved or deferred`);
+    validateEvidenceReferences(conflict?.evidenceIds, `${prefix}.evidenceIds`, evidenceById, data?.mode === "engage");
+    if (conflict?.status === "resolved") requireValue(nonEmpty(conflict?.resolution), `${prefix}.resolution is required`);
+    if (conflict?.status === "deferred") {
+      requireValue(nonEmpty(conflict?.owner), `${prefix}.owner is required`);
+      requireValue(nonEmpty(conflict?.revisitWhen), `${prefix}.revisitWhen is required`);
+    }
+  }
+  requireValue(gateStatuses.has(data?.gate?.status), `gate.status must be one of: ${[...gateStatuses].join(", ")}`);
+  requireValue(nonEmpty(data?.gate?.reason), "gate.reason is required");
+  requireValue(data?.gate?.status === "passed", `gate.status must be passed to satisfy the ${data?.phase ?? "current"} gate`);
+  validateEvidenceReferences(
+    data?.gate?.evidenceIds,
+    "gate.evidenceIds",
+    new Map((data?.evidence ?? []).map((item) => [item.id, item])),
+    data?.mode === "engage",
   );
-  await validateSourceIntake(data);
+  requireValue(Array.isArray(data?.assignments), "assignments must be an array");
+  const assignmentIds = new Set();
+  const assignmentEvidenceById = new Map(
+    (data?.evidence ?? []).map((item) => [item.id, item]),
+  );
+  for (const [index, assignment] of (data?.assignments ?? []).entries()) {
+    const prefix = `assignments[${index}]`;
+    requireValue(nonEmpty(assignment?.id), `${prefix}.id is required`);
+    requireValue(nonEmpty(assignment?.subject), `${prefix}.subject is required`);
+    requireValue(nonEmpty(assignment?.owner), `${prefix}.owner is required`);
+    requireValue(nonEmpty(assignment?.timing), `${prefix}.timing is required`);
+    validateEvidenceReferences(
+      assignment?.evidenceIds,
+      `${prefix}.evidenceIds`,
+      assignmentEvidenceById,
+      data?.mode === "engage",
+    );
+    assignmentIds.add(assignment?.id);
+  }
+  requireValue(assignmentIds.size === (data?.assignments ?? []).length, "assignment IDs must be unique");
+  const phaseIndex = phases.indexOf(data?.phase);
+  if (phaseIndex > 0) {
+    requireValue(data?.classification?.verdict === "FDE", "only an FDE verdict can advance beyond qualification");
+  }
+  if (phaseIndex > 0 || requireSourceIntake) {
+    await validateSourceIntake(data, {
+      casePath,
+      sourceManifest,
+      verifySourceBytes,
+    });
+  }
+  for (const validator of validators.slice(0, phaseIndex + 1)) {
+    validator(data);
+  }
+  return [...errors];
+}
+let validationQueue = Promise.resolve();
+export function validateCaseFileData(data, options) {
+  const input = snapshotJson({ data, options: options ?? {} });
+  const next = validationQueue.then(() => validateCaseFileDataUnsafe(input.data, input.options));
+  validationQueue = next.catch(() => {});
+  return next;
+}
+async function runCli() {
+  const path = process.argv[2];
+  if (!path || process.argv.includes("--help")) {
+    console.log("Usage: node scripts/validate-case-file.mjs <case-file.json>");
+    process.exitCode = path ? 0 : 2;
+    return;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(await readFile(resolve(path), "utf8"));
+  } catch (error) {
+    console.error(`Cannot read case file: ${error.message}`);
+    process.exitCode = 2;
+    return;
+  }
+  const validationErrors = await validateCaseFileData(data, {
+    casePath: path,
+    verifySourceBytes: true,
+  });
+  if (validationErrors.length > 0) {
+    console.error(`Case file is not ready for the "${data.phase}" gate:`);
+    validationErrors.forEach((error, index) =>
+      console.error(`${index + 1}. ${error}`),
+    );
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`Case file satisfies every gate through "${data.phase}".`);
 }
 
-for (const validator of validators.slice(0, phaseIndex + 1)) {
-  validator(data);
+if (fileURLToPath(import.meta.url) === resolve(process.argv[1] ?? "")) {
+  await runCli();
 }
-
-if (errors.length > 0) {
-  console.error(`Case file is not ready for the "${data.phase}" gate:`);
-  errors.forEach((error, index) => console.error(`${index + 1}. ${error}`));
-  process.exit(1);
-}
-
-console.log(`Case file satisfies every gate through "${data.phase}".`);

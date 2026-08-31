@@ -239,6 +239,7 @@ For reports and decks, also copy:
 assets/readout-brief.template.json
 ```
 
+For a trusted multi-turn driver, call `replayEngagement(records, { verifyAuthority, verifyCaseSubmission })`. The verifiers, not actor labels or self-hashes, establish accepted human authority and source submission. Verifier implementations are trusted, side-effect-free runtime adapter code; arbitrary verifier code has the same authority as any other code in the process. The checkpoint is a cache projection, not tamper proof. The caller owns append-only storage. The reducer reads no sources and executes no authorized action.
 Validate the audience, evidence links, findings, recommendations, risks, and next steps:
 
 ```text
