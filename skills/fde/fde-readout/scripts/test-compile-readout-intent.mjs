@@ -121,6 +121,15 @@ try {
       plan.evidence.some((record) => record.id === dependency),
       "human-context evidence dependency was not materialized",
     );
+    const contextId = compactSource.humanContext[0].id;
+    for (const slide of plan.slides.filter((item) =>
+      item.judgmentIds.includes(contextId),
+    )) {
+      expect(
+        slide.evidenceIds.includes(dependency),
+        `slide ${slide.id} omitted its human-context evidence dependency`,
+      );
+    }
     expect(
       JSON.parse(result.stdout).selectedEvidenceIds.includes(dependency),
       "compiler summary omitted the materialized dependency",

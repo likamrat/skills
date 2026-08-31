@@ -261,8 +261,25 @@ const {
   brand: _intentBrand,
   ...planFields
 } = intent;
+const selectedHumanById = new Map(
+  humanContext.map((record) => [record.id, record]),
+);
+const materializedSlides = Array.isArray(planFields.slides)
+  ? planFields.slides.map((slide) => ({
+      ...structuredClone(slide),
+      evidenceIds: [
+        ...new Set([
+          ...(slide.evidenceIds ?? []),
+          ...(slide.judgmentIds ?? []).flatMap(
+            (id) => selectedHumanById.get(id)?.evidenceIds ?? [],
+          ),
+        ]),
+      ],
+    }))
+  : planFields.slides;
 const plan = {
   ...structuredClone(planFields),
+  slides: materializedSlides,
   brand: structuredClone(authorization.brandDefaults),
   evidence: [...evidence, ...authorizationEvidence],
   humanContext,
