@@ -14,6 +14,7 @@ const validator = resolve(
 const evidence = [
   {
     id: "profile-001",
+    sourceId: "source://fictional/profile",
     statement: "The fictional company operates a shipment exception workflow.",
     class: "synthetic",
     source: "Fictional example",
@@ -23,6 +24,7 @@ const evidence = [
   },
   {
     id: "finding-001",
+    sourceId: "source://fictional/findings",
     statement: "The fictional workflow uses three sources.",
     class: "synthetic",
     source: "Fictional example",
@@ -32,6 +34,7 @@ const evidence = [
   },
   {
     id: "decision-001",
+    sourceId: "source://fictional/decision",
     statement: "The fictional sponsor owns the pilot decision.",
     class: "synthetic",
     source: "Fictional example",
@@ -41,6 +44,7 @@ const evidence = [
   },
   {
     id: "brand-001",
+    sourceId: "source://fictional/brand",
     statement: "The fictional brand is approved.",
     class: "synthetic",
     source: "Fictional example",
@@ -94,6 +98,7 @@ const plan = {
   humanContext: [
     {
       id: "judgment-observation-001",
+      sourceId: "#/notes/observations/0",
       kind: "firsthand-observation",
       authorRole: "FDE",
       origin: "human-confirmed",
@@ -106,6 +111,7 @@ const plan = {
     },
     {
       id: "judgment-rationale-001",
+      sourceId: "#/notes/rationale/0",
       kind: "decision-rationale",
       authorRole: "FDE",
       origin: "human-confirmed",
@@ -229,6 +235,42 @@ const tests = [
     expectedStatus: 0,
     expectedText: "5 slides; html + pptx",
   },
+  {
+    name: "accepts external-style and JSON pointer source IDs",
+    mutate: (data) => {
+      data.evidence[0].sourceId = "external:crm/record-42";
+      data.humanContext[0].sourceId = "#/interviews/0/observations/2";
+    },
+    expectedStatus: 0,
+    expectedText: "5 slides; html + pptx",
+  },
+  ...["omitted", "null", "whitespace"].flatMap((invalidValue) => [
+    {
+      name: `rejects ${invalidValue} evidence source ID`,
+      mutate: (data) => {
+        if (invalidValue === "omitted") {
+          delete data.evidence[0].sourceId;
+        } else {
+          data.evidence[0].sourceId = invalidValue === "null" ? null : " \t ";
+        }
+      },
+      expectedStatus: 1,
+      expectedText: "evidence[0].sourceId must be a non-empty string",
+    },
+    {
+      name: `rejects ${invalidValue} human context source ID`,
+      mutate: (data) => {
+        if (invalidValue === "omitted") {
+          delete data.humanContext[0].sourceId;
+        } else {
+          data.humanContext[0].sourceId =
+            invalidValue === "null" ? null : " \t ";
+        }
+      },
+      expectedStatus: 1,
+      expectedText: "humanContext[0].sourceId must be a non-empty string",
+    },
+  ]),
   {
     name: "accepts authorized fictional unbranded plan",
     mutate: (data) => {

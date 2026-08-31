@@ -310,6 +310,10 @@ const evidenceById = new Map();
 for (const [index, item] of (plan.evidence ?? []).entries()) {
   const prefix = `evidence[${index}]`;
   requireValue(kebab(item?.id), `${prefix}.id must use lowercase kebab-case`);
+  requireValue(
+    nonEmpty(item?.sourceId),
+    `${prefix}.sourceId must be a non-empty string`,
+  );
   requireValue(nonEmpty(item?.statement), `${prefix}.statement is required`);
   requireValue(
     evidenceClasses.has(item?.class),
@@ -374,6 +378,10 @@ for (const [index, item] of (plan.humanContext ?? []).entries()) {
   requireValue(
     /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item?.id ?? ""),
     `${prefix}.id must use lowercase kebab-case`,
+  );
+  requireValue(
+    nonEmpty(item?.sourceId),
+    `${prefix}.sourceId must be a non-empty string`,
   );
   requireValue(
     humanContextKinds.has(item?.kind),

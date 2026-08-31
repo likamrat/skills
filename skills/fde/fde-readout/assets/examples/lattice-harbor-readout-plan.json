@@ -40,6 +40,7 @@
   "evidence": [
     {
       "id": "customer-001",
+      "sourceId": "fictional-source://company-definition",
       "statement": "Lattice Harbor Logistics is a fictional freight coordinator serving regional manufacturers across United States port, rail, and warehouse corridors.",
       "class": "synthetic",
       "source": "Fictional company definition",
@@ -49,6 +50,7 @@
     },
     {
       "id": "workflow-001",
+      "sourceId": "fictional-source://operator-observation",
       "statement": "Exception dispatchers copy shipment data among Atlas TMS, a shared inbox, and a routing spreadsheet before selecting an operations queue.",
       "class": "synthetic",
       "source": "Fictional operator observation",
@@ -58,6 +60,7 @@
     },
     {
       "id": "baseline-001",
+      "sourceId": "fictional-source://atlas-tms/sample",
       "statement": "A fictional four-week sample of 1,240 shipment exceptions has a 47-minute median time to first queue assignment and a 21.6 percent reclassification rate.",
       "class": "synthetic",
       "source": "Fictional Atlas TMS workflow sample",
@@ -67,6 +70,7 @@
     },
     {
       "id": "authority-001",
+      "sourceId": "fictional-source://operations-policy",
       "statement": "Exception dispatchers may confirm queue assignments, but only a duty manager may authorize customer ETA commitments or detention-fee waivers.",
       "class": "synthetic",
       "source": "Fictional network operations policy",
@@ -76,6 +80,7 @@
     },
     {
       "id": "target-001",
+      "sourceId": "fictional-source://sponsor-decision",
       "statement": "The fictional pilot target is a median first routing time at or below 20 minutes and a reclassification rate at or below 10 percent over four weeks.",
       "class": "synthetic",
       "source": "Fictional sponsor decision record",
@@ -85,6 +90,7 @@
     },
     {
       "id": "build-001",
+      "sourceId": "fictional-source://implementation-trace",
       "statement": "The fictional implementation reads shipment and message context, writes a queue recommendation with evidence, and has no tool for customer commitments or fee waivers.",
       "class": "synthetic",
       "source": "Fictional implementation trace",
@@ -94,6 +100,7 @@
     },
     {
       "id": "eval-001",
+      "sourceId": "fictional-source://evaluation-run",
       "statement": "The fictional offline evaluation passed normal and edge routing cases and escalated incomplete, ambiguous, and high-risk cases without executing an operational action.",
       "class": "synthetic",
       "source": "Fictional evaluation run",
@@ -103,6 +110,7 @@
     },
     {
       "id": "assignment-001",
+      "sourceId": "fictional-source://steering-record",
       "statement": "The fictional VP Network Operations owns the pilot decision due 2026-08-29.",
       "class": "synthetic",
       "source": "Fictional steering record",
@@ -112,6 +120,7 @@
     },
     {
       "id": "assignment-002",
+      "sourceId": "fictional-source://delivery-plan/setup",
       "statement": "The fictional Director of Operations Systems owns pilot setup due 2026-09-08.",
       "class": "synthetic",
       "source": "Fictional delivery plan",
@@ -121,6 +130,7 @@
     },
     {
       "id": "assignment-003",
+      "sourceId": "fictional-source://delivery-plan/measurement",
       "statement": "The fictional Network Analytics Lead owns the pilot measurement dashboard due 2026-09-05.",
       "class": "synthetic",
       "source": "Fictional delivery plan",
@@ -130,6 +140,7 @@
     },
     {
       "id": "brand-001",
+      "sourceId": "fictional-source://brand-definition",
       "statement": "The fictional Lattice Harbor brand uses a white canvas, near-black text, cobalt and magenta accents, crimson for risk, Segoe type, a strict grid, and a fictional-demonstration footer.",
       "class": "synthetic",
       "source": "Fictional brand definition derived from an authorized design-language-only reference",
@@ -141,6 +152,7 @@
   "humanContext": [
     {
       "id": "judgment-observation-001",
+      "sourceId": "fictional-source://operator-interview#observation",
       "kind": "firsthand-observation",
       "authorRole": "FDE",
       "origin": "human-confirmed",
@@ -153,6 +165,7 @@
     },
     {
       "id": "judgment-failed-attempt-001",
+      "sourceId": "fictional-source://operator-interview#failed-attempt",
       "kind": "failed-attempt",
       "authorRole": "FDE",
       "origin": "human-confirmed",
@@ -165,6 +178,7 @@
     },
     {
       "id": "judgment-surprise-001",
+      "sourceId": "fictional-source://operator-interview#surprise",
       "kind": "surprise",
       "authorRole": "FDE",
       "origin": "human-confirmed",
@@ -177,6 +191,7 @@
     },
     {
       "id": "judgment-rationale-001",
+      "sourceId": "fictional-source://fde-decision#rationale",
       "kind": "decision-rationale",
       "authorRole": "FDE",
       "origin": "human-confirmed",
