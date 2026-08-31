@@ -7,7 +7,6 @@ import {
 } from "./trusted-engagement-auth.mjs";
 import { serializeJson, snapshotJson } from "./protocol-json.mjs";
 const UTF8 = new TextDecoder("utf-8", { fatal: true });
-
 async function canonicalPath(path) {
   const absolute = resolve(path);
   try {
@@ -16,13 +15,11 @@ async function canonicalPath(path) {
     return join(await realpath(dirname(absolute)), basename(absolute));
   }
 }
-
 async function checkedPaths(logPath, checkpointPath) {
   const logName = await canonicalPath(logPath);
   const names = await Promise.all([Promise.resolve(logName),
     canonicalPath(checkpointPath), canonicalPath(`${logName}.lock`)]);
-  const display = names.map((path) => process.platform === "win32"
-    ? path.toLowerCase() : path);
+  const display = names;
   const identities = await Promise.all(names.map(async (path) => {
     try {
       const value = await stat(path);
@@ -39,7 +36,6 @@ async function checkedPaths(logPath, checkpointPath) {
   );
   return { logPath: names[0], checkpointPath: names[1] };
 }
-
 function requireSingleLink(value, label) {
   requireValue(value.nlink === 1, `${label} must have exactly one filesystem link`);
 }
@@ -135,6 +131,19 @@ async function syncParentDirectory(path) {
   try { await directory.sync(); } finally { await directory.close(); }
 }
 
+async function reserveCheckpoint(checkpointPath, logIdentity) {
+  let handle;
+  try { handle = await open(checkpointPath, "wx", 0o600); } catch (error) {
+    if (error.code === "EEXIST")
+      throw new Error("checkpoint path exists during log initialization");
+    throw error;
+  }
+  try {
+    requireValue(!sameIdentity(logIdentity, await handle.stat()),
+      "checkpoint path aliases the initialized log");
+  } finally { await handle.close(); }
+}
+
 async function withLock(logPath, action) {
   const lockPath = `${logPath}.lock`;
   let lock;
@@ -158,13 +167,16 @@ async function initializeInput({ logPath, checkpointPath }, syncParent) {
   ({ logPath, checkpointPath } = await checkedPaths(logPath, checkpointPath));
   return withLock(logPath, async () => {
     const handle = await open(logPath, "wx", 0o600);
+    let identity;
     try {
       await handle.sync();
-      requireSingleLink(await handle.stat(), "log");
+      identity = await handle.stat();
+      requireSingleLink(identity, "log");
     } finally {
       await handle.close();
     }
     await syncParent(logPath);
+    await reserveCheckpoint(checkpointPath, identity);
     const state = await replayRecords([], () => undefined);
     await writeCheckpoint(checkpointPath, EMPTY_HEAD, state);
     return snapshotJson({ head: EMPTY_HEAD, state });

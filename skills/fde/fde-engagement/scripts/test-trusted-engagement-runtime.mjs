@@ -7,8 +7,8 @@ import { join } from "node:path";
 import { decodeKeyHex, EMPTY_HEAD, mintSubmission, replayRecords } from "./trusted-engagement-auth.mjs";
 import {
   appendRecord as appendRecordApi, appendTrustedAuthority as appendAuthorityApi,
-  appendTrustedSubmission as appendSubmissionApi, initializeLog, verifyAndReplay as verifyApi,
-} from "./trusted-engagement-runtime.mjs";
+  appendTrustedSubmission as appendSubmissionApi, initializeLog,
+  verifyAndReplay as verifyApi } from "./trusted-engagement-runtime.mjs";
 const root = await mkdtemp(join(tmpdir(), "fde-runtime-"));
 const key = randomBytes(32);
 const wrongKey = randomBytes(32);
@@ -74,38 +74,38 @@ async function seeded(name = "seeded") {
 try {
   const alias = join(root, "aliased.jsonl");
   for (const checkpointPath of [alias, `${alias}.lock`]) {
-    await rejects(
-      () => initializeLog({ logPath: alias, checkpointPath }), "paths must differ");
+    await rejects(() => initializeLog({ logPath: alias, checkpointPath }), "paths must differ");
   }
   await assert.rejects(() => access(alias));
+  const variant = { logPath: join(root, "case-variant.jsonl"),
+    checkpointPath: join(root, "CASE-VARIANT.JSONL") };
+  try {
+    await initializeLog(variant); assert.ok((await readFile(variant.checkpointPath)).length > 0);
+  } catch (error) {
+    assert.match(error.message, /checkpoint path exists/); assert.equal((await readFile(variant.logPath)).length, 0);
+  }
   const missing = await initialized("missing-key");
   await rejects(() => appendTrustedSubmission({
-    ...trusted(missing, submission("missing"), EMPTY_HEAD),
-    keyProvider: async () => undefined, submitter: { kind: "agent", id: "driver-1" },
+    ...trusted(missing, submission("missing"), EMPTY_HEAD), keyProvider: async () => undefined,
+    submitter: { kind: "agent", id: "driver-1" },
   }), "exactly 32 bytes");
   assert.equal((await readFile(missing.logPath)).length, 0);
   assert.equal(decodeKeyHex(key.toString("hex")).byteLength, 32);
-  for (const length of [62, 66, 128]) {
+  for (const length of [62, 66, 128])
     assert.throws(() => decodeKeyHex("a".repeat(length)), /exactly 64/);
-  }
   for (const length of [31, 33, 64]) {
-    await rejects(() => mintSubmission(
-      submission(`key-${length}`), { kind: "agent", id: "driver-1" },
-      keyId, async () => Buffer.alloc(length),
-    ), "exactly 32 bytes");
+    await rejects(() => mintSubmission(submission(`key-${length}`), {
+      kind: "agent", id: "driver-1" }, keyId, async () => Buffer.alloc(length)), "exactly 32 bytes");
   }
-  const logDirectory = join(root, "separate-log");
-  const checkpointDirectory = join(root, "separate-checkpoint");
+  const logDirectory = join(root, "separate-log"), checkpointDirectory = join(root, "separate-checkpoint");
   await Promise.all([mkdir(logDirectory), mkdir(checkpointDirectory)]);
   const ordered = { logPath: join(logDirectory, "engagement.jsonl"),
     checkpointPath: join(checkpointDirectory, "engagement.json") };
   let parentSyncObserved = false;
   await initializeLog(ordered, async (logPath) => {
     await access(logPath); await assert.rejects(() => access(ordered.checkpointPath));
-    parentSyncObserved = true;
-  });
+    parentSyncObserved = true; });
   assert.ok(parentSyncObserved, "log parent sync must precede checkpoint creation");
-
   const snapshotted = await initialized("snapshotted-inputs");
   let releaseSubmission;
   const submissionWait = new Promise((resolve) => { releaseSubmission = resolve; });
@@ -137,7 +137,6 @@ try {
   releaseAuthority();
   const authorityResult = await pendingAuthority;
   assert.equal(authorityResult.state.humanAnswers[0].actor.id, "original-reviewer");
-
   const main = await seeded();
   const hardLink = join(root, "log-hard-link.jsonl");
   let hardLinksAvailable = true;
@@ -165,7 +164,6 @@ try {
   await rejects(() => verifyAndReplay({
     ...main, trustedHead: main.answered.head, keyProvider: wrongProvider,
   }), "authentication failed");
-
   const signedCase = await mintSubmission(submission("signed-case"),
     { kind: "agent", id: "driver-1" }, keyId, provider);
   const changed = structuredClone(signedCase);
@@ -174,7 +172,6 @@ try {
   await rejects(() => appendRecord(trusted(mutationLog, changed, EMPTY_HEAD)),
     "case validation failed|verification failed");
   assert.equal((await readFile(mutationLog.logPath)).length, 0);
-
   for (const [mutate, text] of [
     [(item) => { item.submissionReceipt.extra = true; }, "unexpected fields"],
     [(item) => { item.submissionReceipt.version = 2; }, "version is unsupported"],
@@ -191,7 +188,6 @@ try {
     mutationLog, { ...submission("preexisting"), submissionReceipt: {} },
     EMPTY_HEAD, { submitter: { kind: "agent", id: "driver-1" } },
   )), "preexisting trust envelope");
-
   const confused = {
     id: "confused-answer", type: "human-answer",
     actor: { kind: "human", id: "reviewer-1" }, ...main.binding,
@@ -216,7 +212,6 @@ try {
   await rejects(() => appendRecord(trusted(main, {
     id: "trusted-field", type: "unknown-record", trusted: true,
   }, main.answered.head)), "record.trusted");
-
   const original = await readFile(main.logPath, "utf8");
   const lines = original.trimEnd().split("\n");
   for (const [name, text, error] of [
@@ -250,13 +245,11 @@ try {
   }, main.submitted.head, {
     authority: { kind: "human", id: "reviewer-1" },
   })), "does not equal");
-
   const race = await initialized("race");
   const raceResults = await Promise.allSettled(["race-1", "race-2"].map((id) =>
     appendTrustedSubmission(trusted(race, submission(id), EMPTY_HEAD,
       { submitter: { kind: "agent", id: "driver-1" } }))));
   assert.deepEqual(raceResults.map((result) => result.status).sort(), ["fulfilled", "rejected"]);
-
   const crash = await initialized("crash");
   const badCheckpoint = join(root, "checkpoint-directory");
   await mkdir(badCheckpoint);
@@ -271,7 +264,6 @@ try {
     crash, submission("stale-after-crash"), EMPTY_HEAD,
     { submitter: { kind: "agent", id: "driver-1" } },
   )), "does not equal");
-
   const initRecovery = paths("init-recovery");
   const badInitCheckpoint = join(root, "init-checkpoint-directory");
   await mkdir(badInitCheckpoint);
@@ -285,7 +277,6 @@ try {
     { ...main, trustedHead: replayed.head, keyProvider: provider });
   assert.equal(replayed.state.digest, replayedAgain.state.digest);
   await access(main.checkpointPath);
-
   let releaseHead;
   const headWait = new Promise((resolve) => { releaseHead = resolve; });
   const mutableHead = structuredClone(replayed.head);
@@ -295,7 +286,6 @@ try {
   mutableHead.digest = "0".repeat(64);
   releaseHead();
   assert.equal((await pendingReplay).head.digest, replayed.head.digest);
-
   let keyReads = 0;
   await verifyAndReplay({
     ...main, trustedHead: main.submitted.head,
@@ -305,7 +295,6 @@ try {
     },
   });
   assert.ok(keyReads >= 4, "replay must wire log and protocol verifiers");
-
   const sentinel = join(root, "must-not-exist.txt");
   await appendTrustedAuthority(trusted(main, {
     id: "grant-no-execution", type: "action-authorized", ...main.binding,
@@ -315,7 +304,6 @@ try {
     authority: { kind: "human", id: "reviewer-1" },
   }));
   await assert.rejects(() => access(sentinel));
-
   const secret = key.toString("hex");
   assert.ok(!(await readFile(main.logPath, "utf8")).includes(secret));
   assert.ok(!(await readFile(main.checkpointPath, "utf8")).includes(secret));
