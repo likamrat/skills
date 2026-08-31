@@ -242,6 +242,16 @@ if (protocolTests.status !== 0) {
     `engagement protocol tests failed:\n${protocolTests.stdout}${protocolTests.stderr}`,
   );
 }
+const runtimeTests = spawnSync(
+  process.execPath,
+  [join(skillRoot, "scripts", "test-trusted-engagement-runtime.mjs")],
+  { encoding: "utf8" },
+);
+if (runtimeTests.status !== 0) {
+  failures.push(
+    `trusted runtime tests failed:\n${runtimeTests.stdout}${runtimeTests.stderr}`,
+  );
+}
 const reportingTests = spawnSync(
   process.execPath,
   [join(skillRoot, "scripts", "test-reporting.mjs")],
