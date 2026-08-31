@@ -209,20 +209,38 @@ requireValue(
   typeof plan.brand?.authorized === "boolean",
   "brand.authorized must be true or false",
 );
-requireValue(nonEmpty(plan.brand?.wordmark), "brand.wordmark is required");
 requireValue(nonEmpty(plan.brand?.fontFamily), "brand.fontFamily is required");
 requireValue(
   nonEmpty(plan.brand?.requiredFooter),
   "brand.requiredFooter is required",
 );
 requireValue(
-  plan.brand?.source !== "unbranded" && plan.brand?.authorized === true,
-  "HTML or PPTX delivery requires authorized branding",
+  plan.brand?.authorized === true,
+  "HTML or PPTX delivery requires an authorized brand treatment",
 );
+if (plan.brand?.source === "unbranded") {
+  requireValue(
+    plan.brand?.wordmark === "",
+    "unbranded treatment requires brand.wordmark to be an empty string",
+  );
+  requireValue(
+    plan.brand?.logo === undefined || plan.brand.logo === "",
+    "unbranded treatment cannot define a logo",
+  );
+  requireValue(
+    (plan.brand?.styleReference?.reusedAssets ?? []).length === 0,
+    "unbranded treatment cannot list reused assets",
+  );
+} else if (brandSources.has(plan.brand?.source)) {
+  requireValue(
+    nonEmpty(plan.brand?.wordmark),
+    `${plan.brand.source} treatment requires brand.wordmark`,
+  );
+}
 if (plan.fictional) {
   requireValue(
-    plan.brand?.source === "fictional-defined",
-    "fictional plans must use brand.source fictional-defined",
+    ["fictional-defined", "unbranded"].includes(plan.brand?.source),
+    "fictional plans must use brand.source fictional-defined or unbranded",
   );
 }
 

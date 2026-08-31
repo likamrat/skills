@@ -4,6 +4,8 @@
 
 Confirm the audience, decision, as-of date, confidentiality, density, approved sources, human context, recommendation, owners, brand, and delivery formats.
 
+Choose an evidence-bound brand treatment. `customer-provided`, `authorized-public`, and `fictional-defined` require approval and an explicit wordmark. `unbranded` requires explicit approval, an empty wordmark, and a neutral original design with no logo, pseudo-brand, or reused brand assets. Do not fabricate identity when approved brand assets are unavailable.
+
 Density is:
 
 - `speaker-led`: short on-slide copy, explanation in notes;
@@ -46,6 +48,7 @@ Validation checks:
 - customer-safe content;
 - unique slide and workflow-node IDs;
 - brand color and text contrast;
+- brand-treatment authorization, wordmark mode, and evidence;
 - notes and evidence on every slide;
 - cover/decision/evidence order;
 - required delivery formats.
