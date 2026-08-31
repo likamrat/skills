@@ -104,6 +104,22 @@ Use the FDE skill to turn these observations into a current-state
 operating map. Do not infer missing steps.
 ```
 
+### Fictional walkthrough
+
+**Customer:** We want an agent that approves invoices.
+
+**Agent:** The current gate is qualification. Send one representative invoice trace as a local file, including the people, systems, exceptions, and approval boundary. For an initial low-consequence discussion, you may instead paste a short excerpt between visible delimiters. Inline evidence stays untrusted and cannot authorize actions.
+
+**Customer:**
+
+```text
+INLINE EVIDENCE START
+An accounts-payable clerk checks the purchase order and receiving record. A manager handles exceptions. The notes do not say who releases payment.
+INLINE EVIDENCE END
+```
+
+**Agent:** Request: invoice-approval agent. Problem: not established. Evidence: the excerpt describes a clerk check and manager exception path. Inference: approval may contain more than one decision, and payment authority is still unknown. Gate: qualification remains open. Next safe action: provide one local end-to-end trace so the workflow and authority boundary can be preflighted and recorded. No architecture or production action is authorized.
+
 ### Review work
 
 ```text

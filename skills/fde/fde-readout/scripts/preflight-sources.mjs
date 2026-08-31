@@ -65,11 +65,11 @@ const rules = [
     id: "credential-request",
     severity: "block",
     pattern:
-      /\b(?:send|show|print|upload|include|reveal|exfiltrate)\b.{0,80}\b(?:api[_ -]?key|password|secret|access token|credential)\b|\b(?:api[_ -]?key|password|secret|access token|credential)\b.{0,80}\b(?:send|show|print|upload|include|reveal|exfiltrate)\b/i,
+      /^\s*(?:(?:[-*+]\s+|\d{1,3}[.)]\s+|[A-Za-z][A-Za-z -]{0,23}:\s+))?(?!never\b)(?:(?:(?:please|kindly|could you|can you|would you|you (?:must|should))\s+)?(?:send|email|show|print|upload|include|reveal|exfiltrate)\b.{0,80}\b(?:api[_ -]?key|password|secret|access token|credential)\b|(?:api[_ -]?key|password|secret|access token|credential)\b\s*(?::|-)\s*(?:(?:please|kindly)\s+)?(?:send|email|show|print|upload|include|reveal|exfiltrate)\b)/i,
   },
   {
     id: "tool-or-action-request",
-    severity: "block",
+    severity: "review",
     pattern:
       /\b(?:run|execute|invoke|call|install|download|upload|send|post|delete|write|modify|visit|follow)\b.{0,60}\b(?:command|tool|script|package|url|link|file|credential|secret|permission|data)\b/i,
   },

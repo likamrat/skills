@@ -414,6 +414,20 @@ const completeCase = {
   unknowns: [],
 };
 
+let reviewedManifest;
+
+function useReviewedManifest(data) {
+  data.phase = "audit";
+  data.sourceIntake.manifestPath = "review-source-manifest.json";
+  data.sourceIntake.manifestSha256 = reviewedManifest.manifestSha256;
+  data.sourceIntake.status = "reviewed";
+  data.sourceIntake.screenedAt = reviewedManifest.generatedAt;
+  data.sourceIntake.reviewedBy = "reviewer@example.com";
+  data.sourceIntake.sources = [
+    { sourceId: "source-001", path: "review-source.txt" },
+  ];
+}
+
 const tests = [
   {
     name: "accepts complete supervised deploy case",
@@ -651,6 +665,23 @@ const tests = [
     expectedText: "does not match the manifest",
   },
   {
+    name: "accepts reviewed source manifest with reviewer provenance",
+    mutate: (data) => {
+      useReviewedManifest(data);
+    },
+    expectedStatus: 0,
+    expectedText: 'satisfies every gate through "audit"',
+  },
+  {
+    name: "rejects reviewed source manifest without reviewer provenance",
+    mutate: (data) => {
+      useReviewedManifest(data);
+      data.sourceIntake.reviewedBy = "";
+    },
+    expectedStatus: 1,
+    expectedText: "sourceIntake.reviewedBy is required after review",
+  },
+  {
     name: "rejects missing preflight source mapping",
     mutate: (data) => {
       data.phase = "audit";
@@ -771,6 +802,30 @@ try {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   completeCase.sourceIntake.manifestSha256 = manifest.manifestSha256;
   completeCase.sourceIntake.screenedAt = manifest.generatedAt;
+
+  const reviewedSourcePath = join(directory, "review-source.txt");
+  const reviewedManifestPath = join(directory, "review-source-manifest.json");
+  await writeFile(
+    reviewedSourcePath,
+    "The workflow record links to https://example.com/policy for context.\n",
+  );
+  const reviewedPreflight = spawnSync(
+    process.execPath,
+    [
+      sourcePreflight,
+      "--root",
+      directory,
+      "--output",
+      reviewedManifestPath,
+      reviewedSourcePath,
+    ],
+    { cwd: directory, encoding: "utf8" },
+  );
+  if (reviewedPreflight.status !== 1) {
+    console.error(`${reviewedPreflight.stdout}${reviewedPreflight.stderr}`);
+    process.exit(1);
+  }
+  reviewedManifest = JSON.parse(await readFile(reviewedManifestPath, "utf8"));
 
   for (const test of tests) {
     const data = structuredClone(completeCase);
