@@ -24,7 +24,7 @@ function copyJson(value, path, ancestors) {
     requireJson(keys.length === value.length + 1, path, "must not contain sparse entries");
     for (let index = 0; index < value.length; index += 1) {
       const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-      requireJson(descriptor?.enumerable && "value" in descriptor, `${path}[${index}]`, "must be an enumerable data property");
+      requireJson(descriptor?.enumerable && Object.hasOwn(descriptor, "value"), `${path}[${index}]`, "must be an enumerable data property");
     }
     result = reflectApply(map, value, [(item, index) => copyJson(item, `${path}[${index}]`, ancestors)]);
   } else {
@@ -35,7 +35,7 @@ function copyJson(value, path, ancestors) {
     result = Object.create(null);
     for (const key of keys) {
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      requireJson(descriptor.enumerable && "value" in descriptor, `${path}.${key}`, "must be an enumerable data property");
+      requireJson(descriptor.enumerable && Object.hasOwn(descriptor, "value"), `${path}.${key}`, "must be an enumerable data property");
       Object.defineProperty(result, key, {
         value: copyJson(descriptor.value, `${path}.${key}`, ancestors),
         enumerable: true,

@@ -157,7 +157,7 @@ The validator checks every structural gate through the case file's current phase
 
 If shell or file tools are unavailable, self-check the case against the phase table and state that deterministic validation was not run.
 
-For a multi-turn driver, `scripts/engagement-protocol.mjs` replays case submissions, human answers and approvals, and scoped action authorizations. A trusted runtime adapter must verify every authority attestation and case-submission receipt; actor labels, manifest self-hashes, and model claims grant no authority. A new case submission requires fresh approvals. The checkpoint digest proves only that a cache matches the supplied records and verifier results. The caller owns append-only storage and integrity. The protocol reads no source content and performs no authorized action.
+For a multi-turn driver, `scripts/engagement-protocol.mjs` replays case submissions, human answers and approvals, and scoped action authorizations. A trusted, side-effect-free runtime adapter must verify every authority attestation and case-submission receipt; actor labels, manifest self-hashes, and model claims grant no authority. Arbitrary verifier code has the same authority as any other code in the process. A new case submission requires fresh approvals. The checkpoint digest proves only that a cache matches the supplied records and verifier results. The caller owns append-only storage and integrity. The protocol reads no source content and performs no authorized action.
 Read [references/artifacts.md](references/artifacts.md) when creating or reviewing an artifact.
 
 ## Response protocol

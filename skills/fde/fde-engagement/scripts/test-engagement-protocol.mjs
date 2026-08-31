@@ -73,6 +73,11 @@ await rejects("missing authority verifier", () => replayEngagement(
   [], { verifyCaseSubmission: verifiers.verifyCaseSubmission }), "verifyAuthority is required");
 await rejects("missing submission verifier", () => replayEngagement(
   [], { verifyAuthority: verifiers.verifyAuthority }), "verifyCaseSubmission is required");
+const empty = await replayEngagement([], verifiers);
+check(empty.gate.status === "blocked", "empty replay must not pass a gate");
+await rejects("no current submission", () => replayEngagement([
+  answer({ caseEventId: "missing", caseDigest: "missing" }, "orphan-answer"),
+], verifiers), "requires a case submission");
 await rejects("false authority verifier", async () => {
   const item = submission();
   const binding = bind(await replayEngagement([item], verifiers));
@@ -166,12 +171,6 @@ const pending = replayEngagement([mutableSubmission], {
 });
 check((await pending).phase === "audit", "async verifier mutation must not alter the snapshot");
 const queuedCase = structuredClone(baseCase); queuedCase.version = "invalid-at-call"; const queuedValidation = validateCaseFileData(queuedCase); queuedCase.version = "1.0"; check((await queuedValidation).some((error) => error.includes('version must be "1.0"')), "validation must snapshot inputs before queueing");
-const raceCase = submission("case-array-race"); const raceBinding = bind(await replayEngagement([raceCase], verifiers)); const nativeFilter = Array.prototype.filter; const nativeMap = Array.prototype.map; const nativePush = Array.prototype.push; const nativeIsArray = Array.isArray; const nativeTrim = String.prototype.trim; const nativeMapConstructor = Map;
-try { await rejects("array prototype mutation", () => replayEngagement([raceCase, approval("race-approval", "qualify", raceBinding)], {
-    ...verifiers, verifyAuthority: async () => { Array.prototype.filter = () => []; Array.prototype.map = () => []; return true; },
-  }), "runtime intrinsics changed");
-} finally { Array.prototype.filter = nativeFilter; Array.prototype.map = nativeMap; }
-try { await rejects("intrinsic mutation", () => replayEngagement([raceCase, answer(raceBinding, "race-answer"), approval("race-qualify", "qualify", raceBinding)], { ...verifiers, verifyAuthority: async () => { Array.prototype.push = function (item) { return Reflect.apply(nativePush, this, [item, item]); }; Array.isArray = () => true; String.prototype.trim = () => "forged"; globalThis.Map = function () {}; return true; } }), "runtime intrinsics changed"); } finally { Array.prototype.push = nativePush; Array.isArray = nativeIsArray; String.prototype.trim = nativeTrim; globalThis.Map = nativeMapConstructor; }
 Object.prototype.inheritedSemantic = "rejected";
 Object.prototype.toJSON = () => ({ polluted: true });
 const clean = snapshotJson({ id: "clean" });
@@ -181,6 +180,12 @@ delete Object.prototype.inheritedSemantic; delete Object.prototype.toJSON;
 check(!("inheritedSemantic" in clean), "snapshot copies must not inherit semantic properties");
 check(distinct, "canonical serialization must ignore inherited toJSON"); check(pollutionSafe.phase === "audit", "manifest hashing must ignore inherited toJSON");
 const protoCopy = snapshotJson(JSON.parse('{"__proto__":{"authority":true}}')); check(Object.getPrototypeOf(protoCopy) === null && Object.hasOwn(protoCopy, "__proto__"), "own __proto__ must remain inert data");
+Object.prototype.value = "polluted";
+try {
+  const accessor = {}; const descriptor = Object.create(null); descriptor.enumerable = true; descriptor.get = () => "forged";
+  Object.defineProperty(accessor, "secret", descriptor);
+  await rejects("polluted accessor", () => snapshotJson(accessor), "enumerable data property");
+} finally { delete Object.prototype.value; }
 const inherited = Object.create({ type: "case-submitted" }); inherited.id = "inherited";
 await rejects("inherited property", () => replayEngagement([inherited], verifiers), "plain object");
 await rejects("proxy", () => snapshotJson(new Proxy({}, {})), "proxy");
