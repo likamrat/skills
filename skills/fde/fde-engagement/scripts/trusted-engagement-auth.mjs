@@ -20,15 +20,12 @@ export function requireValue(condition, message) {
 }
 
 function exactKeys(value, keys, label) {
-  requireValue(
-    value && typeof value === "object" && !Array.isArray(value),
-    `${label} must be an object`,
-  );
+  requireValue(value && typeof value === "object" && !Array.isArray(value),
+    `${label} must be an object`);
   const actual = Object.keys(value).sort();
-  requireValue(
-    actual.length === keys.length && keys.every((key, index) => key === actual[index]),
-    `${label} has unexpected fields`,
-  );
+  requireValue(actual.length === keys.length &&
+    keys.every((key, index) => key === actual[index]),
+  `${label} has unexpected fields`);
 }
 
 const nonEmpty = (value) => typeof value === "string" && value.trim().length > 0;
@@ -39,21 +36,17 @@ function metadata(envelope, domain, label) {
   requireValue(envelope.domain === domain, `${label}.domain is unsupported`);
   requireValue(envelope.algorithm === ALGORITHM, `${label}.algorithm is unsupported`);
   requireValue(nonEmpty(envelope.keyId), `${label}.keyId is required`);
-  requireValue(
-    typeof envelope.signature === "string" &&
-      /^[a-f0-9]{64}$/.test(envelope.signature),
-    `${label}.signature must be 64 lowercase hex characters`,
-  );
+  requireValue(typeof envelope.signature === "string" &&
+    /^[a-f0-9]{64}$/.test(envelope.signature),
+  `${label}.signature must be 64 lowercase hex characters`);
   return { version: VERSION, domain, algorithm: ALGORITHM, keyId: envelope.keyId };
 }
 
 async function keyBytes(keyProvider, keyId) {
   requireValue(typeof keyProvider === "function", "keyProvider is required");
   const value = await keyProvider(keyId);
-  requireValue(
-    value instanceof Uint8Array && value.byteLength >= 32,
-    `key ${keyId} is missing or shorter than 32 bytes`,
-  );
+  requireValue(value instanceof Uint8Array && value.byteLength === 32,
+    `key ${keyId} must contain exactly 32 bytes`);
   return Buffer.from(value);
 }
 
@@ -66,14 +59,10 @@ const sha256 = (value) =>
   createHash("sha256").update(serializeJson(value)).digest("hex");
 
 function equalHex(actual, expected, label) {
-  requireValue(
-    typeof actual === "string" && /^[a-f0-9]{64}$/.test(actual),
-    `${label} must be 64 lowercase hex characters`,
-  );
-  requireValue(
-    typeof expected === "string" && /^[a-f0-9]{64}$/.test(expected),
-    `${label} comparison value is invalid`,
-  );
+  requireValue(typeof actual === "string" && /^[a-f0-9]{64}$/.test(actual),
+    `${label} must be 64 lowercase hex characters`);
+  requireValue(typeof expected === "string" && /^[a-f0-9]{64}$/.test(expected),
+    `${label} comparison value is invalid`);
   return timingSafeEqual(Buffer.from(actual, "hex"), Buffer.from(expected, "hex"));
 }
 
@@ -85,11 +74,9 @@ async function verifyRecord(record, field, domain, keyProvider) {
   const envelope = record[field];
   const envelopeMetadata = metadata(envelope, domain, `${record.id}.${field}`);
   const key = await keyBytes(keyProvider, envelopeMetadata.keyId);
-  return equalHex(
-    envelope.signature,
+  return equalHex(envelope.signature,
     hmac(key, domain, unsignedRecord(record, field, envelopeMetadata)),
-    `${record.id}.${field}.signature`,
-  );
+    `${record.id}.${field}.signature`);
 }
 
 async function mint(record, field, domain, keyId, keyProvider) {
@@ -121,46 +108,53 @@ function actor(value, requiredKind) {
 
 export function prepareRecord(value) {
   const record = snapshotJson(value);
-  requireValue(
-    record && typeof record === "object" && !Array.isArray(record),
-    "record must be an object",
-  );
-  requireValue(
-    !Object.hasOwn(record, "trusted"),
-    "record.trusted is not an accepted authority field",
-  );
+  requireValue(record && typeof record === "object" && !Array.isArray(record),
+    "record must be an object");
+  requireValue(!Object.hasOwn(record, "trusted"),
+    "record.trusted is not an accepted authority field");
   return record;
 }
 
-export async function mintAuthority(record, authority, keyId, keyProvider) {
+export function decodeKeyHex(value) {
+  const hex = snapshotJson(value);
+  requireValue(
+    typeof hex === "string" && /^[a-fA-F0-9]{64}$/.test(hex),
+    "HMAC key hex must contain exactly 64 hexadecimal characters",
+  );
+  return Buffer.from(hex, "hex");
+}
+
+async function mintAuthorityInput({ record, authority, keyId }, keyProvider) {
   requireValue(
     record.type !== "case-submitted",
     "case-submitted records require a submission receipt",
   );
-  return mint(
-    { ...record, actor: actor(authority, "human") },
-    "attestation",
-    AUTHORITY,
-    keyId,
-    keyProvider,
-  );
+  return mint({ ...record, actor: actor(authority, "human") },
+    "attestation", AUTHORITY, keyId, keyProvider);
 }
 
-export async function mintSubmission(record, submitter, keyId, keyProvider) {
+export function mintAuthority(record, authority, keyId, keyProvider) {
+  const input = snapshotJson({ record, authority, keyId });
+  requireValue(typeof keyProvider === "function", "keyProvider is required");
+  return mintAuthorityInput(input, keyProvider);
+}
+
+async function mintSubmissionInput({ record, submitter, keyId }, keyProvider) {
   requireValue(
     record.type === "case-submitted",
     "trusted submissions require type case-submitted",
   );
-  return mint(
-    { ...record, actor: actor(submitter) },
-    "submissionReceipt",
-    SUBMISSION,
-    keyId,
-    keyProvider,
-  );
+  return mint({ ...record, actor: actor(submitter) },
+    "submissionReceipt", SUBMISSION, keyId, keyProvider);
 }
 
-export async function signEntry(record, head, keyId, keyProvider) {
+export function mintSubmission(record, submitter, keyId, keyProvider) {
+  const input = snapshotJson({ record, submitter, keyId });
+  requireValue(typeof keyProvider === "function", "keyProvider is required");
+  return mintSubmissionInput(input, keyProvider);
+}
+
+async function signEntryInput({ record, head, keyId }, keyProvider) {
   requireValue(nonEmpty(keyId), "keyId is required");
   const authentication = {
     version: VERSION, domain: LOG, algorithm: ALGORITHM, keyId,
@@ -180,7 +174,16 @@ export async function signEntry(record, head, keyId, keyProvider) {
   return snapshotJson({ ...signed, entryDigest: sha256(signed) });
 }
 
-export async function verifyEntry(entry, sequence, previousDigest, keyProvider) {
+export function signEntry(record, head, keyId, keyProvider) {
+  const input = snapshotJson({ record, head, keyId });
+  requireValue(typeof keyProvider === "function", "keyProvider is required");
+  return signEntryInput(input, keyProvider);
+}
+
+async function verifyEntryInput(
+  { entry, sequence, previousDigest },
+  keyProvider,
+) {
   exactKeys(entry, ENTRY_KEYS, `entry ${sequence}`);
   requireValue(entry.version === VERSION, `entry ${sequence}.version is unsupported`);
   requireValue(entry.sequence === sequence, `entry ${sequence}.sequence is invalid`);
@@ -228,6 +231,12 @@ export async function verifyEntry(entry, sequence, previousDigest, keyProvider) 
   return record;
 }
 
+export function verifyEntry(entry, sequence, previousDigest, keyProvider) {
+  const input = snapshotJson({ entry, sequence, previousDigest });
+  requireValue(typeof keyProvider === "function", "keyProvider is required");
+  return verifyEntryInput(input, keyProvider);
+}
+
 function checkedHead(value, label) {
   const head = snapshotJson(value);
   exactKeys(head, ["digest", "sequence", "version"], label);
@@ -273,7 +282,9 @@ export function requireTrustedPrefix(value, entries) {
 }
 
 export function replayRecords(records, keyProvider) {
-  return replayEngagement(records, {
+  const input = snapshotJson(records);
+  requireValue(typeof keyProvider === "function", "keyProvider is required");
+  return replayEngagement(input, {
     verifyAuthority: (record) =>
       verifyRecord(record, "attestation", AUTHORITY, keyProvider),
     verifyCaseSubmission: (record) =>

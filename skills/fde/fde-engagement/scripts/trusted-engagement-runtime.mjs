@@ -1,9 +1,6 @@
-#!/usr/bin/env node
-
 import { randomUUID } from "node:crypto";
-import { open, readFile, realpath, rename, stat, unlink } from "node:fs/promises";
+import { open, realpath, rename, stat, unlink } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import {
   EMPTY_HEAD, mintAuthority, mintSubmission, prepareRecord, replayRecords,
   requireExactHead, requireTrustedPrefix, requireValue, signEntry, verifyEntry,
@@ -43,9 +40,39 @@ async function checkedPaths(logPath, checkpointPath) {
   return { logPath: names[0], checkpointPath: names[1] };
 }
 
+function requireSingleLink(value, label) {
+  requireValue(value.nlink === 1, `${label} must have exactly one filesystem link`);
+}
+
+function sameIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+async function readStableLog(logPath) {
+  const handle = await open(logPath, "r");
+  try {
+    const before = await handle.stat();
+    requireSingleLink(before, "log");
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    const named = await stat(logPath);
+    requireValue(
+      sameIdentity(before, after) && sameIdentity(before, named),
+      "log identity changed during verification",
+    );
+    requireSingleLink(after, "log");
+    requireSingleLink(named, "log");
+    return { bytes, identity: before };
+  } finally {
+    await handle.close();
+  }
+}
+
 async function verifiedLog(logPath, keyProvider) {
-  const bytes = await readFile(logPath);
-  if (bytes.length === 0) return { entries: [], records: [], head: EMPTY_HEAD };
+  const { bytes, identity } = await readStableLog(logPath);
+  if (bytes.length === 0) {
+    return { entries: [], records: [], head: EMPTY_HEAD, identity };
+  }
   requireValue(bytes.at(-1) === 10, "log has a trailing partial record");
   let text;
   try { text = UTF8.decode(bytes); } catch {
@@ -72,7 +99,7 @@ async function verifiedLog(logPath, keyProvider) {
   }
   const head = snapshotJson(
     { version: 1, sequence: entries.length, digest: previousDigest });
-  return { entries, records, head };
+  return { entries, records, head, identity };
 }
 
 async function removeTemporary(path) {
@@ -96,17 +123,16 @@ async function writeCheckpoint(checkpointPath, head, state) {
     }
     await rename(temporary, checkpointPath);
     replaced = true;
-    if (process.platform !== "win32") {
-      const directory = await open(dirname(checkpointPath), "r");
-      try {
-        await directory.sync();
-      } finally {
-        await directory.close();
-      }
-    }
+    await syncParentDirectory(checkpointPath);
   } finally {
     if (!replaced) await removeTemporary(temporary);
   }
+}
+
+async function syncParentDirectory(path) {
+  if (process.platform === "win32") return;
+  const directory = await open(dirname(path), "r");
+  try { await directory.sync(); } finally { await directory.close(); }
 }
 
 async function withLock(logPath, action) {
@@ -126,7 +152,7 @@ async function withLock(logPath, action) {
   }
 }
 
-export async function initializeLog({ logPath, checkpointPath }) {
+async function initializeInput({ logPath, checkpointPath }, syncParent) {
   requireValue(typeof logPath === "string" && typeof checkpointPath === "string",
     "log and checkpoint paths are required");
   ({ logPath, checkpointPath } = await checkedPaths(logPath, checkpointPath));
@@ -134,29 +160,44 @@ export async function initializeLog({ logPath, checkpointPath }) {
     const handle = await open(logPath, "wx", 0o600);
     try {
       await handle.sync();
+      requireSingleLink(await handle.stat(), "log");
     } finally {
       await handle.close();
     }
+    await syncParent(logPath);
     const state = await replayRecords([], () => undefined);
     await writeCheckpoint(checkpointPath, EMPTY_HEAD, state);
     return snapshotJson({ head: EMPTY_HEAD, state });
   });
 }
 
-async function appendTransformed(options, transform) {
-  let { logPath, checkpointPath, expectedHead, keyId, keyProvider } = options;
+export function initializeLog(options, syncParent = syncParentDirectory) {
+  const input = snapshotJson(options);
+  requireValue(typeof syncParent === "function", "syncParent is required");
+  return initializeInput(input, syncParent);
+}
+
+async function appendTransformed(options, keyProvider, transform) {
+  let { logPath, checkpointPath, expectedHead, keyId } = options;
   ({ logPath, checkpointPath } = await checkedPaths(logPath, checkpointPath));
   const input = prepareRecord(options.record);
   return withLock(logPath, async () => {
     const current = await verifiedLog(logPath, keyProvider);
     requireExactHead(expectedHead, current.head);
-    const record = await transform(input, keyId, keyProvider);
+    const record = await transform(input, keyId, keyProvider, options);
     const state = await replayRecords([...current.records, record], keyProvider);
     const entry = await signEntry(record, current.head, keyId, keyProvider);
     const handle = await open(logPath, "a", 0o600);
     try {
+      const identity = await handle.stat();
+      requireValue(
+        sameIdentity(identity, current.identity),
+        "log identity changed before append",
+      );
+      requireSingleLink(identity, "log");
       await handle.writeFile(`${serializeJson(entry)}\n`);
       await handle.sync();
+      requireSingleLink(await handle.stat(), "log");
     } finally {
       await handle.close();
     }
@@ -168,23 +209,27 @@ async function appendTransformed(options, transform) {
   });
 }
 
-export function appendRecord(options) {
-  return appendTransformed(options, async (record) => record);
+function appendInput(options, keyProvider, transform) {
+  const input = snapshotJson(options);
+  requireValue(typeof keyProvider === "function", "keyProvider is required");
+  return appendTransformed(input, keyProvider, transform);
 }
 
-export function appendTrustedAuthority(options) {
-  return appendTransformed(options, (record, keyId, keyProvider) =>
-    mintAuthority(record, options.authority, keyId, keyProvider));
+export function appendRecord(options, keyProvider) {
+  return appendInput(options, keyProvider, async (record) => record);
 }
 
-export function appendTrustedSubmission(options) {
-  return appendTransformed(options, (record, keyId, keyProvider) =>
-    mintSubmission(record, options.submitter, keyId, keyProvider));
+export function appendTrustedAuthority(options, keyProvider) {
+  return appendInput(options, keyProvider, (record, keyId, provider, input) =>
+    mintAuthority(record, input.authority, keyId, provider));
 }
 
-export async function verifyAndReplay({
-  logPath, checkpointPath, trustedHead, keyProvider,
-}) {
+export function appendTrustedSubmission(options, keyProvider) {
+  return appendInput(options, keyProvider, (record, keyId, provider, input) =>
+    mintSubmission(record, input.submitter, keyId, provider));
+}
+
+async function verifyInput({ logPath, checkpointPath, trustedHead }, keyProvider) {
   ({ logPath, checkpointPath } = await checkedPaths(logPath, checkpointPath));
   return withLock(logPath, async () => {
     const current = await verifiedLog(logPath, keyProvider);
@@ -195,97 +240,8 @@ export async function verifyAndReplay({
   });
 }
 
-function parseArguments(values) {
-  const [command, ...rest] = values;
-  const options = {};
-  for (let index = 0; index < rest.length; index += 2) {
-    const flag = rest[index];
-    requireValue(
-      flag?.startsWith("--") && rest[index + 1] != null,
-      `invalid argument near ${flag ?? "end of command"}`,
-    );
-    options[flag.slice(2)] = rest[index + 1];
-  }
-  return { command, options };
-}
-
-function required(options, name) {
-  const value = options[name];
-  requireValue(
-    typeof value === "string" && value.length > 0,
-    `--${name} is required`,
-  );
-  return value;
-}
-
-async function jsonFile(path, label) {
-  try {
-    return snapshotJson(JSON.parse(UTF8.decode(await readFile(path))));
-  } catch (error) {
-    throw new Error(`${label} is invalid: ${error.message}`);
-  }
-}
-
-function environmentKey() {
-  const keyId = process.env.FDE_HMAC_KEY_ID;
-  const hex = process.env.FDE_HMAC_KEY_HEX;
-  requireValue(
-    keyId && hex && /^[a-fA-F0-9]{64,}$/.test(hex) && hex.length % 2 === 0,
-    "FDE_HMAC_KEY_ID and a 32-byte or longer FDE_HMAC_KEY_HEX are required",
-  );
-  const key = Buffer.from(hex, "hex");
-  return {
-    keyId,
-    keyProvider: async (requested) => requested === keyId ? key : undefined,
-  };
-}
-
-export async function runCli(argv) {
-  const { command, options } = parseArguments(argv);
-  const logPath = required(options, "log");
-  const checkpointPath = required(options, "checkpoint");
-  if (command === "init") return initializeLog({ logPath, checkpointPath });
-  const { keyId, keyProvider } = environmentKey();
-  if (command === "replay") {
-    return verifyAndReplay({
-      logPath,
-      checkpointPath,
-      trustedHead: await jsonFile(required(options, "trusted-head"), "trusted head"),
-      keyProvider,
-    });
-  }
-  const common = {
-    logPath,
-    checkpointPath,
-    record: await jsonFile(required(options, "record"), "record"),
-    expectedHead: await jsonFile(required(options, "expected-head"), "expected head"),
-    keyId,
-    keyProvider,
-  };
-  if (command === "append") return appendRecord(common);
-  if (command === "append-authority") {
-    return appendTrustedAuthority({
-      ...common,
-      authority: { kind: "human", id: required(options, "actor-id") },
-    });
-  }
-  if (command === "append-submission") {
-    return appendTrustedSubmission({
-      ...common,
-      submitter: {
-        kind: required(options, "actor-kind"),
-        id: required(options, "actor-id"),
-      },
-    });
-  }
-  throw new Error(`unknown command ${command ?? "(missing)"}`);
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  try {
-    process.stdout.write(`${serializeJson(await runCli(process.argv.slice(2)))}\n`);
-  } catch (error) {
-    console.error(error.message);
-    process.exitCode = 1;
-  }
+export function verifyAndReplay(options, keyProvider) {
+  const input = snapshotJson(options);
+  requireValue(typeof keyProvider === "function", "keyProvider is required");
+  return verifyInput(input, keyProvider);
 }

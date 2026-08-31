@@ -241,16 +241,25 @@ assets/readout-brief.template.json
 
 For a trusted multi-turn driver, `scripts/trusted-engagement-runtime.mjs` supplies the protocol verifiers and owns a versioned JavaScript Object Notation Lines (JSONL) log. Each canonical entry has a monotonic sequence, the previous digest, an entry digest, and a keyed-hash message authentication code (HMAC). Authority, case submission, and log entries use separate signature domains. The authority and submission envelopes cover the complete canonical record, including the actor supplied by the trusted caller and all case, manifest, and evidence bindings.
 
-The application programming interface separates `prepareRecord`, which has no key access, from `appendTrustedAuthority` and `appendTrustedSubmission`. The command line exposes the same boundary:
+The application programming interface separates `prepareRecord`, which has no key access, from `appendTrustedAuthority` and `appendTrustedSubmission`. A separate command-line module was deliberately deferred to keep this adapter within its two-module and size limits. The later isolated experiment should let the model session prepare record data only. A trusted host process reads the ephemeral key and invokes the API:
 
-```text
-node scripts/trusted-engagement-runtime.mjs init --log <log> --checkpoint <checkpoint>
-node scripts/trusted-engagement-runtime.mjs append-submission --log <log> --checkpoint <checkpoint> --record <record> --actor-kind <kind> --actor-id <id> --expected-head <head>
-node scripts/trusted-engagement-runtime.mjs append-authority --log <log> --checkpoint <checkpoint> --record <record> --actor-id <id> --expected-head <head>
-node scripts/trusted-engagement-runtime.mjs replay --log <log> --checkpoint <checkpoint> --trusted-head <head>
+```js
+import { decodeKeyHex } from "./scripts/trusted-engagement-auth.mjs";
+import {
+  appendTrustedSubmission, initializeLog,
+} from "./scripts/trusted-engagement-runtime.mjs";
+
+const keyId = "local-experiment";
+const key = decodeKeyHex(process.env.FDE_HMAC_KEY_HEX);
+const keyProvider = async (requested) => requested === keyId ? key : undefined;
+const current = await initializeLog({ logPath, checkpointPath });
+const next = await appendTrustedSubmission({
+  logPath, checkpointPath, record, expectedHead: current.head, keyId,
+  submitter: authenticatedCaller,
+}, keyProvider);
 ```
 
-All commands except `init` require an ephemeral hexadecimal key in `FDE_HMAC_KEY_HEX` and its non-secret identifier in `FDE_HMAC_KEY_ID`. Append requires the exact current head, so stale writers fail. Replay accepts a previously trusted head as a verified prefix, authenticates any committed extension, rebuilds the disposable checkpoint, and returns the current head. This recovers an append that reached the log before checkpoint replacement or head persistence failed.
+The key and `keyProvider` stay in the trusted host and are never passed to the model session. `decodeKeyHex` accepts exactly 64 hexadecimal characters, and the API accepts exactly 32 key bytes. Append requires the exact current head, so stale writers fail. Replay accepts a previously trusted head as a verified prefix, authenticates any committed extension, rebuilds the disposable checkpoint, and returns the current head. This recovers an append that reached the log before checkpoint replacement or head persistence failed.
 
 This is a single-host, local-filesystem consistency mechanism, not tamper-proof storage or production authentication. The caller still owns durable head storage, key custody and rotation, operating-system permissions, stale-lock recovery, backups, production identity, and network-filesystem behavior. The adapter reads only explicit record and head inputs. It makes no network or model calls, reads no customer sources, and executes no authorized action.
 Validate the audience, evidence links, findings, recommendations, risks, and next steps:

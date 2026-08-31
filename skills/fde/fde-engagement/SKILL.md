@@ -157,7 +157,7 @@ The validator checks every structural gate through the case file's current phase
 
 If shell or file tools are unavailable, self-check the case against the phase table and state that deterministic validation was not run.
 
-For a multi-turn driver, `scripts/trusted-engagement-runtime.mjs` supplies authenticated authority and submission verifiers to `engagement-protocol.mjs`, stores canonical chained records, and rebuilds a disposable checkpoint from the verified log. Append requires the exact current head; replay accepts a previously trusted prefix and verifies any authenticated extension. This local-filesystem adapter is not tamper-proof storage, production identity, a key manager, or an action executor. The deployment owns durable head storage, key custody, permissions, stale-lock recovery, and production identity.
+For a multi-turn driver, import the API in `scripts/trusted-engagement-runtime.mjs`. It supplies authenticated authority and submission verifiers to `engagement-protocol.mjs`, stores canonical chained records, and rebuilds a disposable checkpoint from the verified log. No command-line module is included; the trusted host injects the key while the model session can only prepare record data. Append requires the exact current head; replay accepts a previously trusted prefix and verifies any authenticated extension. This local-filesystem adapter is not tamper-proof storage, production identity, a key manager, or an action executor. The deployment owns durable head storage, key custody, permissions, stale-lock recovery, and production identity.
 Read [references/artifacts.md](references/artifacts.md) when creating or reviewing an artifact.
 
 ## Response protocol
