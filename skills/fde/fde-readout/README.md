@@ -58,6 +58,12 @@ alignment, overflow, connector geometry, and HTML/PPTX drift.
 
 ## Commands
 
+Compile a plan from preflighted source, authorization, and intent:
+
+```text
+node scripts/compile-readout-intent.mjs --source path/to/preflighted-source.json --authorization path/to/preflighted-auth.json --intent path/to/intent.json --output path/to/readout-plan.json
+```
+
 Validate a plan:
 
 ```text

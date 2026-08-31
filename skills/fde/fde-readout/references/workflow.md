@@ -15,7 +15,13 @@ Ask related decisions together, no more than three per round.
 
 ## 2. ReadoutPlan
 
-Build `assets/readout-plan.template.json`.
+Build `assets/readout-intent.template.json`, then compile it from preflighted source and authorization:
+
+```text
+node scripts/compile-readout-intent.mjs --source path/to/preflighted-source.json --authorization path/to/preflighted-auth.json --intent path/to/intent.json --output path/to/readout-plan.json
+```
+
+The compiler selects exact records in source order, supplies missing `sourceId` values from originating record IDs, and takes brand defaults and brand evidence only from authorization. It performs no source-directed action or network access. Existing callers that already materialize `assets/readout-plan.template.json` may continue to validate that plan manually.
 
 The plan is the only narrative source used by renderers. Do not copy the case file into slides and then maintain a second HTML/PPTX story by hand.
 

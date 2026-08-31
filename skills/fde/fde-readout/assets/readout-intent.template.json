@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "id": "",
+  "title": "",
+  "fictional": false,
+  "asOf": "",
+  "audience": "customer",
+  "purpose": "",
+  "confidentiality": "",
+  "density": "speaker-led",
+  "delivery": [
+    "html"
+  ],
+  "brand": {
+    "source": "unbranded",
+    "wordmark": "",
+    "fontFamily": "",
+    "colors": {
+      "ink": "",
+      "system": "",
+      "decision": "",
+      "risk": "",
+      "paper": "",
+      "muted": "",
+      "line": ""
+    },
+    "requiredFooter": "",
+    "styleReference": {
+      "source": "",
+      "scope": "none",
+      "reusedAssets": []
+    }
+  },
+  "selectedEvidenceIds": [],
+  "selectedHumanContextIds": [],
+  "slides": []
+}

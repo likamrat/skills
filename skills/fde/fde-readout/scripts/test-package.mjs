@@ -161,6 +161,7 @@ for (const file of files.filter((candidate) =>
 
 const requiredAssets = [
   [join(skillRoot, "assets", "readout-plan.template.json"), "plan template"],
+  [join(skillRoot, "assets", "readout-intent.template.json"), "intent template"],
   [
     join(skillRoot, "assets", "powerpoint-16x9-seed.pptx"),
     "PowerPoint seed",
@@ -342,6 +343,7 @@ check(
 );
 
 for (const script of [
+  "test-compile-readout-intent.mjs",
   "test-plan.mjs",
   "test-html.mjs",
   "test-writing.mjs",
