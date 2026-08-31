@@ -192,15 +192,30 @@ if (
   fail("Intent brand settings do not match authorization.brandDefaults");
 }
 
-const evidence = select(
-  source.evidence,
-  intent.selectedEvidenceIds,
-  "selectedEvidenceIds",
-);
 const humanContext = select(
   source.humanContext,
   intent.selectedHumanContextIds,
   "selectedHumanContextIds",
+);
+if (
+  !Array.isArray(intent.selectedEvidenceIds) ||
+  intent.selectedEvidenceIds.some((id) => !nonEmpty(id))
+) {
+  fail("selectedEvidenceIds must be an array of non-empty IDs");
+}
+if (new Set(intent.selectedEvidenceIds).size !== intent.selectedEvidenceIds.length) {
+  fail("selectedEvidenceIds contains duplicate IDs");
+}
+const materializedEvidenceIds = [
+  ...new Set([
+    ...intent.selectedEvidenceIds,
+    ...humanContext.flatMap((record) => record.evidenceIds ?? []),
+  ]),
+];
+const evidence = select(
+  source.evidence,
+  materializedEvidenceIds,
+  "selectedEvidenceIds",
 );
 const sourceEvidenceById = recordsById(source.evidence, "source.evidence");
 const sourceHumanById = recordsById(source.humanContext, "source.humanContext");
@@ -241,7 +256,7 @@ const authorizationEvidence = authorization.evidence.map((record) => ({
   sourceId: nonEmpty(record.sourceId) ? record.sourceId : record.id,
 }));
 const {
-  selectedEvidenceIds,
+  selectedEvidenceIds: _selectedEvidenceIds,
   selectedHumanContextIds,
   brand: _intentBrand,
   ...planFields
@@ -277,7 +292,7 @@ console.log(
   JSON.stringify({
     output,
     sha256: createHash("sha256").update(text).digest("hex"),
-    selectedEvidenceIds,
+    selectedEvidenceIds: materializedEvidenceIds,
     selectedHumanContextIds,
     authorizationEvidenceIds: authorization.evidence.map((record) => record.id),
   }),

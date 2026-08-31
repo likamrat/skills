@@ -107,6 +107,26 @@ try {
     expect(JSON.parse(result.stdout).sha256.length === 64, "missing SHA-256");
   });
 
+  await test("materializes evidence required by selected human context", async () => {
+    const dependency = compactSource.humanContext[0].evidenceIds[0];
+    const testIntent = structuredClone(intent);
+    testIntent.selectedEvidenceIds = testIntent.selectedEvidenceIds.filter(
+      (id) => id !== dependency,
+    );
+    const output = join(directory, "human-context-evidence-closure.json");
+    const { result } = run(directory, { intent: testIntent }, output);
+    expect(result.status === 0, `${result.stdout}${result.stderr}`);
+    const plan = JSON.parse(await readFile(output, "utf8"));
+    expect(
+      plan.evidence.some((record) => record.id === dependency),
+      "human-context evidence dependency was not materialized",
+    );
+    expect(
+      JSON.parse(result.stdout).selectedEvidenceIds.includes(dependency),
+      "compiler summary omitted the materialized dependency",
+    );
+  });
+
   for (const [name, mutate, text] of [
     [
       "missing selected ID",
