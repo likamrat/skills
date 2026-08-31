@@ -150,7 +150,7 @@ The bundled renderer is dependency-free. After freezing the plan and HTML, inspe
 
 Read [references/powerpoint-delivery.md](references/powerpoint-delivery.md).
 
-Copy the bundled clean 16:9 seed before native Office authoring; a reference deck is design input, never the mutable output base. Never substitute a screenshot-only deck or install a converter at runtime. On Windows with PowerPoint installed, use `scripts/create-powerpoint-skeleton.ps1` to build and verify the complete slide-and-notes skeleton before opening the Office canvas. Render the three-slide smoke deck and block full authoring until a coordinator or accountable human approves its contact sheet. After approval, restart from a fresh seed copy, repeat native skeleton creation, then use the canvas for content only before rendering and inspecting the full package against the plan.
+Copy the bundled clean 16:9 seed before native Office authoring; a reference deck is design input, never the mutable output base. Never substitute a screenshot-only deck or install a converter at runtime. On Windows with PowerPoint installed, canonical-validate the complete `ReadoutPlan` once, then pass its cover, decision, and densest-family slide IDs to `scripts/create-powerpoint-skeleton.ps1 -SmokeSlideIds`. The helper selects those slides from the complete plan; never create or validate a derivative smoke plan. Author and render the three selected slides, then block until a coordinator or accountable human approves the contact sheet. After approval, discard the smoke deck, restart from a fresh seed, and invoke the helper without `-SmokeSlideIds` against the same complete plan before full canvas authoring and inspection.
 
 ## Restyle from a reference deck
 

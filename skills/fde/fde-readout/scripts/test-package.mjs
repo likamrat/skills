@@ -284,6 +284,22 @@ try {
     !skeletonHelper.includes("ConvertFrom-Json -Depth"),
     "PowerPoint skeleton helper must remain compatible with Windows PowerShell 5.1",
   );
+  check(
+    skeletonHelper.includes("[string[]]$SmokeSlideIds") &&
+      skeletonHelper.includes("$PSBoundParameters.ContainsKey('SmokeSlideIds')") &&
+      skeletonHelper.includes("$selectedSlides = $planSlides"),
+    "PowerPoint skeleton helper must preserve full-plan behavior while supporting explicit smoke selection",
+  );
+  check(
+    skeletonHelper.includes("$sourcePlanSha256") &&
+      skeletonHelper.includes("selectedSlideIds") &&
+      skeletonHelper.includes("selectedSlideFamilies"),
+    "PowerPoint skeleton helper must bind output to the source full plan and selected slides",
+  );
+  check(
+    !skeletonHelper.includes(".FileFormat"),
+    "PowerPoint skeleton helper must not access unsupported Presentation.FileFormat",
+  );
 } catch (error) {
   failures.push(`PowerPoint skeleton helper contract could not be verified: ${error.message}`);
 }
@@ -330,6 +346,7 @@ for (const script of [
   "test-html.mjs",
   "test-writing.mjs",
   "test-source-preflight.mjs",
+  "test-powerpoint-skeleton.mjs",
 ]) {
   const result = spawnSync(process.execPath, [join(skillRoot, "scripts", script)], {
     encoding: "utf8",
