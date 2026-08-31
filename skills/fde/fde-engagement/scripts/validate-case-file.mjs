@@ -312,9 +312,11 @@ async function validateSourceIntake(data) {
     intake.manifestSha256 === computedManifestSha256,
     "sourceIntake.manifestSha256 does not match the manifest",
   );
+  const reconciledManifestStatus =
+    manifest.status === "review" ? "reviewed" : manifest.status;
   requireValue(
-    intake.status === manifest.status,
-    "sourceIntake.status does not match the manifest",
+    intake.status === reconciledManifestStatus,
+    "sourceIntake.status does not reconcile to the manifest",
   );
   requireValue(
     intake.screenedAt === manifest.generatedAt,

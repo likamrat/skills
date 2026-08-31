@@ -55,7 +55,7 @@
       "expected_output": "The skill records an evidence-safe problem ledger and requests the patch inventory needed before prescribing an operating model.",
       "assertions": [
         "It records the requested patches separately from the observed maintenance or workflow problem.",
-        "It prints every problem-ledger field and keeps unsupported values Unknown.",
+        "It records every exact problem-ledger field in the case file, shows the decision-relevant fields, and keeps unsupported values Unknown.",
         "It leaves the common shape unproven and does not generalize from the claim alone.",
         "It records the counterexample as Unknown and requests a concrete split case.",
         "Its disposition is exactly observe, not invest or an invented label.",
@@ -137,7 +137,7 @@
         "The response directs challenge at the decision, terminology, and evidence while treating the FDE as the accountable decision maker.",
         "The response identifies the conflict between recommendation and authorization.",
         "It asks a numbered frontier question that requires the FDE to confirm the canonical meaning of approval.",
-        "Every decision question includes Recommendation, Concrete example, Why, and Changes if.",
+        "The question preserves its persisted decision ID, prerequisites, number, status, evidence, and reopen condition; conversational labels may contract.",
         "The concrete example uses the case's separate recommendation and authorization events without selecting architecture.",
         "It explicitly leaves agent action authority for a later round because that decision depends on the terminology boundary.",
         "It does not ask downstream architecture, tool, or model questions.",
@@ -188,7 +188,7 @@
         "It asks at most three numbered decision questions.",
         "Question numbers continue from the case file rather than restarting at Q1.",
         "It states how many ready decisions remain without previewing downstream answers.",
-        "Each asked question includes Recommendation, Concrete example, Why, and Changes if.",
+        "Each asked question preserves its persisted decision ID, prerequisites, number, status, evidence, and reopen condition; conversational labels may contract.",
         "It waits for the FDE before opening another round."
       ]
     },

@@ -65,7 +65,7 @@ Once grounded:
 1. Rank the ready frontier by gate impact, consequence, and reversibility.
 2. Ask at most three independent decisions in one round.
 3. Do not ask a question whose answer depends on another question still open in that round.
-4. Assign each asked node the next unused question number. Never reset numbering during the engagement.
+4. Assign each asked node the next unused question number and persist its ID, prerequisites, number, status, evidence IDs, and reopen condition. Never reset numbering during the engagement.
 5. Explain why each decision is on the frontier now.
 6. Give a recommendation with rationale and tradeoff.
 7. Add one case-specific example with a plain-language sentence and the smallest useful programmatic form: event formula, rule, payload, query, state transition, pseudocode, interface, or test.
@@ -74,9 +74,9 @@ Once grounded:
 10. State how many ready decisions remain without previewing or answering them.
 11. Wait for all answers before recomputing the tree.
 
-Do not combine independent decisions to evade the three-question limit. Unasked ready nodes remain on the frontier for the next round.
+Do not combine independent decisions to evade the three-question limit. Unasked ready nodes remain on the frontier for the next round. A shorter conversational response does not change these persisted fields.
 
-A frontier response without at least one explicit `Q#` question is invalid. Use `Q1 - <title>` with an ASCII hyphen, never an em dash. Each question must include the labels `Recommendation`, `Concrete example`, `Why`, and `Changes if`.
+Use at least one explicit `Q#` question for a frontier response. The default layout uses `Q1 - <title>` with an ASCII hyphen and the labels `Recommendation`, `Concrete example`, `Why`, and `Changes if`. A single direct frontier question may collapse the labels and order when the gate, evidence and inference distinction, risk, decision, and next safe action remain clear. The next safe action is to answer that question; dependent decisions remain blocked.
 
 Choose the example type that makes the decision observable:
 
@@ -97,9 +97,9 @@ Good: Does "approve" mean recommend a disposition or authorize payment?
 Blocked until answered: whether the agent may take either action.
 ```
 
-End the response after the final `Changes if` line. Wait for the FDE; do not add a conclusion, artifact, or next-gate action.
+For the full round format, end after the final `Changes if` line and wait for the FDE. Do not add a conclusion or artifact.
 
-## Round format
+## Default round format
 
 ```text
 Frontier: <branch or phase> | Asking <count> of <ready count>
