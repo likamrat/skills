@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { browserCandidates } from "./browser-candidates.mjs";
+import {
+  browserCandidates,
+  browserLaunchArguments,
+} from "./browser-candidates.mjs";
 
 assert.deepEqual(
   browserCandidates("linux", {
@@ -33,5 +36,18 @@ assert.deepEqual(
   ["/same/browser", "/usr/bin/google-chrome"],
   "duplicate configured candidates must be removed",
 );
+
+const linuxArguments = browserLaunchArguments("/tmp/profile", "linux");
+assert(linuxArguments.includes("--no-sandbox"));
+assert(linuxArguments.includes("--disable-dev-shm-usage"));
+assert(!linuxArguments.includes("--disable-setuid-sandbox"));
+
+for (const platform of ["win32", "darwin"]) {
+  const argumentsForPlatform = browserLaunchArguments("/tmp/profile", platform);
+  assert(!argumentsForPlatform.includes("--no-sandbox"));
+  assert(!argumentsForPlatform.includes("--disable-dev-shm-usage"));
+  assert(argumentsForPlatform.includes("--remote-debugging-port=0"));
+  assert(argumentsForPlatform.includes("--user-data-dir=/tmp/profile"));
+}
 
 console.log("Browser candidate ordering passed.");

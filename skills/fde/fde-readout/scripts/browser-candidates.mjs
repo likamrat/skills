@@ -47,3 +47,18 @@ export function browserCandidates(
 
   return [...new Set([...configured, ...defaults].filter(Boolean))];
 }
+
+export function browserLaunchArguments(profile, platform = process.platform) {
+  return [
+    "--headless=new",
+    "--disable-gpu",
+    "--no-first-run",
+    "--no-default-browser-check",
+    ...(platform === "linux"
+      ? ["--no-sandbox", "--disable-dev-shm-usage"]
+      : []),
+    "--remote-debugging-port=0",
+    `--user-data-dir=${profile}`,
+    "about:blank",
+  ];
+}

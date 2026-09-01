@@ -5,7 +5,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { browserCandidates } from "./browser-candidates.mjs";
+import {
+  browserCandidates,
+  browserLaunchArguments,
+} from "./browser-candidates.mjs";
 import { createReadoutServer } from "./serve.mjs";
 
 const skillRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -18,6 +21,7 @@ const examplePlan = join(
 const renderer = join(skillRoot, "scripts", "render-html.mjs");
 const directory = await mkdtemp(join(tmpdir(), "fde-readout-html-"));
 const failures = [];
+const browserStderrLimit = 8_192;
 
 function check(condition, message) {
   if (!condition) failures.push(message);
@@ -35,17 +39,57 @@ async function findBrowser() {
   return null;
 }
 
-async function waitForDevtoolsPort(profile) {
+function browserFailure(message, browser, processHandle, spawnError, stderr) {
+  const status = spawnError
+    ? `spawn error: ${spawnError.message}`
+    : processHandle.exitCode !== null
+      ? `exit code ${processHandle.exitCode}`
+      : processHandle.signalCode
+        ? `signal ${processHandle.signalCode}`
+        : "still running";
+  return new Error(
+    `${message}\nBrowser: ${browser}\nProcess: ${status}\nStderr:\n${stderr() || "(none)"}`,
+  );
+}
+
+async function waitForDevtoolsPort(
+  profile,
+  browser,
+  processHandle,
+  getSpawnError,
+  stderr,
+) {
   const path = join(profile, "DevToolsActivePort");
   for (let attempt = 0; attempt < 100; attempt += 1) {
+    const spawnError = getSpawnError();
+    if (
+      spawnError ||
+      processHandle.exitCode !== null ||
+      processHandle.signalCode
+    ) {
+      throw browserFailure(
+        "Browser exited before exposing a debugging port.",
+        browser,
+        processHandle,
+        spawnError,
+        stderr,
+      );
+    }
     try {
       const [port] = (await readFile(path, "utf8")).split(/\r?\n/);
       if (port) return Number.parseInt(port, 10);
-    } catch {
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
     }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
   }
-  throw new Error("Timed out waiting for the browser debugging port.");
+  throw browserFailure(
+    "Timed out waiting for the browser debugging port.",
+    browser,
+    processHandle,
+    getSpawnError(),
+    stderr,
+  );
 }
 
 async function createCdpClient(port) {
@@ -369,20 +413,32 @@ try {
       const profile = await mkdtemp(join(tmpdir(), "fde-readout-browser-"));
       const processHandle = spawn(
         browser,
-        [
-          "--headless=new",
-          "--disable-gpu",
-          "--no-first-run",
-          "--no-default-browser-check",
-          "--remote-debugging-port=0",
-          `--user-data-dir=${profile}`,
-          "about:blank",
-        ],
-        { stdio: "ignore" },
+        browserLaunchArguments(profile),
+        { stdio: ["ignore", "ignore", "pipe"] },
       );
+      let spawnError;
+      let browserStderr = "";
+      let stderrTruncated = false;
+      processHandle.once("error", (error) => {
+        spawnError = error;
+      });
+      processHandle.stderr.setEncoding("utf8");
+      processHandle.stderr.on("data", (chunk) => {
+        const remaining = browserStderrLimit - browserStderr.length;
+        if (remaining > 0) browserStderr += chunk.slice(0, remaining);
+        if (chunk.length > remaining) stderrTruncated = true;
+      });
+      const stderr = () =>
+        `${browserStderr.trim()}${stderrTruncated ? "\n[stderr truncated]" : ""}`;
       let client;
       try {
-        const port = await waitForDevtoolsPort(profile);
+        const port = await waitForDevtoolsPort(
+          profile,
+          browser,
+          processHandle,
+          () => spawnError,
+          stderr,
+        );
         client = await createCdpClient(port);
         await client.send("Page.enable");
         await client.send("Runtime.enable");
@@ -428,9 +484,21 @@ try {
         );
       } finally {
         client?.close();
-        if (processHandle.exitCode === null) {
-          processHandle.kill();
-          await new Promise((exit) => processHandle.once("exit", exit));
+        if (
+          processHandle.pid &&
+          processHandle.exitCode === null &&
+          processHandle.signalCode === null
+        ) {
+          const exited = new Promise((exit) =>
+            processHandle.once("exit", exit),
+          );
+          if (
+            processHandle.exitCode === null &&
+            processHandle.signalCode === null
+          ) {
+            processHandle.kill();
+            await exited;
+          }
         }
         await rm(profile, { recursive: true, force: true, maxRetries: 5 });
       }
