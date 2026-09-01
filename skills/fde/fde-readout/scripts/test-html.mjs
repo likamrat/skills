@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { browserCandidates } from "./browser-candidates.mjs";
 import { createReadoutServer } from "./serve.mjs";
 
 const skillRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -23,32 +24,7 @@ function check(condition, message) {
 }
 
 async function findBrowser() {
-  const candidates = [
-    process.env.FDE_READOUT_BROWSER,
-    process.env.CHROME_BIN,
-    process.platform === "win32"
-      ? join(
-          process.env["PROGRAMFILES(X86)"] ?? "",
-          "Microsoft",
-          "Edge",
-          "Application",
-          "msedge.exe",
-        )
-      : "/usr/bin/microsoft-edge",
-    process.platform === "win32"
-      ? join(
-          process.env.PROGRAMFILES ?? "",
-          "Google",
-          "Chrome",
-          "Application",
-          "chrome.exe",
-        )
-      : "/usr/bin/google-chrome",
-    process.platform === "darwin"
-      ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-      : "/usr/bin/chromium",
-  ].filter(Boolean);
-  for (const candidate of candidates) {
+  for (const candidate of browserCandidates()) {
     try {
       await access(candidate);
       return candidate;
