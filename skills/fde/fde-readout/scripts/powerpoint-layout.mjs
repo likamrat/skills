@@ -913,7 +913,7 @@ function compileResponsibility(ctx, slide) {
     ctx,
     "excluded-authority",
     "responsibility-excluded-authority",
-    { x: 48, y: 424, w: 864, h: 46 },
+    { x: 48, y: 424, w: 864, h: 32 },
     slide.content.excludedAuthority.statement,
     { fontSize: 11, bold: true, colorRole: "risk", verticalAlign: "middle", maxLines: 3 },
   );
@@ -921,7 +921,7 @@ function compileResponsibility(ctx, slide) {
     ctx,
     "excluded-authority-evidence",
     "responsibility-excluded-evidence",
-    { x: 48, y: 474, w: 864, h: 14 },
+    { x: 48, y: 460, w: 864, h: 14 },
     slide.content.excludedAuthority.evidenceIds.join(", "),
     { fontSize: 8, colorRole: "muted", maxLines: 1 },
   );
@@ -1002,15 +1002,15 @@ function compileRisks(ctx, slide) {
     ctx,
     "stop-condition",
     "risk-stop-condition",
-    { x: 48, y: 462, w: 864, h: 26 },
+    { x: 48, y: 462, w: 640, h: 16 },
     slide.content.stopCondition.statement,
-    { fontSize: 8, bold: true, colorRole: "risk", verticalAlign: "middle", maxLines: 2 },
+    { fontSize: 8, bold: true, colorRole: "risk", verticalAlign: "middle", maxLines: 1 },
   );
   textPrimitive(
     ctx,
     "stop-evidence",
     "risk-stop-evidence",
-    { x: 48, y: 488, w: 864, h: 8 },
+    { x: 704, y: 462, w: 208, h: 16 },
     slide.content.stopCondition.evidenceIds.join(", "),
     { fontSize: 8, colorRole: "muted", horizontalAlign: "right", maxLines: 1 },
   );
@@ -1722,14 +1722,11 @@ function validatePrimitive(primitive, path, stage, names) {
   if (primitive.kind === "text") {
     assertGeometryBox(primitive, path, stage);
     assertText(primitive.text, `${path}.text`);
-    if (
-      primitive.role === "metric-context" &&
-      STRICT_CONTROL_PATTERN.test(primitive.text)
-    ) {
+    if (STRICT_CONTROL_PATTERN.test(primitive.text)) {
       fail(
         "E_TEXT_CONTROL_CHAR",
         `${path}.text`,
-        "metric context contains a control character",
+        "text contains a control character",
       );
     }
     if (!TEXT_SIZES.has(primitive.fontSize)) fail("E_SPEC_SCHEMA", `${path}.fontSize`, "unsupported text size");
@@ -1769,6 +1766,104 @@ function validatePrimitive(primitive, path, stage, names) {
     if (!["solid", "dash", "dot", "dashDot"].includes(primitive.dash) || primitive.arrowStart !== "none" || !["none", "open"].includes(primitive.arrowEnd)) {
       fail("E_SPEC_SCHEMA", path, "line style is invalid");
     }
+  }
+}
+
+function validateFooterContract(slide, path, theme) {
+  const cover = slide.family === "cover";
+  const contracts = [
+    {
+      role: "footer-rule",
+      kind: "line",
+      geometry: { x1: 48, y1: 498, x2: 912, y2: 498 },
+      colorRole: cover ? "paper" : "line",
+    },
+    {
+      role: "footer-required",
+      kind: "text",
+      geometry: { x: 48, y: 506, w: 220, h: 18 },
+      text: theme.requiredFooter,
+      colorRole: cover ? "paper" : "muted",
+    },
+    {
+      role: "footer-evidence",
+      kind: "text",
+      geometry: { x: 276, y: 506, w: 408, h: 18 },
+      text: compactEvidence(slide.evidenceIds, slide.judgmentIds),
+      colorRole: cover ? "paper" : "muted",
+    },
+    {
+      role: "footer-position",
+      kind: "text",
+      geometry: { x: 692, y: 506, w: 220, h: 18 },
+      text: String(slide.sourceIndex),
+      colorRole: cover ? "paper" : "muted",
+    },
+  ];
+  const recognizedRoles = new Set(contracts.map((contract) => contract.role));
+  for (const contract of contracts) {
+    const matches = slide.primitives.filter(
+      (primitive) => primitive.role === contract.role,
+    );
+    if (matches.length !== 1) {
+      fail(
+        "E_SPEC_SCHEMA",
+        `${path}.primitives`,
+        `expected exactly one ${contract.role} primitive`,
+      );
+    }
+    const primitive = matches[0];
+    if (
+      primitive.kind !== contract.kind ||
+      primitive.name !==
+        primitiveName(slide.sourceIndex, slide.id, contract.role)
+    ) {
+      fail(
+        "E_SPEC_SCHEMA",
+        `${path}.primitives`,
+        `${contract.role} kind or name does not match the footer contract`,
+      );
+    }
+    for (const [key, value] of Object.entries(contract.geometry)) {
+      if (primitive[key] !== value) {
+        fail(
+          "E_GEOMETRY_BOUNDS",
+          `${path}.primitives`,
+          `${contract.role}.${key} does not match the footer contract`,
+        );
+      }
+    }
+    if (
+      primitive.colorRole !== contract.colorRole ||
+      (contract.kind === "text" && primitive.text !== contract.text)
+    ) {
+      fail(
+        "E_SPEC_SCHEMA",
+        `${path}.primitives`,
+        `${contract.role} content does not match the footer contract`,
+      );
+    }
+  }
+  if (!cover) {
+    slide.primitives.forEach((primitive, primitiveIndex) => {
+      if (recognizedRoles.has(primitive.role)) return;
+      const primitivePath = `${path}.primitives[${primitiveIndex}]`;
+      if (primitive.kind === "line") {
+        if (primitive.y1 > 478 || primitive.y2 > 478) {
+          fail(
+            "E_GEOMETRY_BOUNDS",
+            primitivePath,
+            "non-footer line enters the reserved footer band",
+          );
+        }
+      } else if (primitive.y + primitive.h > 478) {
+        fail(
+          "E_GEOMETRY_BOUNDS",
+          primitivePath,
+          "non-footer box enters the reserved footer band",
+        );
+      }
+    });
   }
 }
 
@@ -1813,6 +1908,7 @@ function validateDrawingSpecSnapshot(spec) {
       if (primitive.z !== primitiveIndex + 1) fail("E_NONDETERMINISTIC_OUTPUT", `${path}.primitives[${primitiveIndex}].z`, "z must be contiguous from 1");
       if (spec.theme.unbranded && primitive.role === "wordmark") fail("E_SPEC_SCHEMA", `${path}.primitives[${primitiveIndex}].role`, "unbranded spec cannot emit wordmark");
     });
+    validateFooterContract(slide, path, spec.theme);
     for (const role of [
       "decision-fact-card",
       "profile-fact-card",

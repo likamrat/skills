@@ -190,7 +190,7 @@ function assertFamilyGeometry(spec, plan, family, field, count, label) {
   }
   for (const primitive of slide.primitives) {
     if (primitive.kind !== "line" && !primitive.role.startsWith("footer-")) {
-      check(primitive.y + primitive.h <= 498, `${label} content must remain above footer`);
+      check(primitive.y + primitive.h <= 478, `${label} content must remain above footer`);
     }
   }
 
@@ -412,7 +412,7 @@ try {
           );
           if (!primitive.role.startsWith("footer-")) {
             check(
-              primitive.y + primitive.h <= 498,
+              primitive.y + primitive.h <= 478,
               `${slide.id} content box must remain above the footer`,
             );
           }
@@ -562,6 +562,41 @@ try {
     const slide = candidate.slides.find((item) => item.family === "findings");
     slide.primitives[1].name = slide.primitives[0].name;
   });
+  assertSpecCode("cover footer text required", "E_SPEC_SCHEMA", baseSpec, (candidate) => {
+    const slide = candidate.slides.find((item) => item.family === "cover");
+    slide.primitives = slide.primitives.filter(
+      (primitive) => primitive.role !== "footer-position",
+    );
+  });
+  assertSpecCode("risk footer rule required", "E_SPEC_SCHEMA", baseSpec, (candidate) => {
+    const slide = candidate.slides.find((item) => item.family === "risks");
+    slide.primitives = slide.primitives.filter(
+      (primitive) => primitive.role !== "footer-rule",
+    );
+    slide.primitives.forEach((primitive, index) => {
+      primitive.z = index + 1;
+    });
+  });
+  for (const [family, role] of [
+    ["profile", "profile-company"],
+    ["risks", "risk-evidence"],
+    ["timeline", "timeline-owner"],
+  ]) {
+    assertSpecCode(`${family} footer-band intrusion`, "E_GEOMETRY_BOUNDS", baseSpec, (candidate) => {
+      const slide = candidate.slides.find((item) => item.family === family);
+      slide.primitives.find((primitive) => primitive.role === role).y = 480;
+    });
+  }
+  for (const [family, role] of [
+    ["profile", "profile-business-model"],
+    ["timeline", "timeline-owner"],
+  ]) {
+    assertSpecCode(`${family} C1 text`, "E_TEXT_CONTROL_CHAR", baseSpec, (candidate) => {
+      const slide = candidate.slides.find((item) => item.family === family);
+      slide.primitives.find((primitive) => primitive.role === role).text =
+        "bad\u0085text";
+    });
+  }
 } finally {
   await rm(directory, { recursive: true, force: true });
 }
