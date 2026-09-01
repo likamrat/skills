@@ -22,6 +22,8 @@ const renderer = join(skillRoot, "scripts", "render-html.mjs");
 const directory = await mkdtemp(join(tmpdir(), "fde-readout-html-"));
 const failures = [];
 const browserStderrLimit = 8_192;
+const browserStartupTimeoutMs = 15_000;
+const browserPollIntervalMs = 50;
 
 function check(condition, message) {
   if (!condition) failures.push(message);
@@ -60,7 +62,8 @@ async function waitForDevtoolsPort(
   stderr,
 ) {
   const path = join(profile, "DevToolsActivePort");
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  const deadline = Date.now() + browserStartupTimeoutMs;
+  while (Date.now() < deadline) {
     const spawnError = getSpawnError();
     if (
       spawnError ||
@@ -81,7 +84,9 @@ async function waitForDevtoolsPort(
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+    await new Promise((resolveDelay) =>
+      setTimeout(resolveDelay, browserPollIntervalMs),
+    );
   }
   throw browserFailure(
     "Timed out waiting for the browser debugging port.",
