@@ -163,6 +163,10 @@ const requiredAssets = [
   [join(skillRoot, "assets", "readout-plan.template.json"), "plan template"],
   [join(skillRoot, "assets", "readout-intent.template.json"), "intent template"],
   [
+    join(skillRoot, "assets", "powerpoint-smoke-approval.template.json"),
+    "PowerPoint smoke approval template",
+  ],
+  [
     join(skillRoot, "assets", "powerpoint-16x9-seed.pptx"),
     "PowerPoint seed",
   ],
@@ -350,6 +354,7 @@ for (const script of [
   "test-writing.mjs",
   "test-source-preflight.mjs",
   "test-powerpoint-skeleton.mjs",
+  "test-powerpoint-smoke-contract.mjs",
 ]) {
   const result = spawnSync(process.execPath, [join(skillRoot, "scripts", script)], {
     encoding: "utf8",
