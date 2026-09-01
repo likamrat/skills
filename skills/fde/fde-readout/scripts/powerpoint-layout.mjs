@@ -4,8 +4,24 @@ import { selectSmokeSlides } from "./powerpoint-smoke-contract.mjs";
 
 const SCHEMA_VERSION = "fde-drawing-spec/1.0";
 const COLOR_ROLES = ["ink", "system", "decision", "risk", "paper", "muted", "line"];
-const SUPPORTED_FAMILIES = new Set(["cover", "decision", "metrics", "evidence"]);
+const SUPPORTED_FAMILIES = new Set([
+  "cover",
+  "decision",
+  "profile",
+  "metrics",
+  "findings",
+  "responsibility",
+  "risks",
+  "timeline",
+  "evidence",
+]);
 const TEXT_SIZES = new Set([8, 11, 28, 34]);
+const RESPONSIBILITY_TYPES = new Set([
+  "deterministic",
+  "model",
+  "human",
+  "hybrid",
+]);
 const NAME_PATTERN = /^fde-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const STRICT_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
@@ -354,6 +370,22 @@ function createContext(slide, sourceIndex) {
   };
 }
 
+function gridCells(region, count, columns, horizontalGap, verticalGap) {
+  const rows = Math.ceil(count / columns);
+  const width = (region.w - horizontalGap * (columns - 1)) / columns;
+  const height = (region.h - verticalGap * (rows - 1)) / rows;
+  return Array.from({ length: count }, (_, index) => ({
+    x: region.x + (index % columns) * (width + horizontalGap),
+    y: region.y + Math.floor(index / columns) * (height + verticalGap),
+    w: width,
+    h: height,
+  }));
+}
+
+function itemToken(label, index) {
+  return `${label}-${String(index + 1).padStart(2, "0")}`;
+}
+
 function addStandardHeader(ctx, slide) {
   linePrimitive(
     ctx,
@@ -619,6 +651,495 @@ function compileMetrics(ctx, slide) {
   addFooter(ctx, slide);
 }
 
+function compileProfile(ctx, slide) {
+  addStandardHeader(ctx, slide);
+  textPrimitive(
+    ctx,
+    "company",
+    "profile-company",
+    { x: 48, y: 124, w: 536, h: 30 },
+    slide.content.company,
+    { fontSize: 11, bold: true, verticalAlign: "middle", maxLines: 2 },
+  );
+  textPrimitive(
+    ctx,
+    "business-model",
+    "profile-business-model",
+    { x: 48, y: 162, w: 536, h: 48 },
+    slide.content.businessModel,
+    { fontSize: 11, maxLines: 3 },
+  );
+  const factCells = gridCells(
+    { x: 48, y: 224, w: 536, h: 246 },
+    slide.content.facts.length,
+    slide.content.facts.length <= 3 ? 1 : 2,
+    8,
+    8,
+  );
+  slide.content.facts.forEach((fact, index) => {
+    const box = factCells[index];
+    const token = itemToken("fact", index);
+    shapePrimitive(ctx, `${token}-card`, "profile-fact-card", box, {
+      fillColorRole: "system",
+      fillTransparency: 0.92,
+      lineVisible: false,
+    });
+    textPrimitive(
+      ctx,
+      `${token}-label`,
+      "profile-fact-label",
+      { x: box.x + 12, y: box.y + 9, w: box.w - 24, h: 16 },
+      fact.label,
+      { fontSize: 8, bold: true, colorRole: "system", maxLines: 1 },
+    );
+    textPrimitive(
+      ctx,
+      `${token}-value`,
+      "profile-fact-value",
+      {
+        x: box.x + 12,
+        y: box.y + 29,
+        w: box.w - 24,
+        h: Math.max(14, box.h - 50),
+      },
+      fact.value,
+      { fontSize: 11, bold: true, verticalAlign: "middle", maxLines: 3 },
+    );
+    textPrimitive(
+      ctx,
+      `${token}-evidence`,
+      "profile-fact-evidence",
+      { x: box.x + 12, y: box.y + box.h - 17, w: box.w - 24, h: 11 },
+      fact.evidenceIds.join(", "),
+      { fontSize: 8, colorRole: "muted", maxLines: 1 },
+    );
+  });
+  shapePrimitive(
+    ctx,
+    "value-card",
+    "profile-value-card",
+    { x: 600, y: 124, w: 312, h: 200 },
+    {
+      fillColorRole: "decision",
+      fillTransparency: 0.92,
+      lineColorRole: "decision",
+      lineWidth: 2,
+    },
+  );
+  textPrimitive(
+    ctx,
+    "value-label",
+    "profile-value-label",
+    { x: 614, y: 138, w: 284, h: 16 },
+    "VALUE",
+    { fontSize: 8, bold: true, colorRole: "decision", maxLines: 1 },
+  );
+  textPrimitive(
+    ctx,
+    "value-statement",
+    "profile-value-statement",
+    { x: 614, y: 162, w: 284, h: 126 },
+    slide.content.valueStatement.statement,
+    { fontSize: 11, bold: true, verticalAlign: "middle", maxLines: 7 },
+  );
+  textPrimitive(
+    ctx,
+    "value-evidence",
+    "profile-value-evidence",
+    { x: 614, y: 298, w: 284, h: 14 },
+    slide.content.valueStatement.evidenceIds.join(", "),
+    { fontSize: 8, colorRole: "muted", maxLines: 1 },
+  );
+  const contextCells = gridCells(
+    { x: 600, y: 338, w: 312, h: 132 },
+    slide.content.contexts.length,
+    1,
+    0,
+    6,
+  );
+  slide.content.contexts.forEach((context, index) => {
+    const box = contextCells[index];
+    const token = itemToken("context", index);
+    shapePrimitive(ctx, `${token}-cell`, "profile-context-cell", box, {
+      fillVisible: false,
+    });
+    textPrimitive(
+      ctx,
+      `${token}-text`,
+      "profile-context",
+      { x: box.x + 10, y: box.y + 2, w: box.w - 20, h: box.h - 4 },
+      context,
+      { fontSize: 8, bold: true, verticalAlign: "middle", maxLines: 2 },
+    );
+  });
+  addFooter(ctx, slide);
+}
+
+function compileFindings(ctx, slide) {
+  addStandardHeader(ctx, slide);
+  const rowHeight = 346 / slide.content.items.length;
+  slide.content.items.forEach((item, index) => {
+    const y = 124 + index * rowHeight;
+    const token = itemToken("finding", index);
+    shapePrimitive(
+      ctx,
+      `${token}-row`,
+      "finding-row",
+      { x: 48, y, w: 864, h: rowHeight },
+      { fillVisible: false, lineVisible: false },
+    );
+    textPrimitive(
+      ctx,
+      `${token}-number`,
+      "finding-number",
+      { x: 48, y: y + 8, w: 36, h: rowHeight - 16 },
+      String(index + 1).padStart(2, "0"),
+      {
+        fontSize: 11,
+        bold: true,
+        colorRole: "system",
+        verticalAlign: "middle",
+        maxLines: 1,
+      },
+    );
+    textPrimitive(
+      ctx,
+      `${token}-title`,
+      "finding-title",
+      { x: 100, y: y + 8, w: 236, h: Math.max(24, rowHeight - 30) },
+      item.title,
+      { fontSize: 11, bold: true, verticalAlign: "middle", maxLines: 4 },
+    );
+    textPrimitive(
+      ctx,
+      `${token}-evidence`,
+      "finding-evidence",
+      { x: 100, y: y + rowHeight - 18, w: 236, h: 12 },
+      item.evidenceIds.join(", "),
+      { fontSize: 8, colorRole: "muted", maxLines: 1 },
+    );
+    textPrimitive(
+      ctx,
+      `${token}-statement`,
+      "finding-statement",
+      { x: 352, y: y + 8, w: 248, h: rowHeight - 16 },
+      item.statement,
+      { fontSize: 11, verticalAlign: "middle", maxLines: 5 },
+    );
+    textPrimitive(
+      ctx,
+      `${token}-consequence`,
+      "finding-consequence",
+      { x: 616, y: y + 8, w: 296, h: rowHeight - 16 },
+      item.consequence,
+      { fontSize: 11, bold: true, verticalAlign: "middle", maxLines: 5 },
+    );
+    if (index < slide.content.items.length - 1) {
+      linePrimitive(
+        ctx,
+        `${token}-divider`,
+        "finding-divider",
+        { x1: 48, y1: y + rowHeight, x2: 912, y2: y + rowHeight },
+      );
+    }
+  });
+  addFooter(ctx, slide);
+}
+
+function compileResponsibility(ctx, slide) {
+  addStandardHeader(ctx, slide);
+  const width = 864 / slide.content.steps.length;
+  slide.content.steps.forEach((step, index) => {
+    const x = 48 + index * width;
+    const token = itemToken("step", index);
+    shapePrimitive(
+      ctx,
+      `${token}-cell`,
+      "responsibility-cell",
+      { x, y: 144, w: width, h: 222 },
+      {
+        fillColorRole: index % 2 === 0 ? "system" : "decision",
+        fillTransparency: 0.92,
+        lineVisible: index === 0,
+      },
+    );
+    textPrimitive(
+      ctx,
+      `${token}-type`,
+      "responsibility-type",
+      { x: x + 14, y: 158, w: width - 28, h: 24 },
+      step.type,
+      {
+        fontSize: 8,
+        bold: true,
+        colorRole: index % 2 === 0 ? "system" : "decision",
+        maxLines: 1,
+      },
+    );
+    textPrimitive(
+      ctx,
+      `${token}-statement`,
+      "responsibility-statement",
+      { x: x + 14, y: 190, w: width - 28, h: 136 },
+      step.statement,
+      { fontSize: 11, bold: true, verticalAlign: "middle", maxLines: 7 },
+    );
+    textPrimitive(
+      ctx,
+      `${token}-evidence`,
+      "responsibility-evidence",
+      { x: x + 14, y: 338, w: width - 28, h: 14 },
+      step.evidenceIds.join(", "),
+      { fontSize: 8, colorRole: "muted", maxLines: 1 },
+    );
+  });
+  for (let index = 1; index < slide.content.steps.length; index += 1) {
+    const x = 48 + index * width;
+    linePrimitive(
+      ctx,
+      `step-divider-${String(index).padStart(2, "0")}`,
+      "responsibility-divider",
+      { x1: x, y1: 144, x2: x, y2: 366 },
+    );
+  }
+  linePrimitive(
+    ctx,
+    "excluded-authority-rule",
+    "responsibility-excluded-rule",
+    { x1: 48, y1: 410, x2: 912, y2: 410 },
+    { colorRole: "risk", width: 2 },
+  );
+  textPrimitive(
+    ctx,
+    "excluded-authority",
+    "responsibility-excluded-authority",
+    { x: 48, y: 424, w: 864, h: 46 },
+    slide.content.excludedAuthority.statement,
+    { fontSize: 11, bold: true, colorRole: "risk", verticalAlign: "middle", maxLines: 3 },
+  );
+  textPrimitive(
+    ctx,
+    "excluded-authority-evidence",
+    "responsibility-excluded-evidence",
+    { x: 48, y: 474, w: 864, h: 14 },
+    slide.content.excludedAuthority.evidenceIds.join(", "),
+    { fontSize: 8, colorRole: "muted", maxLines: 1 },
+  );
+  addFooter(ctx, slide);
+}
+
+function riskCardBoxes(count) {
+  if (count === 1) return [{ x: 192, y: 124, w: 576, h: 314 }];
+  if (count === 2) return gridCells({ x: 48, y: 124, w: 864, h: 314 }, 2, 2, 16, 0);
+  if (count === 3) return gridCells({ x: 48, y: 124, w: 864, h: 314 }, 3, 3, 16, 0);
+  return gridCells({ x: 48, y: 124, w: 864, h: 314 }, 4, 2, 16, 10);
+}
+
+function compileRisks(ctx, slide) {
+  addStandardHeader(ctx, slide);
+  const boxes = riskCardBoxes(slide.content.items.length);
+  slide.content.items.forEach((item, index) => {
+    const box = boxes[index];
+    const token = itemToken("risk", index);
+    shapePrimitive(ctx, `${token}-card`, "risk-card", box, {
+      shapeType: "roundRect",
+      fillColorRole: "risk",
+      fillTransparency: 0.94,
+      lineColorRole: "risk",
+      lineWidth: 2,
+    });
+    textPrimitive(
+      ctx,
+      `${token}-title`,
+      "risk-title",
+      { x: box.x + 12, y: box.y + 8, w: box.w - 24, h: 24 },
+      item.risk,
+      { fontSize: 11, bold: true, colorRole: "risk", maxLines: 2 },
+    );
+    const compact = box.h < 200;
+    const blockHeight = compact ? 30 : 56;
+    const firstBlockY = box.y + (compact ? 38 : 50);
+    [
+      ["impact", "IMPACT", item.impact],
+      ["control", "CONTROL", item.control],
+      ["residual", "RESIDUAL", item.residualRisk],
+    ].forEach(([pathToken, label, value], blockIndex) => {
+      const y = firstBlockY + blockIndex * blockHeight;
+      textPrimitive(
+        ctx,
+        `${token}-${pathToken}-label`,
+        `risk-${pathToken}-label`,
+        { x: box.x + 12, y, w: box.w - 24, h: 11 },
+        label,
+        { fontSize: 8, bold: true, colorRole: "risk", maxLines: 1 },
+      );
+      textPrimitive(
+        ctx,
+        `${token}-${pathToken}`,
+        `risk-${pathToken}`,
+        { x: box.x + 12, y: y + 12, w: box.w - 24, h: blockHeight - 13 },
+        value,
+        { fontSize: 8, maxLines: compact ? 2 : 4 },
+      );
+    });
+    textPrimitive(
+      ctx,
+      `${token}-evidence`,
+      "risk-evidence",
+      { x: box.x + 12, y: box.y + box.h - 14, w: box.w - 24, h: 10 },
+      item.evidenceIds.join(", "),
+      { fontSize: 8, colorRole: "muted", maxLines: 1 },
+    );
+  });
+  linePrimitive(
+    ctx,
+    "stop-rule",
+    "risk-stop-rule",
+    { x1: 48, y1: 454, x2: 912, y2: 454 },
+    { colorRole: "risk", width: 2 },
+  );
+  textPrimitive(
+    ctx,
+    "stop-condition",
+    "risk-stop-condition",
+    { x: 48, y: 462, w: 864, h: 26 },
+    slide.content.stopCondition.statement,
+    { fontSize: 8, bold: true, colorRole: "risk", verticalAlign: "middle", maxLines: 2 },
+  );
+  textPrimitive(
+    ctx,
+    "stop-evidence",
+    "risk-stop-evidence",
+    { x: 48, y: 488, w: 864, h: 8 },
+    slide.content.stopCondition.evidenceIds.join(", "),
+    { fontSize: 8, colorRole: "muted", horizontalAlign: "right", maxLines: 1 },
+  );
+  addFooter(ctx, slide);
+}
+
+function compileTimeline(ctx, slide) {
+  addStandardHeader(ctx, slide);
+  shapePrimitive(
+    ctx,
+    "decision-strip",
+    "timeline-decision-strip",
+    { x: 48, y: 122, w: 864, h: 66 },
+    {
+      fillColorRole: "decision",
+      fillTransparency: 0.92,
+      lineColorRole: "decision",
+      lineWidth: 2,
+    },
+  );
+  textPrimitive(
+    ctx,
+    "decision-statement",
+    "timeline-decision-statement",
+    { x: 62, y: 134, w: 548, h: 36 },
+    slide.content.decision.statement,
+    { fontSize: 11, bold: true, verticalAlign: "middle", maxLines: 2 },
+  );
+  textPrimitive(
+    ctx,
+    "decision-owner",
+    "timeline-decision-owner",
+    { x: 626, y: 132, w: 174, h: 20 },
+    slide.content.decision.owner,
+    { fontSize: 8, bold: true, horizontalAlign: "right", maxLines: 1 },
+  );
+  textPrimitive(
+    ctx,
+    "decision-due",
+    "timeline-decision-due",
+    { x: 814, y: 132, w: 84, h: 20 },
+    slide.content.decision.due,
+    { fontSize: 8, bold: true, colorRole: "decision", horizontalAlign: "right", maxLines: 1 },
+  );
+  textPrimitive(
+    ctx,
+    "decision-evidence",
+    "timeline-decision-evidence",
+    { x: 626, y: 160, w: 272, h: 14 },
+    slide.content.decision.evidenceIds.join(", "),
+    { fontSize: 8, colorRole: "muted", horizontalAlign: "right", maxLines: 1 },
+  );
+  const slotWidth = 864 / slide.content.milestones.length;
+  const firstCenter = 48 + slotWidth / 2;
+  const lastCenter = 48 + (slide.content.milestones.length - 0.5) * slotWidth;
+  linePrimitive(
+    ctx,
+    "milestone-line",
+    "timeline-milestone-line",
+    { x1: firstCenter, y1: 245, x2: lastCenter, y2: 245 },
+    { colorRole: "system", width: 2 },
+  );
+  slide.content.milestones.forEach((milestone, index) => {
+    const x = 48 + index * slotWidth;
+    const center = x + slotWidth / 2;
+    const token = itemToken("milestone", index);
+    shapePrimitive(
+      ctx,
+      `${token}-slot`,
+      "timeline-slot",
+      { x, y: 231, w: slotWidth, h: 227 },
+      { fillVisible: false, lineVisible: false },
+    );
+    shapePrimitive(
+      ctx,
+      `${token}-marker`,
+      "timeline-marker",
+      { x: center - 14, y: 231, w: 28, h: 28 },
+      {
+        shapeType: "ellipse",
+        fillColorRole: index === 0 ? "decision" : "system",
+        lineVisible: false,
+      },
+    );
+    const textBox = (y, h) => ({ x: x + 6, y, w: slotWidth - 12, h });
+    textPrimitive(
+      ctx,
+      `${token}-due`,
+      "timeline-due",
+      textBox(274, 16),
+      milestone.due,
+      { fontSize: 8, bold: true, colorRole: "system", horizontalAlign: "center", maxLines: 1 },
+    );
+    textPrimitive(
+      ctx,
+      `${token}-label`,
+      "timeline-label",
+      textBox(296, 34),
+      milestone.label,
+      { fontSize: 11, bold: true, horizontalAlign: "center", maxLines: 3 },
+    );
+    textPrimitive(
+      ctx,
+      `${token}-owner`,
+      "timeline-owner",
+      textBox(336, 30),
+      milestone.owner,
+      { fontSize: 8, horizontalAlign: "center", maxLines: 3 },
+    );
+    textPrimitive(
+      ctx,
+      `${token}-outcome`,
+      "timeline-outcome",
+      textBox(374, 54),
+      milestone.outcome,
+      { fontSize: 8, bold: true, horizontalAlign: "center", maxLines: 4 },
+    );
+    textPrimitive(
+      ctx,
+      `${token}-evidence`,
+      "timeline-evidence",
+      textBox(438, 20),
+      milestone.evidenceIds.join(", "),
+      { fontSize: 8, colorRole: "muted", horizontalAlign: "center", maxLines: 2 },
+    );
+  });
+  addFooter(ctx, slide);
+}
+
 function evidenceRows(count) {
   if (count <= 3) return [count];
   return count === 4 ? [2, 2] : [3, 2];
@@ -721,8 +1242,23 @@ function compileSlide(plan, slide, sourceIndex) {
     case "decision":
       compileDecision(ctx, slide);
       break;
+    case "profile":
+      compileProfile(ctx, slide);
+      break;
     case "metrics":
       compileMetrics(ctx, slide);
+      break;
+    case "findings":
+      compileFindings(ctx, slide);
+      break;
+    case "responsibility":
+      compileResponsibility(ctx, slide);
+      break;
+    case "risks":
+      compileRisks(ctx, slide);
+      break;
+    case "timeline":
+      compileTimeline(ctx, slide);
       break;
     case "evidence":
       compileEvidence(ctx, slide);
@@ -746,20 +1282,61 @@ function compileSlide(plan, slide, sourceIndex) {
 
 function validateNestedEvidence(slide, slideIndex) {
   const declared = new Set(slide.evidenceIds);
-  const nested =
-    slide.family === "decision"
-      ? slide.content.facts
-      : slide.family === "metrics"
-        ? [...slide.content.metrics, slide.content.outcome]
-        : slide.family === "evidence"
-          ? slide.content.groups
-          : [];
-  nested.forEach((item, itemIndex) => {
+  const path = `$.slides[${slideIndex}].content`;
+  const entries = (items, field) =>
+    items.map((item, index) => ({
+      item,
+      path: `${path}.${field}[${index}]`,
+    }));
+  let nested = [];
+  switch (slide.family) {
+    case "decision":
+      nested = entries(slide.content.facts, "facts");
+      break;
+    case "profile":
+      nested = [
+        ...entries(slide.content.facts, "facts"),
+        { item: slide.content.valueStatement, path: `${path}.valueStatement` },
+      ];
+      break;
+    case "metrics":
+      nested = [
+        ...entries(slide.content.metrics, "metrics"),
+        { item: slide.content.outcome, path: `${path}.outcome` },
+      ];
+      break;
+    case "findings":
+    case "risks":
+      nested = entries(slide.content.items, "items");
+      if (slide.family === "risks") {
+        nested.push({
+          item: slide.content.stopCondition,
+          path: `${path}.stopCondition`,
+        });
+      }
+      break;
+    case "responsibility":
+      nested = [
+        ...entries(slide.content.steps, "steps"),
+        { item: slide.content.excludedAuthority, path: `${path}.excludedAuthority` },
+      ];
+      break;
+    case "timeline":
+      nested = [
+        { item: slide.content.decision, path: `${path}.decision` },
+        ...entries(slide.content.milestones, "milestones"),
+      ];
+      break;
+    case "evidence":
+      nested = entries(slide.content.groups, "groups");
+      break;
+  }
+  nested.forEach(({ item, path: itemPath }) => {
     item.evidenceIds.forEach((evidenceId, evidenceIndex) => {
       if (!declared.has(evidenceId)) {
         fail(
           "E_EVIDENCE_NOT_DECLARED",
-          `$.slides[${slideIndex}].content.${slide.family === "decision" ? "facts" : slide.family === "metrics" && itemIndex === nested.length - 1 ? "outcome" : slide.family === "metrics" ? "metrics" : "groups"}${slide.family === "metrics" && itemIndex === nested.length - 1 ? "" : `[${itemIndex}]`}.evidenceIds[${evidenceIndex}]`,
+          `${itemPath}.evidenceIds[${evidenceIndex}]`,
           `${evidenceId} is absent from slide.evidenceIds`,
         );
       }
@@ -781,11 +1358,56 @@ function validateMetricContext(metric, path) {
   }
 }
 
+function validateContentString(value, path) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    fail("E_TEXT_EMPTY", path, "expected a nonempty string");
+  }
+  if (STRICT_CONTROL_PATTERN.test(value)) {
+    fail("E_TEXT_CONTROL_CHAR", path, "text contains a control character");
+  }
+}
+
+function validateContentArray(value, path, min, max) {
+  if (!isDenseArray(value) || value.length < min || value.length > max) {
+    fail("E_SPEC_SCHEMA", path, `expected a dense array with ${min}-${max} items`);
+  }
+}
+
+function validateEvidenceArray(value, path) {
+  validateContentArray(value, path, 1, Number.MAX_SAFE_INTEGER);
+  value.forEach((evidenceId, index) =>
+    validateContentString(evidenceId, `${path}[${index}]`),
+  );
+}
+
+function validateClaimContent(value, path) {
+  allowedKeys(value, ["statement", "evidenceIds"], ["statement", "evidenceIds"], path);
+  validateContentString(value.statement, `${path}.statement`);
+  validateEvidenceArray(value.evidenceIds, `${path}.evidenceIds`);
+}
+
+function validateFactContent(value, path) {
+  allowedKeys(
+    value,
+    ["label", "value", "evidenceIds"],
+    ["label", "value", "evidenceIds"],
+    path,
+  );
+  validateContentString(value.label, `${path}.label`);
+  validateContentString(value.value, `${path}.value`);
+  validateEvidenceArray(value.evidenceIds, `${path}.evidenceIds`);
+}
+
 function validateSupportedContent(slide, slideIndex) {
   const path = `$.slides[${slideIndex}].content`;
+  if (!isPlainObject(slide.content)) {
+    fail("E_SPEC_SCHEMA", path, "expected a content object");
+  }
   switch (slide.family) {
     case "cover":
       allowedKeys(slide.content, ["subtitle", "decision"], ["subtitle", "decision"], path);
+      validateContentString(slide.content.subtitle, `${path}.subtitle`);
+      validateContentString(slide.content.decision, `${path}.decision`);
       break;
     case "decision":
       allowedKeys(
@@ -794,53 +1416,194 @@ function validateSupportedContent(slide, slideIndex) {
         ["recommendation", "bullets", "facts"],
         path,
       );
+      validateContentString(slide.content.recommendation, `${path}.recommendation`);
+      validateContentArray(slide.content.bullets, `${path}.bullets`, 1, 4);
+      slide.content.bullets.forEach((bullet, index) =>
+        validateContentString(bullet, `${path}.bullets[${index}]`),
+      );
+      validateContentArray(slide.content.facts, `${path}.facts`, 1, 3);
       slide.content.facts.forEach((fact, index) =>
-        allowedKeys(
-          fact,
-          ["label", "value", "evidenceIds"],
-          ["label", "value", "evidenceIds"],
-          `${path}.facts[${index}]`,
-        ),
+        validateFactContent(fact, `${path}.facts[${index}]`),
+      );
+      break;
+    case "profile":
+      allowedKeys(
+        slide.content,
+        ["company", "businessModel", "facts", "valueStatement", "contexts"],
+        ["company", "businessModel", "facts", "valueStatement", "contexts"],
+        path,
+      );
+      validateContentString(slide.content.company, `${path}.company`);
+      validateContentString(slide.content.businessModel, `${path}.businessModel`);
+      validateContentArray(slide.content.facts, `${path}.facts`, 2, 6);
+      slide.content.facts.forEach((fact, index) =>
+        validateFactContent(fact, `${path}.facts[${index}]`),
+      );
+      validateClaimContent(slide.content.valueStatement, `${path}.valueStatement`);
+      validateContentArray(slide.content.contexts, `${path}.contexts`, 1, 5);
+      slide.content.contexts.forEach((context, index) =>
+        validateContentString(context, `${path}.contexts[${index}]`),
       );
       break;
     case "metrics":
       allowedKeys(slide.content, ["metrics", "outcome"], ["metrics", "outcome"], path);
-      if (!isDenseArray(slide.content.metrics)) {
-        fail("E_SPEC_SCHEMA", `${path}.metrics`, "expected a dense metrics array");
-      }
-      slide.content.metrics.forEach((metric, index) =>
-        isPlainObject(metric)
-          ? allowedKeys(
-              metric,
-              ["label", "value", "context", "evidenceIds"],
-              ["label", "value", "evidenceIds"],
-              `${path}.metrics[${index}]`,
-            )
-          : fail(
-              "E_SPEC_SCHEMA",
-              `${path}.metrics[${index}]`,
-              "expected a metric object",
-            ),
-      );
+      validateContentArray(slide.content.metrics, `${path}.metrics`, 2, 4);
       slide.content.metrics.forEach((metric, index) => {
+        allowedKeys(
+          metric,
+          ["label", "value", "context", "evidenceIds"],
+          ["label", "value", "evidenceIds"],
+          `${path}.metrics[${index}]`,
+        );
+        validateContentString(metric.label, `${path}.metrics[${index}].label`);
+        validateContentString(metric.value, `${path}.metrics[${index}].value`);
+        validateEvidenceArray(
+          metric.evidenceIds,
+          `${path}.metrics[${index}].evidenceIds`,
+        );
         validateMetricContext(metric, `${path}.metrics[${index}].context`);
       });
+      validateClaimContent(slide.content.outcome, `${path}.outcome`);
+      break;
+    case "findings":
+      allowedKeys(slide.content, ["items"], ["items"], path);
+      validateContentArray(slide.content.items, `${path}.items`, 2, 5);
+      slide.content.items.forEach((item, index) => {
+        const itemPath = `${path}.items[${index}]`;
+        allowedKeys(
+          item,
+          ["title", "statement", "consequence", "evidenceIds"],
+          ["title", "statement", "consequence", "evidenceIds"],
+          itemPath,
+        );
+        for (const field of ["title", "statement", "consequence"]) {
+          validateContentString(item[field], `${itemPath}.${field}`);
+        }
+        validateEvidenceArray(item.evidenceIds, `${itemPath}.evidenceIds`);
+      });
+      break;
+    case "responsibility":
       allowedKeys(
-        slide.content.outcome,
-        ["statement", "evidenceIds"],
-        ["statement", "evidenceIds"],
-        `${path}.outcome`,
+        slide.content,
+        ["steps", "excludedAuthority"],
+        ["steps", "excludedAuthority"],
+        path,
       );
+      validateContentArray(slide.content.steps, `${path}.steps`, 3, 5);
+      slide.content.steps.forEach((step, index) => {
+        const stepPath = `${path}.steps[${index}]`;
+        allowedKeys(
+          step,
+          ["type", "statement", "evidenceIds"],
+          ["type", "statement", "evidenceIds"],
+          stepPath,
+        );
+        if (!RESPONSIBILITY_TYPES.has(step.type)) {
+          fail("E_SPEC_SCHEMA", `${stepPath}.type`, "invalid responsibility type");
+        }
+        validateContentString(step.statement, `${stepPath}.statement`);
+        validateEvidenceArray(step.evidenceIds, `${stepPath}.evidenceIds`);
+      });
+      validateClaimContent(
+        slide.content.excludedAuthority,
+        `${path}.excludedAuthority`,
+      );
+      break;
+    case "risks":
+      allowedKeys(
+        slide.content,
+        ["items", "stopCondition"],
+        ["items", "stopCondition"],
+        path,
+      );
+      validateContentArray(slide.content.items, `${path}.items`, 1, 4);
+      slide.content.items.forEach((item, index) => {
+        const itemPath = `${path}.items[${index}]`;
+        allowedKeys(
+          item,
+          ["risk", "impact", "control", "residualRisk", "evidenceIds"],
+          ["risk", "impact", "control", "residualRisk", "evidenceIds"],
+          itemPath,
+        );
+        for (const field of ["risk", "impact", "control", "residualRisk"]) {
+          validateContentString(item[field], `${itemPath}.${field}`);
+        }
+        validateEvidenceArray(item.evidenceIds, `${itemPath}.evidenceIds`);
+      });
+      validateClaimContent(slide.content.stopCondition, `${path}.stopCondition`);
+      break;
+    case "timeline":
+      allowedKeys(
+        slide.content,
+        ["decision", "milestones"],
+        ["decision", "milestones"],
+        path,
+      );
+      allowedKeys(
+        slide.content.decision,
+        ["statement", "owner", "due", "evidenceIds"],
+        ["statement", "owner", "due", "evidenceIds"],
+        `${path}.decision`,
+      );
+      for (const field of ["statement", "owner", "due"]) {
+        validateContentString(
+          slide.content.decision[field],
+          `${path}.decision.${field}`,
+        );
+      }
+      validateEvidenceArray(
+        slide.content.decision.evidenceIds,
+        `${path}.decision.evidenceIds`,
+      );
+      validateContentArray(slide.content.milestones, `${path}.milestones`, 2, 6);
+      slide.content.milestones.forEach((milestone, index) => {
+        const milestonePath = `${path}.milestones[${index}]`;
+        allowedKeys(
+          milestone,
+          ["label", "owner", "due", "outcome", "evidenceIds"],
+          ["label", "owner", "due", "outcome", "evidenceIds"],
+          milestonePath,
+        );
+        for (const field of ["label", "owner", "due", "outcome"]) {
+          validateContentString(milestone[field], `${milestonePath}.${field}`);
+        }
+        validateEvidenceArray(
+          milestone.evidenceIds,
+          `${milestonePath}.evidenceIds`,
+        );
+      });
       break;
     case "evidence":
       allowedKeys(slide.content, ["groups", "controls"], ["groups", "controls"], path);
-      slide.content.groups.forEach((group, index) =>
+      validateContentArray(slide.content.groups, `${path}.groups`, 2, 5);
+      slide.content.groups.forEach((group, index) => {
+        const groupPath = `${path}.groups[${index}]`;
         allowedKeys(
           group,
           ["label", "items", "evidenceIds"],
           ["label", "items", "evidenceIds"],
-          `${path}.groups[${index}]`,
-        ),
+          groupPath,
+        );
+        validateContentString(group.label, `${groupPath}.label`);
+        validateContentArray(
+          group.items,
+          `${groupPath}.items`,
+          1,
+          Number.MAX_SAFE_INTEGER,
+        );
+        group.items.forEach((item, index) =>
+          validateContentString(item, `${groupPath}.items[${index}]`),
+        );
+        validateEvidenceArray(group.evidenceIds, `${groupPath}.evidenceIds`);
+      });
+      validateContentArray(
+        slide.content.controls,
+        `${path}.controls`,
+        1,
+        Number.MAX_SAFE_INTEGER,
+      );
+      slide.content.controls.forEach((control, index) =>
+        validateContentString(control, `${path}.controls[${index}]`),
       );
       break;
   }
@@ -856,26 +1619,9 @@ export function compileReadoutPlan(inputPlan, { sourcePlanSha256, mode } = {}) {
   assertFont(plan.brand?.fontFamily, "$.brand.fontFamily");
   if (plan.brand?.logo) fail("E_UNSUPPORTED_MEDIA", "$.brand.logo", "media is not supported");
   for (const [slideIndex, slide] of plan.slides.entries()) {
-    if (slide.family !== "metrics") continue;
-    const metricsPath = `$.slides[${slideIndex}].content.metrics`;
-    if (
-      !isPlainObject(slide.content) ||
-      !isDenseArray(slide.content.metrics)
-    ) {
-      fail("E_SPEC_SCHEMA", metricsPath, "expected a dense metrics array");
-    }
-    for (const [metricIndex, metric] of slide.content.metrics.entries()) {
-      if (!isPlainObject(metric)) {
-        fail(
-          "E_SPEC_SCHEMA",
-          `${metricsPath}[${metricIndex}]`,
-          "expected a metric object",
-        );
-      }
-      validateMetricContext(
-        metric,
-        `${metricsPath}[${metricIndex}].context`,
-      );
+    if (SUPPORTED_FAMILIES.has(slide.family)) {
+      validateSupportedContent(slide, slideIndex);
+      validateNestedEvidence(slide, slideIndex);
     }
   }
   const selected = mode === "smoke" ? selectSmokeSlides(plan) : plan.slides;
@@ -884,8 +1630,6 @@ export function compileReadoutPlan(inputPlan, { sourcePlanSha256, mode } = {}) {
     if (!SUPPORTED_FAMILIES.has(slide.family)) {
       fail("E_UNSUPPORTED_FAMILY", `$.slides[${sourceIndexes.get(slide) - 1}].family`, slide.family);
     }
-    validateSupportedContent(slide, sourceIndexes.get(slide) - 1);
-    validateNestedEvidence(slide, sourceIndexes.get(slide) - 1);
   });
   const colors = Object.fromEntries(
     COLOR_ROLES.map((role) => [role, normalizeColor(plan.brand?.colors?.[role], `$.brand.colors.${role}`)]),
@@ -946,7 +1690,13 @@ function assertGeometryBox(item, path, stage) {
 }
 
 function overlap(a, b) {
-  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  const tolerance = 0.0005;
+  return (
+    a.x < b.x + b.w - tolerance &&
+    b.x < a.x + a.w - tolerance &&
+    a.y < b.y + b.h - tolerance &&
+    b.y < a.y + a.h - tolerance
+  );
 }
 
 function validatePrimitive(primitive, path, stage, names) {
@@ -1063,7 +1813,18 @@ function validateDrawingSpecSnapshot(spec) {
       if (primitive.z !== primitiveIndex + 1) fail("E_NONDETERMINISTIC_OUTPUT", `${path}.primitives[${primitiveIndex}].z`, "z must be contiguous from 1");
       if (spec.theme.unbranded && primitive.role === "wordmark") fail("E_SPEC_SCHEMA", `${path}.primitives[${primitiveIndex}].role`, "unbranded spec cannot emit wordmark");
     });
-    for (const role of ["decision-fact-card", "metric-cell", "evidence-card"]) {
+    for (const role of [
+      "decision-fact-card",
+      "profile-fact-card",
+      "profile-context-cell",
+      "metric-cell",
+      "finding-row",
+      "responsibility-cell",
+      "risk-card",
+      "timeline-slot",
+      "timeline-marker",
+      "evidence-card",
+    ]) {
       const peers = slide.primitives.filter((primitive) => primitive.kind === "shape" && primitive.role === role);
       peers.forEach((left, leftIndex) => peers.slice(leftIndex + 1).forEach((right) => {
         if (overlap(left, right)) fail("E_GEOMETRY_OVERLAP", path, `${role} peers overlap`);

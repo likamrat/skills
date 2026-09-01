@@ -364,6 +364,7 @@ for (const script of [
   "test-powerpoint-skeleton.mjs",
   "test-powerpoint-smoke-contract.mjs",
   "test-powerpoint-layout.mjs",
+  "test-powerpoint-shape-families.mjs",
 ]) {
   const result = spawnSync(process.execPath, [join(skillRoot, "scripts", script)], {
     encoding: "utf8",
