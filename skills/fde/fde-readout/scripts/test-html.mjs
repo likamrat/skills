@@ -25,6 +25,7 @@ function check(condition, message) {
 async function findBrowser() {
   const candidates = [
     process.env.FDE_READOUT_BROWSER,
+    process.env.CHROME_BIN,
     process.platform === "win32"
       ? join(
           process.env["PROGRAMFILES(X86)"] ?? "",
