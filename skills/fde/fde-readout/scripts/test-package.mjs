@@ -199,6 +199,14 @@ const requiredAssets = [
     join(skillRoot, "scripts", "create-powerpoint-skeleton.ps1"),
     "native PowerPoint skeleton helper",
   ],
+  [
+    join(skillRoot, "scripts", "powerpoint-layout.mjs"),
+    "PowerPoint drawing-spec compiler",
+  ],
+  [
+    join(skillRoot, "scripts", "render-powerpoint-spec.mjs"),
+    "PowerPoint drawing-spec CLI",
+  ],
 ];
 for (const [path, label] of requiredAssets) {
   try {
@@ -355,6 +363,7 @@ for (const script of [
   "test-source-preflight.mjs",
   "test-powerpoint-skeleton.mjs",
   "test-powerpoint-smoke-contract.mjs",
+  "test-powerpoint-layout.mjs",
 ]) {
   const result = spawnSync(process.execPath, [join(skillRoot, "scripts", script)], {
     encoding: "utf8",
