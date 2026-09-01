@@ -61,7 +61,6 @@ if (errors.length > 0) {
 const planPath = resolve(values["--plan"]);
 const outputPath = resolve(values["--output"]);
 let tempPath;
-let validationTempPath;
 
 try {
   const canonicalPlanPath = await realpath(planPath);
@@ -79,19 +78,13 @@ try {
     });
   }
   const rawPlan = await readFile(planPath);
-  validationTempPath = resolve(
-    dirname(planPath),
-    `.${randomUUID()}.${process.pid}.readout-plan.tmp.json`,
-  );
-  await writeFile(validationTempPath, rawPlan, { flag: "wx" });
   const validatorPath = fileURLToPath(
     new URL("./validate-readout-plan.mjs", import.meta.url),
   );
-  const validation = spawnSync(process.execPath, [validatorPath, validationTempPath], {
+  const validation = spawnSync(process.execPath, [validatorPath, "-"], {
     encoding: "utf8",
+    input: rawPlan,
   });
-  await rm(validationTempPath, { force: true });
-  validationTempPath = undefined;
   if (validation.status !== 0) {
     const detail = `${validation.stderr ?? ""}${validation.stdout ?? ""}`.trim();
     throw Object.assign(new Error(detail || "ReadoutPlan validation failed"), {
@@ -139,7 +132,6 @@ try {
   );
 } catch (error) {
   if (tempPath) await rm(tempPath, { force: true }).catch(() => {});
-  if (validationTempPath) await rm(validationTempPath, { force: true }).catch(() => {});
   console.error(`1. ${error.code ? `${error.code}: ` : ""}${error.message}`);
   process.exit(error.exitCode ?? (error.code === "ENOENT" ? 2 : 1));
 }

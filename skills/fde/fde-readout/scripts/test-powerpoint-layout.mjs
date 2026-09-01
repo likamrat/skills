@@ -2,7 +2,14 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,9 +82,10 @@ function buildPlan(sample, { unbranded = false } = {}) {
   return plan;
 }
 
-function runNode(script, args) {
+function runNode(script, args, { input } = {}) {
   return spawnSync(process.execPath, [script, ...args], {
     encoding: "utf8",
+    input,
   });
 }
 
@@ -118,6 +126,17 @@ try {
   check(
     planValidation.status === 0,
     `generated five-slide plan must pass canonical validator:\n${planValidation.stdout}${planValidation.stderr}`,
+  );
+  const stdinValidation = runNode(validator, ["-"], { input: rawPlan });
+  check(
+    stdinValidation.status === 0,
+    `canonical validator stdin must accept the complete plan:\n${stdinValidation.stderr}`,
+  );
+  const invalidStdinValidation = runNode(validator, ["-"], { input: "{" });
+  check(
+    invalidStdinValidation.status === 2 &&
+      invalidStdinValidation.stdout === "",
+    "canonical validator stdin must reject malformed JSON without stdout",
   );
 
   const sourcePlanSha256 = hash(rawPlan);
@@ -261,6 +280,89 @@ try {
   assertThrowsCode("unknown deck key", "E_SPEC_SCHEMA", (spec) => {
     spec.extra = true;
   }, full);
+  assertThrowsCode("symbol property", "E_SPEC_SCHEMA", (spec) => {
+    spec.theme[Symbol("hidden")] = "hidden";
+  }, full);
+  assertThrowsCode("non-enumerable property", "E_SPEC_SCHEMA", (spec) => {
+    Object.defineProperty(spec.theme, "hidden", {
+      value: "hidden",
+      enumerable: false,
+    });
+  }, full);
+  {
+    const getterSpec = clone(full);
+    const firstValue = getterSpec.theme.requiredFooter;
+    let getterReads = 0;
+    Object.defineProperty(getterSpec.theme, "requiredFooter", {
+      enumerable: true,
+      configurable: true,
+      get() {
+        getterReads += 1;
+        return getterReads === 1 ? firstValue : "FLIPPED";
+      },
+    });
+    try {
+      stableSerialize(getterSpec);
+      failures.push("stable serialization must reject accessors");
+    } catch (error) {
+      check(error.code === "E_SPEC_SCHEMA", "accessor spec requires E_SPEC_SCHEMA");
+      check(getterReads === 0, "accessor rejection must not invoke the getter");
+    }
+  }
+  {
+    const proxySpec = clone(full);
+    const theme = proxySpec.theme;
+    let descriptorReads = 0;
+    proxySpec.theme = new Proxy(theme, {
+      getOwnPropertyDescriptor(target, key) {
+        const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+        if (key !== "requiredFooter") return descriptor;
+        descriptorReads += 1;
+        return {
+          ...descriptor,
+          value:
+            descriptorReads === 1
+              ? descriptor.value
+              : "FLIPPED AFTER SNAPSHOT",
+        };
+      },
+    });
+    const serialized = stableSerialize(proxySpec);
+    check(descriptorReads === 1, "proxy descriptors must be captured exactly once");
+    check(
+      serialized.includes(JSON.stringify(theme.requiredFooter)) &&
+        !serialized.includes("FLIPPED AFTER SNAPSHOT"),
+      "validation and serialization must use the same detached proxy snapshot",
+    );
+  }
+  {
+    const customArraySpec = clone(full);
+    Object.setPrototypeOf(
+      customArraySpec.slides,
+      Object.create(Array.prototype),
+    );
+    try {
+      stableSerialize(customArraySpec);
+      failures.push("custom array prototypes must fail");
+    } catch (error) {
+      check(error.code === "E_SPEC_SCHEMA", "custom array prototype requires E_SPEC_SCHEMA");
+    }
+  }
+  {
+    const proxiedArraySpec = clone(full);
+    let lengthReads = 0;
+    proxiedArraySpec.slides = new Proxy(proxiedArraySpec.slides, {
+      get(target, key, receiver) {
+        if (key === "length") lengthReads += 1;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    stableSerialize(proxiedArraySpec);
+    check(
+      lengthReads === 0,
+      "array snapshots must use the captured length descriptor without get traps",
+    );
+  }
   assertThrowsCode("unknown primitive kind", "E_SPEC_SCHEMA", (spec) => {
     spec.slides[0].primitives[0].kind = "image";
   }, full);
@@ -302,6 +404,11 @@ try {
   assertThrowsCode("control text", "E_TEXT_CONTROL_CHAR", (spec) => {
     spec.slides[0].primitives.find((primitive) => primitive.kind === "text").text = "bad\u0001text";
   }, full);
+  assertThrowsCode("metric context C1", "E_TEXT_CONTROL_CHAR", (spec) => {
+    spec.slides[2].primitives.find(
+      (primitive) => primitive.role === "metric-context",
+    ).text = "bad\u0085context";
+  }, full);
   assertThrowsCode("control notes", "E_TEXT_CONTROL_CHAR", (spec) => {
     spec.slides[0].notesText = `bad\u0001notes\r\nEvidence: ${spec.slides[0].evidenceIds.join(", ")}\r\nHuman context: ${spec.slides[0].judgmentIds.join(", ")}`;
   }, full);
@@ -338,6 +445,113 @@ try {
     failures.push("padded font must fail");
   } catch (error) {
     check(error.code === "E_FONT_INVALID", "padded font requires E_FONT_INVALID");
+  }
+  for (const [label, control] of [
+    ["LF", "\n"],
+    ["tab", "\t"],
+    ["C1", "\u0085"],
+  ]) {
+    const controlFontPlan = buildPlan(sample);
+    controlFontPlan.brand.fontFamily = `Segoe${control}UI`;
+    try {
+      compileReadoutPlan(controlFontPlan, { sourcePlanSha256, mode: "full" });
+      failures.push(`${label} font control must fail compilation`);
+    } catch (error) {
+      check(error.code === "E_FONT_INVALID", `${label} font requires E_FONT_INVALID`);
+    }
+  }
+  assertThrowsCode("spec C1 font", "E_FONT_INVALID", (spec) => {
+    spec.theme.fontFamily = "Segoe\u0085UI";
+  }, full);
+  for (const [label, context] of [
+    ["null", null],
+    ["number", 42],
+    ["empty", " "],
+    ["LF", "bad\ncontext"],
+    ["tab", "bad\tcontext"],
+    ["C1", "bad\u0085context"],
+  ]) {
+    const invalidContextPlan = buildPlan(sample);
+    invalidContextPlan.slides[2].content.metrics[0].context = context;
+    try {
+      compileReadoutPlan(invalidContextPlan, { sourcePlanSha256, mode: "full" });
+      failures.push(`metric context ${label} must fail`);
+    } catch (error) {
+      check(
+        ["E_SPEC_SCHEMA", "E_TEXT_EMPTY", "E_TEXT_CONTROL_CHAR"].includes(error.code),
+        `metric context ${label} must return a stable validation code`,
+      );
+    }
+  }
+  const unselectedContextPlan = buildPlan(sample);
+  unselectedContextPlan.slides[3].content.metrics[0].context = "bad\tcontext";
+  try {
+    compileReadoutPlan(unselectedContextPlan, {
+      sourcePlanSha256,
+      mode: "smoke",
+    });
+    failures.push("smoke mode must validate unselected metric contexts");
+  } catch (error) {
+    check(
+      error.code === "E_TEXT_CONTROL_CHAR",
+      "unselected smoke metric context requires E_TEXT_CONTROL_CHAR",
+    );
+  }
+  const malformedMetricsPlan = buildPlan(sample);
+  malformedMetricsPlan.slides[2].content.metrics = {};
+  try {
+    compileReadoutPlan(malformedMetricsPlan, {
+      sourcePlanSha256,
+      mode: "full",
+    });
+    failures.push("malformed metrics must fail without a runtime type error");
+  } catch (error) {
+    check(
+      error.code === "E_SPEC_SCHEMA",
+      "malformed metrics require E_SPEC_SCHEMA",
+    );
+  }
+  {
+    const getterPlan = buildPlan(sample);
+    let getterReads = 0;
+    Object.defineProperty(getterPlan.brand, "fontFamily", {
+      enumerable: true,
+      configurable: true,
+      get() {
+        getterReads += 1;
+        return getterReads === 1 ? "Segoe UI" : "FLIPPED";
+      },
+    });
+    try {
+      compileReadoutPlan(getterPlan, { sourcePlanSha256, mode: "full" });
+      failures.push("compiler must reject plan accessors");
+    } catch (error) {
+      check(error.code === "E_SPEC_SCHEMA", "plan accessor requires E_SPEC_SCHEMA");
+      check(getterReads === 0, "plan accessor rejection must not invoke the getter");
+    }
+  }
+  {
+    const symbolPlan = buildPlan(sample);
+    symbolPlan.brand[Symbol("hidden")] = true;
+    try {
+      compileReadoutPlan(symbolPlan, { sourcePlanSha256, mode: "full" });
+      failures.push("compiler must reject plan symbol properties");
+    } catch (error) {
+      check(error.code === "E_SPEC_SCHEMA", "plan symbol requires E_SPEC_SCHEMA");
+    }
+  }
+  {
+    const hiddenPlan = buildPlan(sample);
+    Object.defineProperty(hiddenPlan.brand, "hidden", {
+      value: true,
+      enumerable: false,
+    });
+    try {
+      compileReadoutPlan(hiddenPlan, { sourcePlanSha256, mode: "full" });
+      failures.push("compiler must reject plan non-enumerable properties");
+    } catch (error) {
+      check(error.code === "E_SPEC_SCHEMA", "plan non-enumerable requires E_SPEC_SCHEMA");
+    }
   }
   const undeclaredEvidencePlan = buildPlan(sample);
   undeclaredEvidencePlan.slides[1].content.facts[0].evidenceIds = ["customer-001"];
@@ -404,8 +618,58 @@ try {
     join(directory, "malformed-output.json"),
   ]);
   check(malformedPlan.status === 2 && malformedPlan.stdout === "", "malformed JSON must exit 2");
-  const leftovers = (await readdir(directory)).filter((name) => name.endsWith(".powerpoint-spec.tmp"));
-  check(leftovers.length === 0, "CLI failures must clean temporary files");
+  const inputDirectory = join(directory, "snapshot-input");
+  const outputDirectory = join(directory, "snapshot-output");
+  await mkdir(inputDirectory);
+  await mkdir(outputDirectory);
+  const snapshotPlanPath = join(inputDirectory, "plan.json");
+  const snapshotOutputPath = join(outputDirectory, "spec.json");
+  await writeFile(snapshotPlanPath, rawPlan);
+  const snapshotRun = runNode(cli, [
+    "--plan",
+    snapshotPlanPath,
+    "--mode",
+    "full",
+    "--output",
+    snapshotOutputPath,
+  ]);
+  check(snapshotRun.status === 0, `stdin-backed CLI run failed:\n${snapshotRun.stderr}`);
+  const invalidSnapshotPlanPath = join(inputDirectory, "invalid.json");
+  const invalidSnapshotOutputPath = join(outputDirectory, "invalid-spec.json");
+  await writeFile(invalidSnapshotPlanPath, "{");
+  const invalidSnapshotRun = runNode(cli, [
+    "--plan",
+    invalidSnapshotPlanPath,
+    "--mode",
+    "full",
+    "--output",
+    invalidSnapshotOutputPath,
+  ]);
+  check(
+    invalidSnapshotRun.status === 2 && invalidSnapshotRun.stdout === "",
+    "invalid stdin validation must fail without a success payload",
+  );
+  const inputLeftovers = (await readdir(inputDirectory)).filter((name) =>
+    name.startsWith(".fde-readout-plan-"),
+  );
+  const outputEntries = await readdir(outputDirectory);
+  const outputLeftovers = outputEntries.filter(
+    (name) =>
+      name.startsWith(".fde-readout-plan-") ||
+      name.endsWith(".powerpoint-spec.tmp"),
+  );
+  const rootLeftovers = (await readdir(directory)).filter(
+    (name) =>
+      name.endsWith(".powerpoint-spec.tmp") ||
+      name.startsWith(".fde-readout-plan-"),
+  );
+  check(
+    inputLeftovers.length === 0 &&
+      outputLeftovers.length === 0 &&
+      rootLeftovers.length === 0 &&
+      !outputEntries.includes("invalid-spec.json"),
+    "stdin validation must create no customer-plan snapshot or failed output temp",
+  );
 } finally {
   await rm(directory, { recursive: true, force: true });
 }

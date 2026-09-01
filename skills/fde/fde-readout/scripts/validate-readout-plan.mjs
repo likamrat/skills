@@ -106,6 +106,10 @@ function hexColor(value) {
   return /^#[0-9a-f]{6}$/i.test(value ?? "");
 }
 
+function strictControlFree(value) {
+  return typeof value === "string" && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
+}
+
 function stringArray(value, { min = 0, max = Infinity } = {}) {
   return (
     Array.isArray(value) &&
@@ -163,7 +167,15 @@ function contrastRatio(left, right) {
 
 let plan;
 try {
-  plan = JSON.parse(await readFile(resolve(path), "utf8"));
+  let text;
+  if (path === "-") {
+    process.stdin.setEncoding("utf8");
+    text = "";
+    for await (const chunk of process.stdin) text += chunk;
+  } else {
+    text = await readFile(resolve(path), "utf8");
+  }
+  plan = JSON.parse(text);
 } catch (error) {
   console.error(`Cannot read ReadoutPlan: ${error.message}`);
   process.exit(2);
@@ -210,6 +222,10 @@ requireValue(
   "brand.authorized must be true or false",
 );
 requireValue(nonEmpty(plan.brand?.fontFamily), "brand.fontFamily is required");
+requireValue(
+  strictControlFree(plan.brand?.fontFamily),
+  "brand.fontFamily must not contain control characters",
+);
 requireValue(
   nonEmpty(plan.brand?.requiredFooter),
   "brand.requiredFooter is required",
@@ -443,6 +459,7 @@ function validateFacts(items, prefix, min, max) {
     objectArray(items, { min, max }),
     `${prefix} requires ${min}-${max} items`,
   );
+  if (!Array.isArray(items)) return;
   for (const [index, item] of (items ?? []).entries()) {
     requireValue(nonEmpty(item?.label), `${prefix}[${index}].label is required`);
     requireValue(nonEmpty(item?.value), `${prefix}[${index}].value is required`);
@@ -533,6 +550,26 @@ for (const [index, slide] of (plan.slides ?? []).entries()) {
       break;
     case "metrics":
       validateFacts(content.metrics, `${prefix}.content.metrics`, 2, 4);
+      if (Array.isArray(content.metrics)) {
+        for (const [metricIndex, metric] of content.metrics.entries()) {
+          if (
+            metric === null ||
+            typeof metric !== "object" ||
+            Array.isArray(metric) ||
+            !Object.hasOwn(metric, "context")
+          ) {
+            continue;
+          }
+          requireValue(
+            nonEmpty(metric.context),
+            `${prefix}.content.metrics[${metricIndex}].context must be a non-empty string`,
+          );
+          requireValue(
+            strictControlFree(metric.context),
+            `${prefix}.content.metrics[${metricIndex}].context must not contain control characters`,
+          );
+        }
+      }
       validateClaim(content.outcome, `${prefix}.content.outcome`);
       break;
     case "chart":

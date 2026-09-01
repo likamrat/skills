@@ -8,6 +8,7 @@ const SUPPORTED_FAMILIES = new Set(["cover", "decision", "metrics", "evidence"])
 const TEXT_SIZES = new Set([8, 11, 28, 34]);
 const NAME_PATTERN = /^fde-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+const STRICT_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
 const DECK_KEYS = [
   "schemaVersion",
   "units",
@@ -92,6 +93,17 @@ export class DrawingSpecError extends Error {
   }
 }
 
+function assertFont(value, path) {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.trim() !== value ||
+    STRICT_CONTROL_PATTERN.test(value)
+  ) {
+    fail("E_FONT_INVALID", path, "font must be nonblank, unpadded, and control-free");
+  }
+}
+
 function fail(code, path, message) {
   throw new DrawingSpecError(code, path, message);
 }
@@ -153,27 +165,110 @@ function isPlainObject(value) {
   return prototype === Object.prototype || prototype === null;
 }
 
+function descriptorFor(value, key, path) {
+  let descriptor;
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(value, key);
+  } catch (error) {
+    fail("E_SPEC_SCHEMA", path, `property inspection failed: ${error.message}`);
+  }
+  if (
+    !descriptor ||
+    !Object.hasOwn(descriptor, "value") ||
+    descriptor.enumerable !== true ||
+    descriptor.writable !== true
+  ) {
+    fail(
+      "E_SPEC_SCHEMA",
+      path,
+      "properties must be enumerable writable data properties",
+    );
+  }
+  return descriptor;
+}
+
+function snapshotPlainData(value, path = "$") {
+  if (value === null) fail("E_SPEC_SCHEMA", path, "null is not allowed");
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      fail("E_GEOMETRY_NONFINITE", path, "number must be finite");
+    }
+    return value;
+  }
+  if (["string", "boolean"].includes(typeof value)) return value;
+  if (typeof value !== "object") {
+    fail("E_SPEC_SCHEMA", path, "value must be plain JSON data");
+  }
+
+  let prototype;
+  let keys;
+  try {
+    prototype = Object.getPrototypeOf(value);
+    keys = Reflect.ownKeys(value);
+  } catch (error) {
+    fail("E_SPEC_SCHEMA", path, `property inspection failed: ${error.message}`);
+  }
+  if (keys.some((key) => typeof key === "symbol")) {
+    fail("E_SPEC_SCHEMA", path, "symbol properties are not allowed");
+  }
+
+  if (Array.isArray(value)) {
+    if (prototype !== Array.prototype) {
+      fail("E_SPEC_SCHEMA", path, "array prototype must be Array.prototype");
+    }
+    const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+    const length = lengthDescriptor?.value;
+    if (
+      !lengthDescriptor ||
+      !Object.hasOwn(lengthDescriptor, "value") ||
+      !Number.isSafeInteger(length) ||
+      length < 0 ||
+      lengthDescriptor.writable !== true
+    ) {
+      fail("E_SPEC_SCHEMA", `${path}.length`, "array length descriptor is invalid");
+    }
+    const indexKeys = keys.filter((key) => key !== "length");
+    if (
+      indexKeys.length !== length ||
+      indexKeys.some((key, index) => key !== String(index))
+    ) {
+      fail("E_SPEC_SCHEMA", path, "array must contain only dense owned indexes");
+    }
+    const snapshot = new Array(length);
+    for (let index = 0; index < length; index += 1) {
+      const descriptor = descriptorFor(value, String(index), `${path}[${index}]`);
+      snapshot[index] = snapshotPlainData(descriptor.value, `${path}[${index}]`);
+    }
+    return snapshot;
+  }
+
+  if (prototype !== Object.prototype && prototype !== null) {
+    fail(
+      "E_SPEC_SCHEMA",
+      path,
+      "object prototype must be Object.prototype or null",
+    );
+  }
+  const snapshot =
+    prototype === null ? Object.create(null) : Object.create(Object.prototype);
+  for (const key of keys) {
+    const descriptor = descriptorFor(value, key, `${path}.${key}`);
+    Object.defineProperty(snapshot, key, {
+      value: snapshotPlainData(descriptor.value, `${path}.${key}`),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return snapshot;
+}
+
 function isDenseArray(value) {
   return (
     Array.isArray(value) &&
-    Object.keys(value).length === value.length &&
-    value.every((_, index) => Object.hasOwn(value, index))
+    Object.getPrototypeOf(value) === Array.prototype &&
+    Object.keys(value).length === value.length
   );
-}
-
-function assertPlainJson(value, path = "$") {
-  if (value === null) fail("E_SPEC_SCHEMA", path, "null is not allowed");
-  if (typeof value === "number" && !Number.isFinite(value)) {
-    fail("E_GEOMETRY_NONFINITE", path, "number must be finite");
-  }
-  if (["string", "boolean", "number"].includes(typeof value)) return;
-  if (Array.isArray(value)) {
-    if (!isDenseArray(value)) fail("E_SPEC_SCHEMA", path, "array must be dense");
-    value.forEach((item, index) => assertPlainJson(item, `${path}[${index}]`));
-    return;
-  }
-  if (!isPlainObject(value)) fail("E_SPEC_SCHEMA", path, "value must be plain JSON");
-  for (const [key, item] of Object.entries(value)) assertPlainJson(item, `${path}.${key}`);
 }
 
 function normalizeColor(value, path) {
@@ -672,6 +767,20 @@ function validateNestedEvidence(slide, slideIndex) {
   });
 }
 
+function validateMetricContext(metric, path) {
+  if (!Object.hasOwn(metric, "context")) return;
+  if (typeof metric.context !== "string" || metric.context.trim().length === 0) {
+    fail("E_TEXT_EMPTY", path, "metric context must be a nonempty string");
+  }
+  if (STRICT_CONTROL_PATTERN.test(metric.context)) {
+    fail(
+      "E_TEXT_CONTROL_CHAR",
+      path,
+      "metric context contains a control character",
+    );
+  }
+}
+
 function validateSupportedContent(slide, slideIndex) {
   const path = `$.slides[${slideIndex}].content`;
   switch (slide.family) {
@@ -696,14 +805,26 @@ function validateSupportedContent(slide, slideIndex) {
       break;
     case "metrics":
       allowedKeys(slide.content, ["metrics", "outcome"], ["metrics", "outcome"], path);
+      if (!isDenseArray(slide.content.metrics)) {
+        fail("E_SPEC_SCHEMA", `${path}.metrics`, "expected a dense metrics array");
+      }
       slide.content.metrics.forEach((metric, index) =>
-        allowedKeys(
-          metric,
-          ["label", "value", "context", "evidenceIds"],
-          ["label", "value", "evidenceIds"],
-          `${path}.metrics[${index}]`,
-        ),
+        isPlainObject(metric)
+          ? allowedKeys(
+              metric,
+              ["label", "value", "context", "evidenceIds"],
+              ["label", "value", "evidenceIds"],
+              `${path}.metrics[${index}]`,
+            )
+          : fail(
+              "E_SPEC_SCHEMA",
+              `${path}.metrics[${index}]`,
+              "expected a metric object",
+            ),
       );
+      slide.content.metrics.forEach((metric, index) => {
+        validateMetricContext(metric, `${path}.metrics[${index}].context`);
+      });
       allowedKeys(
         slide.content.outcome,
         ["statement", "evidenceIds"],
@@ -725,16 +846,38 @@ function validateSupportedContent(slide, slideIndex) {
   }
 }
 
-export function compileReadoutPlan(plan, { sourcePlanSha256, mode } = {}) {
+export function compileReadoutPlan(inputPlan, { sourcePlanSha256, mode } = {}) {
+  const plan = snapshotPlainData(inputPlan);
   if (!isPlainObject(plan)) fail("E_SPEC_SCHEMA", "$", "plan must be a plain object");
   if (!["smoke", "full"].includes(mode)) fail("E_SPEC_SCHEMA", "$.mode", "expected smoke or full");
   if (!/^[a-f0-9]{64}$/.test(sourcePlanSha256 ?? "")) {
     fail("E_SPEC_SCHEMA", "$.sourcePlanSha256", "expected lowercase SHA-256");
   }
-  if (typeof plan.brand?.fontFamily !== "string" || plan.brand.fontFamily.trim() !== plan.brand.fontFamily || !plan.brand.fontFamily) {
-    fail("E_FONT_INVALID", "$.brand.fontFamily", "font must be nonblank and unpadded");
-  }
+  assertFont(plan.brand?.fontFamily, "$.brand.fontFamily");
   if (plan.brand?.logo) fail("E_UNSUPPORTED_MEDIA", "$.brand.logo", "media is not supported");
+  for (const [slideIndex, slide] of plan.slides.entries()) {
+    if (slide.family !== "metrics") continue;
+    const metricsPath = `$.slides[${slideIndex}].content.metrics`;
+    if (
+      !isPlainObject(slide.content) ||
+      !isDenseArray(slide.content.metrics)
+    ) {
+      fail("E_SPEC_SCHEMA", metricsPath, "expected a dense metrics array");
+    }
+    for (const [metricIndex, metric] of slide.content.metrics.entries()) {
+      if (!isPlainObject(metric)) {
+        fail(
+          "E_SPEC_SCHEMA",
+          `${metricsPath}[${metricIndex}]`,
+          "expected a metric object",
+        );
+      }
+      validateMetricContext(
+        metric,
+        `${metricsPath}[${metricIndex}].context`,
+      );
+    }
+  }
   const selected = mode === "smoke" ? selectSmokeSlides(plan) : plan.slides;
   const sourceIndexes = new Map(plan.slides.map((slide, index) => [slide, index + 1]));
   selected.forEach((slide) => {
@@ -766,8 +909,7 @@ export function compileReadoutPlan(plan, { sourcePlanSha256, mode } = {}) {
     selectedSlideFamilies: selected.map((slide) => slide.family),
     slides: selected.map((slide) => compileSlide(plan, slide, sourceIndexes.get(slide))),
   };
-  validateDrawingSpec(spec);
-  return spec;
+  return validateDrawingSpec(spec);
 }
 
 function assertString(value, path, { nonempty = true } = {}) {
@@ -830,6 +972,16 @@ function validatePrimitive(primitive, path, stage, names) {
   if (primitive.kind === "text") {
     assertGeometryBox(primitive, path, stage);
     assertText(primitive.text, `${path}.text`);
+    if (
+      primitive.role === "metric-context" &&
+      STRICT_CONTROL_PATTERN.test(primitive.text)
+    ) {
+      fail(
+        "E_TEXT_CONTROL_CHAR",
+        `${path}.text`,
+        "metric context contains a control character",
+      );
+    }
     if (!TEXT_SIZES.has(primitive.fontSize)) fail("E_SPEC_SCHEMA", `${path}.fontSize`, "unsupported text size");
     for (const key of ["bold", "italic", "wordWrap"]) {
       if (typeof primitive[key] !== "boolean") fail("E_SPEC_SCHEMA", `${path}.${key}`, "expected boolean");
@@ -870,8 +1022,7 @@ function validatePrimitive(primitive, path, stage, names) {
   }
 }
 
-export function validateDrawingSpec(spec) {
-  assertPlainJson(spec);
+function validateDrawingSpecSnapshot(spec) {
   exactKeys(spec, DECK_KEYS, "$");
   if (spec.schemaVersion !== SCHEMA_VERSION || spec.units !== "points") fail("E_SPEC_SCHEMA", "$", "invalid schema version or units");
   exactKeys(spec.stage, ["width", "height"], "$.stage");
@@ -880,7 +1031,7 @@ export function validateDrawingSpec(spec) {
   assertString(spec.source.planId, "$.source.planId");
   if (spec.source.planVersion !== "1.0" || !/^[a-f0-9]{64}$/.test(spec.source.planSha256)) fail("E_SPEC_SCHEMA", "$.source", "invalid plan version or hash");
   exactKeys(spec.theme, ["fontFamily", "colors", "requiredFooter", "unbranded"], "$.theme");
-  assertString(spec.theme.fontFamily, "$.theme.fontFamily");
+  assertFont(spec.theme.fontFamily, "$.theme.fontFamily");
   assertString(spec.theme.requiredFooter, "$.theme.requiredFooter");
   if (typeof spec.theme.unbranded !== "boolean") fail("E_SPEC_SCHEMA", "$.theme.unbranded", "expected boolean");
   exactKeys(spec.theme.colors, COLOR_ROLES, "$.theme.colors");
@@ -922,6 +1073,10 @@ export function validateDrawingSpec(spec) {
   return spec;
 }
 
+export function validateDrawingSpec(spec) {
+  return validateDrawingSpecSnapshot(snapshotPlainData(spec));
+}
+
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);
   if (!isPlainObject(value)) return value;
@@ -929,6 +1084,7 @@ function canonical(value) {
 }
 
 export function stableSerialize(spec) {
-  validateDrawingSpec(spec);
-  return JSON.stringify(canonical(spec));
+  const snapshot = snapshotPlainData(spec);
+  validateDrawingSpecSnapshot(snapshot);
+  return JSON.stringify(canonical(snapshot));
 }
