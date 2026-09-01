@@ -8,22 +8,36 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
   APPROVAL_ALLOWED_KEYS,
   BLOCKED_IDENTITY_TERMS,
   EXCLUDED_SMOKE_FAMILIES,
   FAMILY_DENSITY_FIELDS,
+  canonicalizeJson,
   densityScore,
   isDenseArray,
   selectSmokeSlides,
+  smokeApprovalSignaturePayload,
   validateSmokeApproval,
 } from "./powerpoint-smoke-contract.mjs";
 
 const scriptsDir = fileURLToPath(new URL(".", import.meta.url));
 const cli = resolve(scriptsDir, "validate-powerpoint-smoke-approval.mjs");
 const failures = [];
+const hostKeyPair = generateKeyPairSync("ed25519");
+const hostKeyId = "host-approval-key-2026";
+const trustedKeyring = {
+  schemaVersion: 1,
+  keys: [
+    {
+      keyId: hostKeyId,
+      algorithm: "ed25519",
+      publicKeyPem: hostKeyPair.publicKey.export({ type: "spki", format: "pem" }),
+    },
+  ],
+};
 
 function check(condition, message) {
   if (!condition) failures.push(message);
@@ -31,6 +45,14 @@ function check(condition, message) {
 
 function sha256(text) {
   return createHash("sha256").update(text).digest("hex");
+}
+
+function signApproval(approval, privateKey = hostKeyPair.privateKey) {
+  approval.attestation.signature = sign(
+    null,
+    smokeApprovalSignaturePayload(approval),
+    privateKey,
+  ).toString("base64url");
 }
 
 function buildPlan() {
@@ -110,6 +132,8 @@ function buildFixture(plan = buildPlan()) {
     selectedSlideFamilies: selection.map((slide) => slide.family),
     pptxSha256,
     contactSheetSha256,
+    densestSlideReadable: true,
+    legacyContentRemoved: true,
     slides: selection.map(slideEntry),
     package: {
       slides: 3,
@@ -127,6 +151,8 @@ function buildFixture(plan = buildPlan()) {
     schemaVersion: 1,
     approved: true,
     approver: {
+      id: "employee:jane-doe",
+      kind: "human",
       name: "Jane Doe",
       role: "Engagement Director",
     },
@@ -136,18 +162,28 @@ function buildFixture(plan = buildPlan()) {
     smokePptxSha256: pptxSha256,
     contactSheetSha256: contactSheetSha256,
     selectedSlideIds: selection.map((slide) => slide.id),
+    attestation: {
+      version: 1,
+      domain: "fde-powerpoint-smoke-approval-v1",
+      algorithm: "ed25519",
+      keyId: hostKeyId,
+      signature: "",
+    },
   };
+  signApproval(approval);
 
-  return { plan, planBytes, report, reportBytes, approval, selection };
+  return { plan, planBytes, report, reportBytes, approval, selection, trustedKeyring };
 }
 
 function expectPass(label, mutate) {
   const fixture = buildFixture();
   if (mutate) mutate(fixture);
+  signApproval(fixture.approval);
   const result = validateSmokeApproval({
     planBytes: fixture.planBytes,
     reportBytes: fixture.reportBytes,
     approval: fixture.approval,
+    trustedKeyring: fixture.trustedKeyring,
   });
   check(result.errors.length === 0, `${label} expected success, got: ${result.errors.join("; ")}`);
   return result;
@@ -160,6 +196,7 @@ function expectFail(label, mutate, pattern) {
     planBytes: fixture.planBytes,
     reportBytes: fixture.reportBytes,
     approval: fixture.approval,
+    trustedKeyring: fixture.trustedKeyring,
   });
   check(result.errors.length > 0, `${label} expected failure but validation passed`);
   check(
@@ -182,10 +219,235 @@ function replaceReport(fixture, report) {
 // --- Success ---
 {
   const result = expectPass("baseline success");
+  check(result.authenticated === true, "success must report authenticated true");
+  check(result.attestation.keyId === hostKeyId, "success must return the attestation key ID");
+  check(result.approver.id === "employee:jane-doe", "success must return the host identity ID");
+  check(result.approver.kind === "human", "success must return the human actor kind");
   check(result.approver.name === "Jane Doe", "success must return the approver name");
   check(
     result.approver.role === "Engagement Director",
     "success must return the accountable approver role",
+  );
+}
+
+// --- Deterministic strict canonicalization ---
+check(
+  canonicalizeJson({ z: 1, a: { y: 2, x: [true, null, "ok"] } }) ===
+    '{"a":{"x":[true,null,"ok"],"y":2},"z":1}',
+  "canonical JSON must sort keys recursively",
+);
+check(
+  canonicalizeJson({ b: 2, a: 1 }) === canonicalizeJson({ a: 1, b: 2 }),
+  "canonical JSON must not depend on insertion order",
+);
+for (const [label, value] of [
+  ["undefined", undefined],
+  ["nonfinite", Number.POSITIVE_INFINITY],
+  ["function", () => {}],
+  ["symbol", Symbol("x")],
+  ["bigint", 1n],
+  ["non-plain object", new Date()],
+  ["undefined property", { value: undefined }],
+]) {
+  let threw = false;
+  try {
+    canonicalizeJson(value);
+  } catch {
+    threw = true;
+  }
+  check(threw, `canonical JSON must reject ${label}`);
+}
+{
+  const sparse = new Array(2);
+  sparse[1] = "x";
+  let threw = false;
+  try {
+    canonicalizeJson(sparse);
+  } catch {
+    threw = true;
+  }
+  check(threw, "canonical JSON must reject sparse arrays");
+}
+
+// --- Host-authenticated approval receipt ---
+expectFail(
+  "unsigned lexical human",
+  (fixture) => {
+    fixture.approval.attestation.signature = "";
+  },
+  /signature must be a non-empty base64url signature/,
+);
+expectFail(
+  "nonhuman actor kind",
+  (fixture) => {
+    fixture.approval.approver.kind = "service";
+  },
+  /approver\.kind must equal human/,
+);
+{
+  const fixture = buildFixture();
+  const result = validateSmokeApproval({
+    planBytes: fixture.planBytes,
+    reportBytes: fixture.reportBytes,
+    approval: fixture.approval,
+  });
+  check(
+    result.errors.some((error) => /trustedKeyring must be a host-supplied plain object/.test(error)),
+    `missing trusted keyring must fail, got: ${result.errors.join("; ")}`,
+  );
+}
+{
+  const attacker = generateKeyPairSync("ed25519");
+  const fixture = buildFixture();
+  signApproval(fixture.approval, attacker.privateKey);
+  const result = validateSmokeApproval({
+    planBytes: fixture.planBytes,
+    reportBytes: fixture.reportBytes,
+    approval: fixture.approval,
+    trustedKeyring: fixture.trustedKeyring,
+  });
+  check(
+    result.errors.some((error) => /signature is invalid for the host-pinned key/.test(error)),
+    `self-signed approval must fail against host pin, got: ${result.errors.join("; ")}`,
+  );
+}
+for (const [label, mutate] of [
+  ["approver id", (approval) => (approval.approver.id = "employee:janet-doe")],
+  ["approver name", (approval) => (approval.approver.name = "Janet Doe")],
+  ["approver role", (approval) => (approval.approver.role = "Delivery Director")],
+  ["timestamp", (approval) => (approval.approvedAt = "2026-01-16T09:30:00Z")],
+  ["plan hash", (approval) => (approval.planSha256 = sha256("mutated-plan"))],
+  ["report hash", (approval) => (approval.smokeReportSha256 = sha256("mutated-report"))],
+  ["PPTX hash", (approval) => (approval.smokePptxSha256 = sha256("mutated-pptx"))],
+  ["contact hash", (approval) => (approval.contactSheetSha256 = sha256("mutated-contact"))],
+  [
+    "selection",
+    (approval) => (approval.selectedSlideIds = ["cover", "decision", "profile-a"]),
+  ],
+]) {
+  expectFail(
+    `signed ${label} mutation`,
+    (fixture) => mutate(fixture.approval),
+    /signature is invalid for the host-pinned key/,
+  );
+}
+for (const [label, field, value, pattern] of [
+  ["version", "version", 2, /attestation\.version must equal 1/],
+  ["domain", "domain", "other-domain", /attestation\.domain must equal/],
+  ["algorithm", "algorithm", "rsa", /attestation\.algorithm must equal ed25519/],
+]) {
+  expectFail(
+    `attestation ${label} mutation`,
+    (fixture) => {
+      fixture.approval.attestation[field] = value;
+      signApproval(fixture.approval);
+    },
+    pattern,
+  );
+}
+expectFail(
+  "unknown attestation key ID",
+  (fixture) => {
+    fixture.approval.attestation.keyId = "unknown-key";
+    signApproval(fixture.approval);
+  },
+  /keyId is not trusted/,
+);
+expectFail(
+  "malformed base64url signature",
+  (fixture) => {
+    fixture.approval.attestation.signature = "not+base64url=";
+  },
+  /signature must be unpadded base64url/,
+);
+expectFail(
+  "wrong-length base64url signature",
+  (fixture) => {
+    fixture.approval.attestation.signature = Buffer.alloc(63).toString("base64url");
+  },
+  /signature must encode a 64-byte Ed25519 signature/,
+);
+expectFail(
+  "approval-embedded public key",
+  (fixture) => {
+    fixture.approval.attestation.publicKeyPem = fixture.trustedKeyring.keys[0].publicKeyPem;
+  },
+  /approval\.attestation has unexpected keys/,
+);
+{
+  const wrongKeyPair = generateKeyPairSync("ed25519");
+  const fixture = buildFixture();
+  fixture.trustedKeyring = {
+    schemaVersion: 1,
+    keys: [
+      {
+        keyId: hostKeyId,
+        algorithm: "ed25519",
+        publicKeyPem: wrongKeyPair.publicKey.export({ type: "spki", format: "pem" }),
+      },
+    ],
+  };
+  const result = validateSmokeApproval({
+    planBytes: fixture.planBytes,
+    reportBytes: fixture.reportBytes,
+    approval: fixture.approval,
+    trustedKeyring: fixture.trustedKeyring,
+  });
+  check(
+    result.errors.some((error) => /signature is invalid for the host-pinned key/.test(error)),
+    `wrong host-pinned key must fail, got: ${result.errors.join("; ")}`,
+  );
+}
+
+for (const [label, mutate, pattern] of [
+  [
+    "duplicate key IDs",
+    (keyring) => keyring.keys.push({ ...keyring.keys[0] }),
+    /duplicate keyId/,
+  ],
+  ["keyring extra field", (keyring) => (keyring.owner = "host"), /unexpected keys/],
+  ["keyring missing field", (keyring) => delete keyring.schemaVersion, /must be an own property/],
+  [
+    "key entry extra field",
+    (keyring) => (keyring.keys[0].privateKeyPem = "forbidden"),
+    /unexpected keys/,
+  ],
+  [
+    "private key material",
+    (keyring) =>
+      (keyring.keys[0].publicKeyPem = hostKeyPair.privateKey.export({
+        type: "pkcs8",
+        format: "pem",
+      })),
+    /must contain only a PEM-encoded public key/,
+  ],
+  [
+    "malformed public key",
+    (keyring) => (keyring.keys[0].publicKeyPem = "-----BEGIN PUBLIC KEY-----\nbad\n-----END PUBLIC KEY-----"),
+    /must be a valid Ed25519 public key/,
+  ],
+  [
+    "non-Ed25519 public key",
+    (keyring) =>
+      (keyring.keys[0].publicKeyPem = generateKeyPairSync("rsa", {
+        modulusLength: 2048,
+      }).publicKey.export({ type: "spki", format: "pem" })),
+    /must be an Ed25519 public key/,
+  ],
+]) {
+  const fixture = buildFixture();
+  fixture.trustedKeyring = structuredClone(fixture.trustedKeyring);
+  mutate(fixture.trustedKeyring);
+  const result = validateSmokeApproval({
+    planBytes: fixture.planBytes,
+    reportBytes: fixture.reportBytes,
+    approval: fixture.approval,
+    trustedKeyring: fixture.trustedKeyring,
+  });
+  check(result.errors.length > 0, `${label} expected failure but validation passed`);
+  check(
+    result.errors.some((error) => pattern.test(error)),
+    `${label} expected ${pattern}, got: ${result.errors.join("; ")}`,
   );
 }
 
@@ -491,6 +753,24 @@ expectFail(
 );
 
 // --- Report hard-gate failures ---
+for (const field of ["densestSlideReadable", "legacyContentRemoved"]) {
+  expectFail(
+    `${field} false`,
+    (fixture) => {
+      replaceReport(fixture, { ...fixture.report, [field]: false });
+    },
+    new RegExp(`report\\.${field} must equal true`),
+  );
+  expectFail(
+    `${field} missing`,
+    (fixture) => {
+      const report = { ...fixture.report };
+      delete report[field];
+      replaceReport(fixture, report);
+    },
+    new RegExp(`report\\.${field} must (be an own property|equal true)`),
+  );
+}
 expectFail(
   "report status not PASS",
   (fixture) => {
@@ -795,6 +1075,7 @@ for (const family of ["table", "evaluation"]) {
     planBytes: fixture.planBytes,
     reportBytes: fixture.reportBytes,
     approval: fixture.approval,
+    trustedKeyring: fixture.trustedKeyring,
   });
   check(
     result.errors.some((error) =>
@@ -839,13 +1120,25 @@ try {
   const planPath = join(temp, "plan.json");
   const reportPath = join(temp, "smoke-report.json");
   const approvalPath = join(temp, "approval.json");
+  const keyringPath = join(temp, "trusted-keyring.json");
   await writeFile(planPath, fixture.planBytes);
   await writeFile(reportPath, fixture.reportBytes);
   await writeFile(approvalPath, JSON.stringify(fixture.approval));
+  await writeFile(keyringPath, JSON.stringify(fixture.trustedKeyring));
 
   const success = spawnSync(
     process.execPath,
-    [cli, "--approval", approvalPath, "--plan", planPath, "--smoke-report", reportPath],
+    [
+      cli,
+      "--approval",
+      approvalPath,
+      "--plan",
+      planPath,
+      "--smoke-report",
+      reportPath,
+      "--trusted-keyring",
+      keyringPath,
+    ],
     { encoding: "utf8" },
   );
   check(success.status === 0, `CLI success case must exit 0, got: ${success.stderr}`);
@@ -857,6 +1150,10 @@ try {
   }
   if (parsed) {
     check(parsed.status === "PASS", "CLI success JSON must report status PASS");
+    check(parsed.authenticated === true, "CLI success JSON must report authenticated true");
+    check(parsed.attestation?.keyId === hostKeyId, "CLI success JSON must report attestation keyId");
+    check(parsed.approver?.id === "employee:jane-doe", "CLI success JSON must report approver.id");
+    check(parsed.approver?.kind === "human", "CLI success JSON must report approver.kind");
     check(parsed.approver?.name === "Jane Doe", "CLI success JSON must report approver.name");
     check(
       parsed.approver?.role === "Engagement Director",
@@ -873,7 +1170,17 @@ try {
   await writeFile(approvalPath, JSON.stringify(badApproval));
   const failure = spawnSync(
     process.execPath,
-    [cli, "--approval", approvalPath, "--plan", planPath, "--smoke-report", reportPath],
+    [
+      cli,
+      "--approval",
+      approvalPath,
+      "--plan",
+      planPath,
+      "--smoke-report",
+      reportPath,
+      "--trusted-keyring",
+      keyringPath,
+    ],
     { encoding: "utf8" },
   );
   check(failure.status !== 0, "CLI failure case must exit nonzero");
@@ -894,8 +1201,11 @@ try {
     planPath,
     "--smoke-report",
     reportPath,
+    "--trusted-keyring",
+    keyringPath,
   ];
-  checkCliFailure("CLI missing required flag", validArgs.slice(0, -2));
+  checkCliFailure("CLI missing keyring", validArgs.slice(0, -2));
+  checkCliFailure("CLI missing required flag", validArgs.filter((value) => value !== "--plan" && value !== planPath));
   checkCliFailure("CLI unknown flag", [...validArgs, "--wat"]);
   checkCliFailure("CLI unknown positional argument", [...validArgs, "extra"]);
   checkCliFailure("CLI duplicate flag", [...validArgs, "--plan", planPath]);
@@ -905,6 +1215,8 @@ try {
     planPath,
     "--smoke-report",
     reportPath,
+    "--trusted-keyring",
+    keyringPath,
   ]);
   checkCliFailure("CLI help with another argument", ["--help", "--plan", planPath]);
 

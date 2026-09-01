@@ -3,7 +3,9 @@
 // Pure, reusable functions for the cross-platform PowerPoint smoke contract.
 // This module performs no I/O, network access, or external tool calls.
 
-import { createHash } from "node:crypto";
+import { createHash, createPublicKey, verify } from "node:crypto";
+
+export const APPROVAL_ATTESTATION_DOMAIN = "fde-powerpoint-smoke-approval-v1";
 
 export const EXCLUDED_SMOKE_FAMILIES = Object.freeze([
   "cover",
@@ -64,9 +66,19 @@ export const APPROVAL_ALLOWED_KEYS = Object.freeze([
   "smokePptxSha256",
   "contactSheetSha256",
   "selectedSlideIds",
+  "attestation",
 ]);
 const approvalAllowedKeyLookup = new Set(APPROVAL_ALLOWED_KEYS);
-const approverAllowedKeyLookup = new Set(["name", "role"]);
+const approverAllowedKeyLookup = new Set(["id", "kind", "name", "role"]);
+const attestationAllowedKeyLookup = new Set([
+  "version",
+  "domain",
+  "algorithm",
+  "keyId",
+  "signature",
+]);
+const keyringAllowedKeyLookup = new Set(["schemaVersion", "keys"]);
+const keyringEntryAllowedKeyLookup = new Set(["keyId", "algorithm", "publicKeyPem"]);
 const reportAllowedKeyLookup = new Set([
   "schemaVersion",
   "status",
@@ -76,6 +88,8 @@ const reportAllowedKeyLookup = new Set([
   "selectedSlideFamilies",
   "pptxSha256",
   "contactSheetSha256",
+  "densestSlideReadable",
+  "legacyContentRemoved",
   "slides",
   "package",
 ]);
@@ -101,6 +115,7 @@ const reportPackageAllowedKeyLookup = new Set([
 ]);
 
 const HEX64 = /^[0-9a-f]{64}$/;
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
 const ISO_TIMESTAMP =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/;
 const PERSONAL_NAME =
@@ -109,6 +124,61 @@ const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key
 
 export function sha256Hex(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+export function canonicalizeJson(value) {
+  if (value === null) return "null";
+  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("canonical JSON rejects non-finite numbers");
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    if (!isDenseArray(value)) throw new TypeError("canonical JSON rejects sparse arrays");
+    const expectedKeys = new Set(["length", ...value.map((_, index) => String(index))]);
+    if (Reflect.ownKeys(value).some((key) => !expectedKeys.has(key))) {
+      throw new TypeError("canonical JSON rejects non-JSON array properties");
+    }
+    for (let index = 0; index < value.length; index += 1) {
+      if (!hasOwn(Object.getOwnPropertyDescriptor(value, String(index)), "value")) {
+        throw new TypeError("canonical JSON rejects accessor properties");
+      }
+    }
+    return `[${value.map((entry) => canonicalizeJson(entry)).join(",")}]`;
+  }
+  if (!isPlainObject(value)) {
+    throw new TypeError(`canonical JSON rejects unsupported value type: ${typeof value}`);
+  }
+
+  const ownKeys = Reflect.ownKeys(value);
+  if (
+    ownKeys.some((key) => typeof key !== "string") ||
+    ownKeys.some((key) => !Object.prototype.propertyIsEnumerable.call(value, key)) ||
+    ownKeys.some((key) => !hasOwn(Object.getOwnPropertyDescriptor(value, key), "value"))
+  ) {
+    throw new TypeError("canonical JSON requires enumerable string-keyed data properties");
+  }
+  return `{${ownKeys
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalizeJson(value[key])}`)
+    .join(",")}}`;
+}
+
+export function smokeApprovalSignaturePayload(approval) {
+  if (!isPlainObject(approval) || !isPlainObject(approval.attestation)) {
+    throw new TypeError("approval and approval.attestation must be plain objects");
+  }
+  canonicalizeJson(approval);
+  const unsignedApproval = {
+    ...approval,
+    attestation: Object.fromEntries(
+      Object.entries(approval.attestation).filter(([key]) => key !== "signature"),
+    ),
+  };
+  return Buffer.from(
+    `${APPROVAL_ATTESTATION_DOMAIN}\0${canonicalizeJson(unsignedApproval)}`,
+    "utf8",
+  );
 }
 
 function isPlainObject(value) {
@@ -130,9 +200,11 @@ export function isDenseArray(value) {
 }
 
 function checkExactKeys(value, allowedKeys, label, errors) {
-  const unexpected = Object.keys(value).filter((key) => !allowedKeys.has(key));
+  const unexpected = Reflect.ownKeys(value).filter(
+    (key) => typeof key !== "string" || !allowedKeys.has(key),
+  );
   if (unexpected.length > 0) {
-    errors.push(`${label} has unexpected keys: ${unexpected.join(", ")}`);
+    errors.push(`${label} has unexpected keys: ${unexpected.map(String).join(", ")}`);
   }
 }
 
@@ -311,7 +383,13 @@ function validateApprovalShape(approval, errors) {
     errors.push("approval.approver must be a plain object");
   } else {
     checkExactKeys(approval.approver, approverAllowedKeyLookup, "approval.approver", errors);
-    requireOwnKeys(approval.approver, ["name", "role"], "approval.approver", errors);
+    requireOwnKeys(approval.approver, ["id", "kind", "name", "role"], "approval.approver", errors);
+    if (!hasOwn(approval.approver, "id") || !isNonEmptyString(approval.approver.id)) {
+      errors.push("approval.approver.id must be a non-empty host identity");
+    }
+    if (!hasOwn(approval.approver, "kind") || approval.approver.kind !== "human") {
+      errors.push("approval.approver.kind must equal human");
+    }
     if (!hasOwn(approval.approver, "name") || !looksLikePersonalName(approval.approver.name)) {
       errors.push("approval.approver.name must contain at least two nontrivial name words");
     } else if (containsBlockedIdentityTerm(approval.approver.name)) {
@@ -352,6 +430,127 @@ function validateApprovalShape(approval, errors) {
       length: 3,
     });
   }
+  if (!hasOwn(approval, "attestation") || !isPlainObject(approval.attestation)) {
+    errors.push("approval.attestation must be a plain object");
+  } else {
+    checkExactKeys(
+      approval.attestation,
+      attestationAllowedKeyLookup,
+      "approval.attestation",
+      errors,
+    );
+    requireOwnKeys(
+      approval.attestation,
+      [...attestationAllowedKeyLookup],
+      "approval.attestation",
+      errors,
+    );
+    if (!hasOwn(approval.attestation, "version") || approval.attestation.version !== 1) {
+      errors.push("approval.attestation.version must equal 1");
+    }
+    if (
+      !hasOwn(approval.attestation, "domain") ||
+      approval.attestation.domain !== APPROVAL_ATTESTATION_DOMAIN
+    ) {
+      errors.push(`approval.attestation.domain must equal ${APPROVAL_ATTESTATION_DOMAIN}`);
+    }
+    if (!hasOwn(approval.attestation, "algorithm") || approval.attestation.algorithm !== "ed25519") {
+      errors.push("approval.attestation.algorithm must equal ed25519");
+    }
+    if (!hasOwn(approval.attestation, "keyId") || !isNonEmptyString(approval.attestation.keyId)) {
+      errors.push("approval.attestation.keyId must be non-empty");
+    }
+    if (
+      !hasOwn(approval.attestation, "signature") ||
+      !isNonEmptyString(approval.attestation.signature)
+    ) {
+      errors.push("approval.attestation.signature must be a non-empty base64url signature");
+    }
+  }
+}
+
+// The host pins this public keyring and owns identity, authorization, private-key custody,
+// and signer integrity. Approval documents never supply their own verification keys.
+function validateTrustedKeyring(trustedKeyring, errors) {
+  const keysById = new Map();
+  const seenKeyIds = new Set();
+  if (!isPlainObject(trustedKeyring)) {
+    errors.push("trustedKeyring must be a host-supplied plain object");
+    return keysById;
+  }
+  try {
+    canonicalizeJson(trustedKeyring);
+  } catch (error) {
+    errors.push(`trustedKeyring must contain only strict JSON data: ${error.message}`);
+  }
+  checkExactKeys(trustedKeyring, keyringAllowedKeyLookup, "trustedKeyring", errors);
+  requireOwnKeys(trustedKeyring, [...keyringAllowedKeyLookup], "trustedKeyring", errors);
+  if (!hasOwn(trustedKeyring, "schemaVersion") || trustedKeyring.schemaVersion !== 1) {
+    errors.push("trustedKeyring.schemaVersion must equal 1");
+  }
+  if (
+    !hasOwn(trustedKeyring, "keys") ||
+    !isDenseArray(trustedKeyring.keys) ||
+    trustedKeyring.keys.length === 0
+  ) {
+    errors.push("trustedKeyring.keys must be a non-empty dense array");
+    return keysById;
+  }
+
+  trustedKeyring.keys.forEach((entry, index) => {
+    const label = `trustedKeyring.keys[${index}]`;
+    if (!isPlainObject(entry)) {
+      errors.push(`${label} must be a plain object`);
+      return;
+    }
+    checkExactKeys(entry, keyringEntryAllowedKeyLookup, label, errors);
+    requireOwnKeys(entry, [...keyringEntryAllowedKeyLookup], label, errors);
+    if (!hasOwn(entry, "keyId") || !isNonEmptyString(entry.keyId)) {
+      errors.push(`${label}.keyId must be non-empty`);
+    } else if (seenKeyIds.has(entry.keyId)) {
+      errors.push(`trustedKeyring.keys contains duplicate keyId: ${entry.keyId}`);
+    } else {
+      seenKeyIds.add(entry.keyId);
+    }
+    if (!hasOwn(entry, "algorithm") || entry.algorithm !== "ed25519") {
+      errors.push(`${label}.algorithm must equal ed25519`);
+    }
+    if (
+      !hasOwn(entry, "publicKeyPem") ||
+      !isNonEmptyString(entry.publicKeyPem) ||
+      /PRIVATE KEY/i.test(entry.publicKeyPem) ||
+      !/^-----BEGIN PUBLIC KEY-----[\s\S]+-----END PUBLIC KEY-----\s*$/.test(entry.publicKeyPem)
+    ) {
+      errors.push(`${label}.publicKeyPem must contain only a PEM-encoded public key`);
+      return;
+    }
+    try {
+      const publicKey = createPublicKey(entry.publicKeyPem);
+      if (publicKey.type !== "public" || publicKey.asymmetricKeyType !== "ed25519") {
+        errors.push(`${label}.publicKeyPem must be an Ed25519 public key`);
+        return;
+      }
+      if (isNonEmptyString(entry.keyId) && !keysById.has(entry.keyId)) {
+        keysById.set(entry.keyId, publicKey);
+      }
+    } catch {
+      errors.push(`${label}.publicKeyPem must be a valid Ed25519 public key`);
+    }
+  });
+  return keysById;
+}
+
+function decodeBase64urlSignature(value, errors) {
+  if (typeof value !== "string" || !BASE64URL.test(value)) {
+    errors.push("approval.attestation.signature must be unpadded base64url");
+    return undefined;
+  }
+  const signature = Buffer.from(value, "base64url");
+  if (signature.length !== 64 || signature.toString("base64url") !== value) {
+    errors.push("approval.attestation.signature must encode a 64-byte Ed25519 signature");
+    return undefined;
+  }
+  return signature;
 }
 
 function arraysEqual(actual, expected) {
@@ -372,13 +571,32 @@ function parseJsonBytes(bytes, label, errors) {
   }
 }
 
-export function validateSmokeApproval({ planBytes, reportBytes, approval }) {
+export function validateSmokeApproval({ planBytes, reportBytes, approval, trustedKeyring }) {
   const errors = [];
   validateApprovalShape(approval, errors);
+  const trustedKeys = validateTrustedKeyring(trustedKeyring, errors);
   if (planBytes === undefined || planBytes === null) errors.push("planBytes is required");
   if (reportBytes === undefined || reportBytes === null) errors.push("reportBytes is required");
   if (errors.length > 0) return { errors };
 
+  const publicKey = trustedKeys.get(approval.attestation.keyId);
+  if (!publicKey) {
+    errors.push(`approval.attestation.keyId is not trusted: ${approval.attestation.keyId}`);
+  } else {
+    const signature = decodeBase64urlSignature(approval.attestation.signature, errors);
+    if (signature) {
+      let payload;
+      try {
+        payload = smokeApprovalSignaturePayload(approval);
+      } catch (error) {
+        errors.push(`approval signature payload is invalid: ${error.message}`);
+      }
+      // Verification is defense in depth; it does not prove physical inspection or production identity.
+      if (payload && !verify(null, payload, publicKey, signature)) {
+        errors.push("approval.attestation.signature is invalid for the host-pinned key");
+      }
+    }
+  }
   const actualPlanSha256 = sha256Hex(planBytes);
   const actualReportSha256 = sha256Hex(reportBytes);
   if (approval.planSha256 !== actualPlanSha256) {
@@ -438,6 +656,12 @@ export function validateSmokeApproval({ planBytes, reportBytes, approval }) {
   }
   if (!hasOwn(report, "selectionMode") || report.selectionMode !== "smoke") {
     errors.push("report.selectionMode must equal smoke");
+  }
+  if (!hasOwn(report, "densestSlideReadable") || report.densestSlideReadable !== true) {
+    errors.push("report.densestSlideReadable must equal true");
+  }
+  if (!hasOwn(report, "legacyContentRemoved") || report.legacyContentRemoved !== true) {
+    errors.push("report.legacyContentRemoved must equal true");
   }
   if (
     !hasOwn(report, "sourcePlanSha256") ||
@@ -585,8 +809,14 @@ export function validateSmokeApproval({ planBytes, reportBytes, approval }) {
     errors,
     status: report.status,
     approver: {
+      id: approval.approver.id,
+      kind: approval.approver.kind,
       name: approval.approver.name,
       role: approval.approver.role,
+    },
+    authenticated: true,
+    attestation: {
+      keyId: approval.attestation.keyId,
     },
     approvedAt: approval.approvedAt,
     hashes: {

@@ -2,6 +2,8 @@
   "schemaVersion": 1,
   "approved": false,
   "approver": {
+    "id": "",
+    "kind": "human",
     "name": "",
     "role": ""
   },
@@ -10,5 +12,12 @@
   "smokeReportSha256": "",
   "smokePptxSha256": "",
   "contactSheetSha256": "",
-  "selectedSlideIds": []
+  "selectedSlideIds": [],
+  "attestation": {
+    "version": 1,
+    "domain": "fde-powerpoint-smoke-approval-v1",
+    "algorithm": "ed25519",
+    "keyId": "",
+    "signature": ""
+  }
 }

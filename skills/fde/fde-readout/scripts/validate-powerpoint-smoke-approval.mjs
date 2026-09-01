@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// CLI: node validate-powerpoint-smoke-approval.mjs --approval <json> --plan <json> --smoke-report <json>
+// CLI: node validate-powerpoint-smoke-approval.mjs --approval <json> --plan <json> --smoke-report <json> --trusted-keyring <json>
 //
 // Validates a smoke approval record against the raw bytes of the plan and
 // smoke report it references. Prints compact JSON on success, numbered
@@ -12,12 +12,18 @@ import { resolve } from "node:path";
 import { validateSmokeApproval } from "./powerpoint-smoke-contract.mjs";
 
 function parseArgs(argv) {
-  const args = { approval: undefined, plan: undefined, smokeReport: undefined };
+  const args = {
+    approval: undefined,
+    plan: undefined,
+    smokeReport: undefined,
+    trustedKeyring: undefined,
+  };
   const errors = [];
   const flags = new Map([
     ["--approval", "approval"],
     ["--plan", "plan"],
     ["--smoke-report", "smokeReport"],
+    ["--trusted-keyring", "trustedKeyring"],
   ]);
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -54,7 +60,7 @@ function parseArgs(argv) {
 
 function usage() {
   console.log(
-    "Usage: node validate-powerpoint-smoke-approval.mjs --approval <json> --plan <json> --smoke-report <json>",
+    "Usage: node validate-powerpoint-smoke-approval.mjs --approval <json> --plan <json> --smoke-report <json> --trusted-keyring <json>",
   );
 }
 
@@ -79,6 +85,7 @@ const errors = [];
 let approvalBytes;
 let planBytes;
 let reportBytes;
+let trustedKeyringBytes;
 
 try {
   approvalBytes = await readFile(resolve(args.approval));
@@ -95,23 +102,36 @@ try {
 } catch (error) {
   errors.push(`could not read smoke report file: ${error.message}`);
 }
+try {
+  trustedKeyringBytes = await readFile(resolve(args.trustedKeyring));
+} catch (error) {
+  errors.push(`could not read trusted keyring file: ${error.message}`);
+}
 
 if (errors.length > 0) fail(errors);
 
 let approval;
+let trustedKeyring;
 try {
   approval = JSON.parse(approvalBytes.toString("utf8"));
 } catch (error) {
   fail([`approval file is not valid JSON: ${error.message}`]);
 }
+try {
+  trustedKeyring = JSON.parse(trustedKeyringBytes.toString("utf8"));
+} catch (error) {
+  fail([`trusted keyring file is not valid JSON: ${error.message}`]);
+}
 
-const result = validateSmokeApproval({ planBytes, reportBytes, approval });
+const result = validateSmokeApproval({ planBytes, reportBytes, approval, trustedKeyring });
 
 if (result.errors.length > 0) fail(result.errors);
 
 console.log(
   JSON.stringify({
     status: result.status,
+    authenticated: result.authenticated,
+    attestation: result.attestation,
     approver: result.approver,
     approvedAt: result.approvedAt,
     hashes: result.hashes,
