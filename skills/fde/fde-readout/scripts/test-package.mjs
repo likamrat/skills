@@ -343,6 +343,7 @@ check(
 );
 
 for (const script of [
+  "test-browser-candidates.mjs",
   "test-compile-readout-intent.mjs",
   "test-plan.mjs",
   "test-html.mjs",
