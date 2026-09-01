@@ -55,6 +55,20 @@ export const BLOCKED_IDENTITY_TERMS = Object.freeze([
   "n a",
 ]);
 const blockedIdentityTermLookup = new Set(BLOCKED_IDENTITY_TERMS);
+const wholeIdentityTermLookup = new Set([
+  "agent",
+  "ai",
+  "bot",
+  "ci",
+  "machine",
+  "model",
+  "n a",
+  "none",
+  "runner",
+  "system",
+  "tool",
+  "unknown",
+]);
 
 export const APPROVAL_ALLOWED_KEYS = Object.freeze([
   "schemaVersion",
@@ -228,12 +242,21 @@ function normalizeIdentityText(value) {
 export function containsBlockedIdentityTerm(value) {
   const normalized = normalizeIdentityText(value);
   if (!normalized) return false;
-  const padded = ` ${normalized} `;
+  const tokens = normalized.split(" ");
   const compact = normalized.replace(/\s+/g, "");
+  const compactTokenRuns = new Set();
+  for (let start = 0; start < tokens.length; start += 1) {
+    let run = "";
+    for (let end = start; end < tokens.length; end += 1) {
+      run += tokens[end];
+      compactTokenRuns.add(run);
+    }
+  }
   for (const term of blockedIdentityTermLookup) {
-    if (["ai", "ci", "n a"].includes(term)) {
-      if (padded.includes(` ${term} `)) return true;
-    } else if (compact.includes(term.replace(/\s+/g, ""))) {
+    const compactTerm = term.replace(/\s+/g, "");
+    if (wholeIdentityTermLookup.has(term)) {
+      if (compactTokenRuns.has(compactTerm)) return true;
+    } else if (compact.includes(compactTerm)) {
       return true;
     }
   }

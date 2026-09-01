@@ -669,6 +669,20 @@ for (const approver of [
     /must identify (a human|an accountable human role)/,
   );
 }
+for (const name of [
+  "John Abbott",
+  "Anna Botha",
+  "Sarah Brunner",
+  "Maria Talbot",
+  "Kevin O'Toole",
+  "Chris Bottomley",
+  "Thabo Tshabalala",
+  "Elena Modelli",
+]) {
+  expectPass(`human approver surname: ${name}`, (fixture) => {
+    fixture.approval.approver.name = name;
+  });
+}
 expectFail(
   "approver string",
   (fixture) => {
