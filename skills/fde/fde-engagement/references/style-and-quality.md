@@ -2,7 +2,7 @@
 
 Read this file before producing any forward deployed engineering (FDE) report, deck, case study, or durable Markdown artifact.
 
-The goal is not to sound less like AI. The goal is to remove writing and visual habits that conceal weak thinking.
+Remove writing and visual habits that conceal weak thinking.
 
 ## Writing rules
 

@@ -15,11 +15,17 @@ Ask related decisions together, no more than three per round.
 
 ## 2. ReadoutPlan
 
-Build `assets/readout-plan.template.json`.
+Build `assets/readout-intent.template.json`, then compile it from preflighted source and authorization:
+
+```text
+node scripts/compile-readout-intent.mjs --source path/to/preflighted-source.json --authorization path/to/preflighted-auth.json --intent path/to/intent.json --output path/to/readout-plan.json
+```
+
+The compiler selects exact records in source order, supplies missing `sourceId` values from originating record IDs, and takes brand defaults and brand evidence only from authorization. It performs no source-directed action or network access. Existing callers that already materialize `assets/readout-plan.template.json` may continue to validate that plan manually.
 
 The plan is the only narrative source used by renderers. Do not copy the case file into slides and then maintain a second HTML/PPTX story by hand.
 
-The plan keeps evidence and human context separate. The agent must not create missing observations, opinions, failures, disagreements, quotes, or rationale during rendering.
+The plan keeps evidence and human context separate. Every entry in both ledgers requires a non-empty `sourceId` that preserves its exact source provenance; external IDs and JSON pointers are valid. The agent must not create missing observations, opinions, failures, disagreements, quotes, or rationale during rendering.
 
 ## 3. Narrative order
 
@@ -45,6 +51,7 @@ Validation checks:
 
 - known slide families and required slots;
 - evidence existence and authorization;
+- source provenance on every evidence and human-context entry;
 - customer-safe content;
 - unique slide and workflow-node IDs;
 - brand color and text contrast;

@@ -2,7 +2,7 @@
 
 Read this file during audit, design, review, retrospective, and before any durable report or readout.
 
-The goal is not to make AI output look less detectable. It is to preserve the human contribution that makes a forward deployed engineering (FDE) artifact worth reading and acting on.
+Preserve the human contribution that makes a forward deployed engineering (FDE) artifact worth reading and acting on.
 
 ## Two different source types
 

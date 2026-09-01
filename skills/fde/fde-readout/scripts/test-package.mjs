@@ -161,6 +161,7 @@ for (const file of files.filter((candidate) =>
 
 const requiredAssets = [
   [join(skillRoot, "assets", "readout-plan.template.json"), "plan template"],
+  [join(skillRoot, "assets", "readout-intent.template.json"), "intent template"],
   [
     join(skillRoot, "assets", "powerpoint-16x9-seed.pptx"),
     "PowerPoint seed",
@@ -284,6 +285,22 @@ try {
     !skeletonHelper.includes("ConvertFrom-Json -Depth"),
     "PowerPoint skeleton helper must remain compatible with Windows PowerShell 5.1",
   );
+  check(
+    skeletonHelper.includes("[string[]]$SmokeSlideIds") &&
+      skeletonHelper.includes("$PSBoundParameters.ContainsKey('SmokeSlideIds')") &&
+      skeletonHelper.includes("$selectedSlides = $planSlides"),
+    "PowerPoint skeleton helper must preserve full-plan behavior while supporting explicit smoke selection",
+  );
+  check(
+    skeletonHelper.includes("$sourcePlanSha256") &&
+      skeletonHelper.includes("selectedSlideIds") &&
+      skeletonHelper.includes("selectedSlideFamilies"),
+    "PowerPoint skeleton helper must bind output to the source full plan and selected slides",
+  );
+  check(
+    !skeletonHelper.includes(".FileFormat"),
+    "PowerPoint skeleton helper must not access unsupported Presentation.FileFormat",
+  );
 } catch (error) {
   failures.push(`PowerPoint skeleton helper contract could not be verified: ${error.message}`);
 }
@@ -326,10 +343,12 @@ check(
 );
 
 for (const script of [
+  "test-compile-readout-intent.mjs",
   "test-plan.mjs",
   "test-html.mjs",
   "test-writing.mjs",
   "test-source-preflight.mjs",
+  "test-powerpoint-skeleton.mjs",
 ]) {
   const result = spawnSync(process.execPath, [join(skillRoot, "scripts", script)], {
     encoding: "utf8",

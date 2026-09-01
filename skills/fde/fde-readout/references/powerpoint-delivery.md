@@ -6,29 +6,42 @@ Every new editable deck starts from a copy of [`../assets/powerpoint-16x9-seed.p
 
 Use this authoring order:
 
-1. copy the clean seed to the output path;
-2. on Windows with PowerPoint installed, create the native slide-and-notes skeleton with:
+1. canonical-validate the complete plan once;
+2. copy the clean seed to a disposable smoke output path;
+3. on Windows with PowerPoint installed, create the three-slide native smoke skeleton from the complete plan with:
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File scripts/create-powerpoint-skeleton.ps1 -Plan plan.json -Output readout.pptx
+   powershell -ExecutionPolicy Bypass -File scripts/create-powerpoint-skeleton.ps1 -Plan plan.json -Output readout-smoke.pptx -SmokeSlideIds cover,pilot-decision,pilot-risks
    ```
 
-3. otherwise, use the native PowerPoint host to assign the starter notes, add each planned slide, and assign its notes before creating the next slide;
-4. save, close, and reopen the native deck, then confirm that the active slide count equals the unique notes-relationship and notes-part counts;
-5. only after that check, open the deck in the Office canvas and build the planned native shapes, tables, charts, and diagrams;
-6. do not add, delete, reorder, or assign notes to slides in the canvas after the native skeleton passes.
+4. author and render the three selected slides, then obtain coordinator or accountable-human approval;
+5. discard the smoke deck and copy a fresh seed to the full-deck output path;
+6. invoke the helper without `-SmokeSlideIds` against the same complete plan;
+7. save, close, and reopen the native deck, then confirm that the active slide count equals the unique notes-relationship and notes-part counts;
+8. only after that check, open the full deck in the Office canvas and build the planned native shapes, tables, charts, and diagrams;
+9. do not add, delete, reorder, or assign notes to slides in the canvas after either native skeleton passes.
+
+If the script cannot run, use another approved native PowerPoint host for the same smoke-first sequence. Assign each selected slide's original notes before creating the next slide.
 
 The seed establishes a clean package foundation. It does not prove that a full deck can be authored safely, so the smoke gate still applies.
 
 ## Three-slide smoke gate
 
-Before full-deck authoring, copy the seed, add two slides, and use the native Office presentation canvas to build only:
+Canonical-validate the complete `ReadoutPlan` once. Do not create or validate a derivative three-slide plan. Before full-deck authoring, select these IDs from that validated complete plan:
 
 1. the cover;
 2. the decision slide;
 3. the densest requested slide family.
 
-The third slide must exercise its native structure, such as the largest table or chart. Build the three-slide and three-notes skeleton in the native PowerPoint host, save it, close it, reopen it, and confirm three unique notes parts before opening the Office canvas. The canvas package serializer may point every added slide at one notes part even when slide-and-notes writes are separate; do not use it to create the skeleton. Render all three slides as one contact sheet and pause for coordinator or accountable-human approval. Treat the smoke deck as disposable. After approval, repeat the same native skeleton creation from a fresh seed before canvas content authoring. Visual approval permits full authoring; it does not waive evidence, notes, package, or efficiency gates.
+The third slide must exercise its native structure, such as the largest table or chart. Pass the three full-plan IDs to the native helper; argument order does not change full-plan order:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/create-powerpoint-skeleton.ps1 -Plan plan.json -Output readout-smoke.pptx -SmokeSlideIds cover,pilot-decision,pilot-risks
+```
+
+The helper requires exactly three unique IDs, including the complete plan's first cover and second decision IDs. It creates only those native slides with their original notes, evidence IDs, and human-context IDs, then reports the source full-plan SHA-256 plus selected IDs and families. Save, close, reopen, and confirm three unique notes parts before opening the Office canvas. The canvas package serializer may point every added slide at one notes part even when slide-and-notes writes are separate; do not use it to create the skeleton.
+
+Author and render those three slides as one contact sheet, then pause for coordinator or accountable-human approval. Treat the smoke deck as disposable. After approval, discard it, copy a fresh seed, and invoke the helper without `-SmokeSlideIds` against the same complete plan before full canvas authoring. Visual approval permits full authoring; it does not waive evidence, notes, package, or efficiency gates.
 
 Stop the PowerPoint path immediately when:
 

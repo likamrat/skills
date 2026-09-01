@@ -1,6 +1,16 @@
 # Presentation workflow research
 
-This skill independently implements presentation workflows checked against [Anthropic's PPTX skill](https://github.com/anthropics/skills/tree/main/skills/pptx), [SlideSpeak's slide-design skill](https://github.com/SlideSpeak/slide-design-skill), [frontend-slides](https://github.com/zarazhangrui/frontend-slides), [dom-to-pptx](https://github.com/atharva9167j/dom-to-pptx), [Elite PowerPoint Designer](https://github.com/willem4130/claude-code-skills/tree/main/skills/elite-powerpoint-designer), [Hallmark](https://www.usehallmark.com/), and [SlideSpeak's comparison](https://slidespeak.co/blog/agent-skills-presentations-powerpoint-ai). Its editing workflow adapts [Peter Yang's No AI Slop skill](https://github.com/petergyang/no-ai-slop) and [25/50/25 heuristic](https://creatoreconomy.so/p/use-my-no-ai-slop-skill-to-remove-20-ai-slop-patterns).
+The presentation workflow was checked against:
+
+- [Anthropic's PPTX skill](https://github.com/anthropics/skills/tree/main/skills/pptx);
+- [SlideSpeak's slide-design skill](https://github.com/SlideSpeak/slide-design-skill);
+- [frontend-slides](https://github.com/zarazhangrui/frontend-slides);
+- [dom-to-pptx](https://github.com/atharva9167j/dom-to-pptx);
+- [Elite PowerPoint Designer](https://github.com/willem4130/claude-code-skills/tree/main/skills/elite-powerpoint-designer);
+- [Hallmark](https://www.usehallmark.com/);
+- [SlideSpeak's comparison](https://slidespeak.co/blog/agent-skills-presentations-powerpoint-ai).
+
+The editing workflow adapts [Peter Yang's No AI Slop skill](https://github.com/petergyang/no-ai-slop) and [25/50/25 heuristic](https://creatoreconomy.so/p/use-my-no-ai-slop-skill-to-remove-20-ai-slop-patterns).
 
 ## Adopted patterns
 
