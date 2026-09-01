@@ -395,6 +395,9 @@ for (const approver of [
   { name: "Automated Reviewer", role: "Engagement Director" },
   { name: "CopilotAgent Reviewer", role: "Engagement Director" },
   { name: "GitHub Actions", role: "Engagement Director" },
+  { name: "GitHub Workflow", role: "Release Reviewer" },
+  { name: "Build Runner", role: "Release Reviewer" },
+  { name: "Jane Doe", role: "Service Account" },
 ]) {
   expectFail(
     `machine approver: ${JSON.stringify(approver)}`,
