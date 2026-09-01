@@ -13,23 +13,43 @@ import { validateSmokeApproval } from "./powerpoint-smoke-contract.mjs";
 
 function parseArgs(argv) {
   const args = { approval: undefined, plan: undefined, smokeReport: undefined };
+  const errors = [];
+  const flags = new Map([
+    ["--approval", "approval"],
+    ["--plan", "plan"],
+    ["--smoke-report", "smokeReport"],
+  ]);
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
-    const value = argv[index + 1];
-    if (flag === "--approval") {
-      args.approval = value;
-      index += 1;
-    } else if (flag === "--plan") {
-      args.plan = value;
-      index += 1;
-    } else if (flag === "--smoke-report") {
-      args.smokeReport = value;
-      index += 1;
-    } else if (flag === "--help") {
+    if (flag === "--help") {
       args.help = true;
+      continue;
+    }
+    const key = flags.get(flag);
+    if (!key) {
+      errors.push(`unknown argument: ${flag}`);
+      continue;
+    }
+    if (args[key] !== undefined) {
+      errors.push(`duplicate argument: ${flag}`);
+    }
+    const value = argv[index + 1];
+    if (value === undefined || value.startsWith("--")) {
+      errors.push(`missing value for ${flag}`);
+      continue;
+    }
+    args[key] = value;
+    index += 1;
+  }
+  if (args.help && argv.length !== 1) {
+    errors.push("--help must be used alone");
+  }
+  if (!args.help) {
+    for (const [flag, key] of flags) {
+      if (args[key] === undefined) errors.push(`missing required argument: ${flag}`);
     }
   }
-  return args;
+  return { args, errors };
 }
 
 function usage() {
@@ -44,16 +64,15 @@ function fail(errors) {
   process.exit(1);
 }
 
-const args = parseArgs(process.argv.slice(2));
+const parsedArgs = parseArgs(process.argv.slice(2));
+const { args } = parsedArgs;
 
+if (parsedArgs.errors.length > 0) {
+  fail(parsedArgs.errors);
+}
 if (args.help) {
   usage();
   process.exit(0);
-}
-
-if (!args.approval || !args.plan || !args.smokeReport) {
-  usage();
-  process.exit(2);
 }
 
 const errors = [];

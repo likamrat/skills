@@ -11,7 +11,12 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
+  APPROVAL_ALLOWED_KEYS,
+  BLOCKED_IDENTITY_TERMS,
+  EXCLUDED_SMOKE_FAMILIES,
+  FAMILY_DENSITY_FIELDS,
   densityScore,
+  isDenseArray,
   selectSmokeSlides,
   validateSmokeApproval,
 } from "./powerpoint-smoke-contract.mjs";
@@ -84,12 +89,13 @@ function slideEntry(slide) {
     notesVerified: true,
     evidenceIds: [...slide.evidenceIds],
     judgmentIds: [...slide.judgmentIds],
-    nativeShapeCount: densityScore(slide),
+    densityScore: densityScore(slide),
+    nativeShapeCount: 5,
+    nativeTableCount: ["table", "evaluation"].includes(slide.family) ? 1 : 0,
   };
 }
 
-function buildFixture() {
-  const plan = buildPlan();
+function buildFixture(plan = buildPlan()) {
   const selection = selectSmokeSlides(plan);
   const planBytes = Buffer.from(JSON.stringify(plan), "utf8");
   const pptxSha256 = sha256("smoke-pptx-fixture");
@@ -120,7 +126,10 @@ function buildFixture() {
   const approval = {
     schemaVersion: 1,
     approved: true,
-    approver: "Jane Doe",
+    approver: {
+      name: "Jane Doe",
+      role: "Engagement Director",
+    },
     approvedAt: "2026-01-15T09:30:00Z",
     planSha256: sha256(planBytes),
     smokeReportSha256: sha256(reportBytes),
@@ -164,8 +173,55 @@ function reserialize(fixture, { plan, report } = {}) {
   if (report) fixture.reportBytes = Buffer.from(JSON.stringify(report), "utf8");
 }
 
+function replaceReport(fixture, report) {
+  fixture.report = report;
+  reserialize(fixture, { report });
+  fixture.approval.smokeReportSha256 = sha256(fixture.reportBytes);
+}
+
 // --- Success ---
-expectPass("baseline success");
+{
+  const result = expectPass("baseline success");
+  check(result.approver.name === "Jane Doe", "success must return the approver name");
+  check(
+    result.approver.role === "Engagement Director",
+    "success must return the accountable approver role",
+  );
+}
+
+// --- Exported constants cannot mutate private validation lookups ---
+for (const [label, mutate] of [
+  ["excluded families", () => EXCLUDED_SMOKE_FAMILIES.push("metrics")],
+  ["density fields", () => FAMILY_DENSITY_FIELDS.metrics.push("extra")],
+  ["blocked identity terms", () => BLOCKED_IDENTITY_TERMS.splice(0)],
+  ["approval keys", () => APPROVAL_ALLOWED_KEYS.push("bypass")],
+]) {
+  let threw = false;
+  try {
+    mutate();
+  } catch {
+    threw = true;
+  }
+  check(threw, `${label} export must be frozen`);
+}
+check(
+  selectSmokeSlides(buildPlan())[2].id === "metrics-a",
+  "constant mutation attempts must not change smoke selection",
+);
+expectFail(
+  "constant mutation attempts do not bypass identity validation",
+  (fixture) => {
+    fixture.approval.approver.role = "Copilot Reviewer";
+  },
+  /accountable human role/,
+);
+
+{
+  const sparse = new Array(3);
+  sparse[0] = "cover";
+  sparse[2] = "metrics-a";
+  check(!isDenseArray(sparse), "isDenseArray must reject missing numeric indices");
+}
 
 // --- densityScore and selectSmokeSlides determinism ---
 {
@@ -205,6 +261,29 @@ expectPass("baseline success");
   check(threw, "selectSmokeSlides must reject a plan with no eligible third slide");
 }
 
+{
+  const sparsePlan = buildPlan();
+  delete sparsePlan.slides[2];
+  let message = "";
+  try {
+    selectSmokeSlides(sparsePlan);
+  } catch (error) {
+    message = error.message;
+  }
+  check(/dense slides array/.test(message), "selectSmokeSlides must reject sparse plan.slides");
+}
+
+{
+  const inheritedPlan = Object.create(buildPlan());
+  let message = "";
+  try {
+    selectSmokeSlides(inheritedPlan);
+  } catch (error) {
+    message = error.message;
+  }
+  check(/plain object/.test(message), "selectSmokeSlides must reject inherited plan data");
+}
+
 // --- Wrong / easy third slide ---
 expectFail(
   "wrong third slide",
@@ -229,7 +308,25 @@ expectFail(
   (fixture) => {
     fixture.approval.selectedSlideIds = ["cover", "cover", "metrics-a"];
   },
-  /selectedSlideIds must contain (exactly 3|unique)/,
+  /selectedSlideIds must (contain exactly 3|not contain duplicates)/,
+);
+
+expectFail(
+  "sparse approval selectedSlideIds",
+  (fixture) => {
+    fixture.approval.selectedSlideIds = new Array(3);
+    fixture.approval.selectedSlideIds[0] = "cover";
+    fixture.approval.selectedSlideIds[2] = "metrics-a";
+  },
+  /selectedSlideIds must be a dense array/,
+);
+
+expectFail(
+  "inherited approval",
+  (fixture) => {
+    fixture.approval = Object.create(fixture.approval);
+  },
+  /approval must be a plain object/,
 );
 
 // --- Raw plan/report tampering ---
@@ -287,34 +384,95 @@ expectFail(
   /approval\.approved must equal true/,
 );
 
-// --- Generic approvers ---
-for (const approver of ["agent", "AI", " None ", "N/A", "System", "Automation", "unknown"]) {
+// --- Structured accountable human approvers ---
+for (const approver of [
+  { name: "Copilot Agent", role: "Engagement Director" },
+  { name: "Jane Bot", role: "Engagement Director" },
+  { name: "Jane Doe", role: "Service Principal" },
+  { name: "Jane Doe", role: "CI Pipeline Owner" },
+  { name: "Jane Doe", role: "AI Review Lead" },
+  { name: "ChatGPT Reviewer", role: "Engagement Director" },
+]) {
   expectFail(
-    `generic approver: ${approver}`,
+    `machine approver: ${JSON.stringify(approver)}`,
     (fixture) => {
       fixture.approval.approver = approver;
     },
-    /must name an accountable human/,
+    /must identify (a human|an accountable human role)/,
   );
 }
+expectFail(
+  "approver string",
+  (fixture) => {
+    fixture.approval.approver = "Jane Doe";
+  },
+  /approver must be a plain object/,
+);
+expectFail(
+  "approver name only",
+  (fixture) => {
+    fixture.approval.approver = { name: "Jane Doe" };
+  },
+  /approver\.role must be an own property/,
+);
+expectFail(
+  "approver role only",
+  (fixture) => {
+    fixture.approval.approver = { role: "Engagement Director" };
+  },
+  /approver\.name must be an own property/,
+);
+expectFail(
+  "single-word approver name",
+  (fixture) => {
+    fixture.approval.approver.name = "Jane";
+  },
+  /at least two nontrivial name words/,
+);
+expectFail(
+  "approver extra property",
+  (fixture) => {
+    fixture.approval.approver.email = "jane@example.com";
+  },
+  /approval\.approver has unexpected keys/,
+);
+expectPass("common personal-name punctuation", (fixture) => {
+  fixture.approval.approver.name = "Anne-Marie O'Neil";
+});
 
-// --- Invalid / no-zone timestamp ---
+// --- Real ISO calendar timestamps with explicit zones ---
 expectFail(
   "timestamp without zone",
   (fixture) => {
     fixture.approval.approvedAt = "2026-01-15T09:30:00";
   },
-  /approvedAt must be an ISO-8601 timestamp/,
+  /approvedAt must be a real ISO-8601 calendar timestamp/,
 );
-expectFail(
-  "timestamp not a real date",
-  (fixture) => {
-    fixture.approval.approvedAt = "2026-99-99T09:30:00Z";
-  },
-  /approvedAt must be/,
-);
+for (const timestamp of [
+  "2026-02-29T09:30:00Z",
+  "2026-04-31T09:30:00Z",
+  "2026-01-15T24:00:00Z",
+  "2026-01-15T09:60:00Z",
+  "2026-01-15T09:30:60Z",
+  "2026-01-15T09:30:00+14:01",
+  "2026-01-15T09:30:00+02:60",
+]) {
+  expectFail(
+    `invalid timestamp: ${timestamp}`,
+    (fixture) => {
+      fixture.approval.approvedAt = timestamp;
+    },
+    /approvedAt must be a real ISO-8601 calendar timestamp/,
+  );
+}
+expectPass("valid leap-day timestamp", (fixture) => {
+  fixture.approval.approvedAt = "2028-02-29T23:59:59.123Z";
+});
 expectPass("timestamp with numeric offset", (fixture) => {
   fixture.approval.approvedAt = "2026-01-15T09:30:00+02:00";
+});
+expectPass("timestamp with maximum offset", (fixture) => {
+  fixture.approval.approvedAt = "2026-01-15T09:30:00-14:00";
 });
 
 // --- Unexpected key ---
@@ -375,6 +533,44 @@ expectFail(
   },
   /report\.selectedSlideFamilies must equal the plan's actual slide families/,
 );
+expectFail(
+  "sparse report selectedSlideIds",
+  (fixture) => {
+    const sparse = new Array(3);
+    sparse[0] = "cover";
+    sparse[2] = "metrics-a";
+    check(!isDenseArray(sparse), "sparse report selectedSlideIds fixture must contain a hole");
+    replaceReport(fixture, { ...fixture.report, selectedSlideIds: sparse });
+  },
+  /report\.selectedSlideIds must contain non-empty strings/,
+);
+expectFail(
+  "sparse report slides",
+  (fixture) => {
+    const sparse = new Array(3);
+    sparse[0] = fixture.report.slides[0];
+    sparse[2] = fixture.report.slides[2];
+    check(!isDenseArray(sparse), "sparse report.slides fixture must contain a hole");
+    replaceReport(fixture, { ...fixture.report, slides: sparse });
+  },
+  /report\.slides\[1\] must be a plain object/,
+);
+expectFail(
+  "missing report own property",
+  (fixture) => {
+    const report = { ...fixture.report };
+    delete report.selectionMode;
+    replaceReport(fixture, report);
+  },
+  /report\.selectionMode must be an own property/,
+);
+expectFail(
+  "unexpected report property",
+  (fixture) => {
+    replaceReport(fixture, { ...fixture.report, trusted: true });
+  },
+  /report has unexpected keys/,
+);
 for (const field of [
   "slides",
   "notesParts",
@@ -399,6 +595,35 @@ for (const field of [
     new RegExp(`report\\.package\\.${field} must equal`),
   );
 }
+expectFail(
+  "report.package integer must be finite and integral",
+  (fixture) => {
+    replaceReport(fixture, {
+      ...fixture.report,
+      package: { ...fixture.report.package, slides: 3.5 },
+    });
+  },
+  /report\.package\.slides must equal 3/,
+);
+expectFail(
+  "report.package missing own property",
+  (fixture) => {
+    const pkg = { ...fixture.report.package };
+    delete pkg.notesParts;
+    replaceReport(fixture, { ...fixture.report, package: pkg });
+  },
+  /report\.package\.notesParts must be an own property/,
+);
+expectFail(
+  "report.package unexpected property",
+  (fixture) => {
+    replaceReport(fixture, {
+      ...fixture.report,
+      package: { ...fixture.report.package, trusted: true },
+    });
+  },
+  /report\.package has unexpected keys/,
+);
 expectFail(
   "report slide overflow true",
   (fixture) => {
@@ -433,7 +658,42 @@ expectFail(
     reserialize(fixture, { report });
     fixture.approval.smokeReportSha256 = sha256(fixture.reportBytes);
   },
-  /report\.slides\[2\]\.evidenceIds must include every plan evidence ID/,
+  /report\.slides\[2\]\.evidenceIds must exactly equal the plan evidence IDs/,
+);
+expectFail(
+  "report slide extra evidence ID",
+  (fixture) => {
+    const slides = fixture.report.slides.map((entry, index) =>
+      index === 2 ? { ...entry, evidenceIds: [...entry.evidenceIds, "ev-extra"] } : entry,
+    );
+    replaceReport(fixture, { ...fixture.report, slides });
+  },
+  /report\.slides\[2\]\.evidenceIds must exactly equal the plan evidence IDs/,
+);
+expectFail(
+  "report slide duplicate evidence ID",
+  (fixture) => {
+    const slides = fixture.report.slides.map((entry, index) =>
+      index === 2
+        ? { ...entry, evidenceIds: [...entry.evidenceIds, entry.evidenceIds[0]] }
+        : entry,
+    );
+    replaceReport(fixture, { ...fixture.report, slides });
+  },
+  /report\.slides\[2\]\.evidenceIds must not contain duplicates/,
+);
+expectFail(
+  "sparse report slide evidenceIds",
+  (fixture) => {
+    const sparse = new Array(2);
+    sparse[0] = fixture.report.slides[2].evidenceIds[0];
+    check(!isDenseArray(sparse), "sparse report evidenceIds fixture must contain a hole");
+    const slides = fixture.report.slides.map((entry, index) =>
+      index === 2 ? { ...entry, evidenceIds: sparse } : entry,
+    );
+    replaceReport(fixture, { ...fixture.report, slides });
+  },
+  /report\.slides\[2\]\.evidenceIds must contain non-empty strings/,
 );
 expectFail(
   "report slide missing judgment ID",
@@ -445,20 +705,100 @@ expectFail(
     reserialize(fixture, { report });
     fixture.approval.smokeReportSha256 = sha256(fixture.reportBytes);
   },
-  /report\.slides\[2\]\.judgmentIds must include every plan judgment ID/,
+  /report\.slides\[2\]\.judgmentIds must exactly equal the plan judgment IDs/,
 );
 expectFail(
-  "report slide nativeShapeCount wrong",
+  "report slide extra judgment ID",
   (fixture) => {
     const slides = fixture.report.slides.map((entry, index) =>
-      index === 2 ? { ...entry, nativeShapeCount: entry.nativeShapeCount + 1 } : entry,
+      index === 2 ? { ...entry, judgmentIds: [...entry.judgmentIds, "jc-extra"] } : entry,
+    );
+    replaceReport(fixture, { ...fixture.report, slides });
+  },
+  /report\.slides\[2\]\.judgmentIds must exactly equal the plan judgment IDs/,
+);
+expectFail(
+  "report slide duplicate judgment ID",
+  (fixture) => {
+    const slides = fixture.report.slides.map((entry, index) =>
+      index === 2
+        ? { ...entry, judgmentIds: [...entry.judgmentIds, entry.judgmentIds[0]] }
+        : entry,
+    );
+    replaceReport(fixture, { ...fixture.report, slides });
+  },
+  /report\.slides\[2\]\.judgmentIds must not contain duplicates/,
+);
+expectFail(
+  "report slide densityScore wrong",
+  (fixture) => {
+    const slides = fixture.report.slides.map((entry, index) =>
+      index === 2 ? { ...entry, densityScore: entry.densityScore + 1 } : entry,
     );
     const report = { ...fixture.report, slides };
     reserialize(fixture, { report });
     fixture.approval.smokeReportSha256 = sha256(fixture.reportBytes);
   },
-  /report\.slides\[2\]\.nativeShapeCount must equal the plan's density score/,
+  /report\.slides\[2\]\.densityScore must equal the plan's density score/,
 );
+expectFail(
+  "report slide nativeShapeCount zero",
+  (fixture) => {
+    const slides = fixture.report.slides.map((entry, index) =>
+      index === 2 ? { ...entry, nativeShapeCount: 0 } : entry,
+    );
+    replaceReport(fixture, { ...fixture.report, slides });
+  },
+  /report\.slides\[2\]\.nativeShapeCount must be a positive integer/,
+);
+expectFail(
+  "report slide nativeShapeCount fractional",
+  (fixture) => {
+    const slides = fixture.report.slides.map((entry, index) =>
+      index === 2 ? { ...entry, nativeShapeCount: 2.5 } : entry,
+    );
+    replaceReport(fixture, { ...fixture.report, slides });
+  },
+  /report\.slides\[2\]\.nativeShapeCount must be a positive integer/,
+);
+expectFail(
+  "report slide nativeTableCount negative",
+  (fixture) => {
+    const slides = fixture.report.slides.map((entry, index) =>
+      index === 2 ? { ...entry, nativeTableCount: -1 } : entry,
+    );
+    replaceReport(fixture, { ...fixture.report, slides });
+  },
+  /report\.slides\[2\]\.nativeTableCount must be an integer greater than or equal to 0/,
+);
+for (const family of ["table", "evaluation"]) {
+  const plan = buildTiePlan();
+  if (family === "evaluation") {
+    plan.slides[2] = {
+      ...plan.slides[2],
+      family,
+      content: { cases: [1, 2] },
+    };
+  }
+  const fixture = buildFixture(plan);
+  const slides = fixture.report.slides.map((entry, index) =>
+    index === 2 ? { ...entry, nativeTableCount: 0 } : entry,
+  );
+  replaceReport(fixture, { ...fixture.report, slides });
+  const result = validateSmokeApproval({
+    planBytes: fixture.planBytes,
+    reportBytes: fixture.reportBytes,
+    approval: fixture.approval,
+  });
+  check(
+    result.errors.some((error) =>
+      /report\.slides\[2\]\.nativeTableCount must be an integer greater than or equal to 1/.test(
+        error,
+      ),
+    ),
+    `${family} family must require a native table, got: ${result.errors.join("; ")}`,
+  );
+}
 
 // --- Slide ID / family mismatch ---
 expectFail(
@@ -511,6 +851,11 @@ try {
   }
   if (parsed) {
     check(parsed.status === "PASS", "CLI success JSON must report status PASS");
+    check(parsed.approver?.name === "Jane Doe", "CLI success JSON must report approver.name");
+    check(
+      parsed.approver?.role === "Engagement Director",
+      "CLI success JSON must report approver.role",
+    );
     check(
       Array.isArray(parsed.selectedSlideIds) && parsed.selectedSlideIds.length === 3,
       "CLI success JSON must report 3 selectedSlideIds",
@@ -528,6 +873,39 @@ try {
   check(failure.status !== 0, "CLI failure case must exit nonzero");
   check(failure.stdout.trim().length === 0, "CLI failure case must not print success-shaped stdout");
   check(/^1\. /m.test(failure.stderr), "CLI failure case must print numbered errors to stderr");
+
+  function checkCliFailure(label, args) {
+    const result = spawnSync(process.execPath, [cli, ...args], { encoding: "utf8" });
+    check(result.status !== 0, `${label} must exit nonzero`);
+    check(result.stdout.length === 0, `${label} must leave stdout empty`);
+    check(/^1\. /m.test(result.stderr), `${label} must print numbered errors to stderr`);
+  }
+
+  const validArgs = [
+    "--approval",
+    approvalPath,
+    "--plan",
+    planPath,
+    "--smoke-report",
+    reportPath,
+  ];
+  checkCliFailure("CLI missing required flag", validArgs.slice(0, -2));
+  checkCliFailure("CLI unknown flag", [...validArgs, "--wat"]);
+  checkCliFailure("CLI unknown positional argument", [...validArgs, "extra"]);
+  checkCliFailure("CLI duplicate flag", [...validArgs, "--plan", planPath]);
+  checkCliFailure("CLI missing flag value", [
+    "--approval",
+    "--plan",
+    planPath,
+    "--smoke-report",
+    reportPath,
+  ]);
+  checkCliFailure("CLI help with another argument", ["--help", "--plan", planPath]);
+
+  const help = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
+  check(help.status === 0, "CLI --help alone must exit zero");
+  check(/^Usage:/.test(help.stdout), "CLI --help alone must print usage to stdout");
+  check(help.stderr.length === 0, "CLI --help alone must leave stderr empty");
 } finally {
   await rm(temp, { recursive: true, force: true });
 }

@@ -1,7 +1,10 @@
 {
   "schemaVersion": 1,
   "approved": false,
-  "approver": "",
+  "approver": {
+    "name": "",
+    "role": ""
+  },
   "approvedAt": "",
   "planSha256": "",
   "smokeReportSha256": "",
