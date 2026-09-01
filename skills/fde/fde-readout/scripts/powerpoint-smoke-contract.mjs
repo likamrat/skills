@@ -31,11 +31,13 @@ export const BLOCKED_IDENTITY_TERMS = Object.freeze([
   "artificial intelligence",
   "anonymous",
   "automation",
+  "automated",
   "bot",
   "chatgpt",
   "ci",
   "copilot",
   "gpt",
+  "github actions",
   "model",
   "none",
   "pipeline",
@@ -150,8 +152,13 @@ export function containsBlockedIdentityTerm(value) {
   const normalized = normalizeIdentityText(value);
   if (!normalized) return false;
   const padded = ` ${normalized} `;
+  const compact = normalized.replace(/\s+/g, "");
   for (const term of blockedIdentityTermLookup) {
-    if (padded.includes(` ${term} `)) return true;
+    if (["ai", "ci", "n a"].includes(term)) {
+      if (padded.includes(` ${term} `)) return true;
+    } else if (compact.includes(term.replace(/\s+/g, ""))) {
+      return true;
+    }
   }
   return false;
 }
