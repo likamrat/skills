@@ -110,6 +110,7 @@ const TABLE_KEYS = [
   "h",
   "headers",
   "rows",
+  "rowEvidenceIds",
   "columnWidths",
   "rowHeights",
   "headerFillColorRole",
@@ -377,7 +378,17 @@ function linePrimitive(ctx, semanticPath, role, points, options = {}) {
   });
 }
 
-function tablePrimitive(ctx, semanticPath, role, box, headers, rows, columnWidths, rowHeights) {
+function tablePrimitive(
+  ctx,
+  semanticPath,
+  role,
+  box,
+  headers,
+  rows,
+  rowEvidenceIds,
+  columnWidths,
+  rowHeights,
+) {
   return ctx.add({
     kind: "table",
     name: primitiveName(ctx.sourceIndex, ctx.id, semanticPath),
@@ -385,6 +396,7 @@ function tablePrimitive(ctx, semanticPath, role, box, headers, rows, columnWidth
     ...box,
     headers,
     rows,
+    rowEvidenceIds,
     columnWidths,
     rowHeights,
     headerFillColorRole: "system",
@@ -1292,19 +1304,27 @@ function compileTable(ctx, slide) {
   const insightH = 46;
   const gap = 14;
   const rowH = Math.min(32, (availableH - headerH - insightH - gap) / rowCount);
-  const tableH = headerH + rowCount * rowH;
+  const rowHeights = [
+    headerH,
+    ...Array.from({ length: rowCount }, () => round3(rowH)),
+  ];
+  const tableH = rowHeights.reduce((sum, height) => sum + height, 0);
   const totalH = tableH + gap + insightH;
   const blockY = 122 + (availableH - totalH) / 2;
-  const columnW = 864 / columnCount;
+  const tableW = 816;
+  const markerX = 872;
+  const markerW = 40;
+  const columnW = tableW / columnCount;
   tablePrimitive(
     ctx,
     "table",
     "native-table",
-    { x: 48, y: blockY, w: 864, h: tableH },
+    { x: 48, y: blockY, w: tableW, h: tableH },
     [...slide.content.columns],
     slide.content.rows.map((row) => [...row.cells]),
+    slide.content.rows.map((row) => [...row.evidenceIds]),
     Array.from({ length: columnCount }, () => round3(columnW)),
-    [headerH, ...Array.from({ length: rowCount }, () => round3(rowH))],
+    rowHeights,
   );
   slide.content.rows.forEach((row, index) => {
     textPrimitive(
@@ -1312,12 +1332,16 @@ function compileTable(ctx, slide) {
       `row-${String(index + 1).padStart(2, "0")}-evidence-marker`,
       "table-row-evidence-marker",
       {
-        x: 916,
-        y: blockY + headerH + index * rowH,
-        w: 36,
-        h: rowH,
+        x: markerX,
+        y:
+          blockY +
+          rowHeights
+            .slice(0, index + 1)
+            .reduce((sum, height) => sum + height, 0),
+        w: markerW,
+        h: rowHeights[index + 1],
       },
-      row.evidenceIds.join(", "),
+      `E${index + 1}`,
       {
         fontSize: 8,
         bold: true,
@@ -1361,18 +1385,32 @@ function compileEvaluation(ctx, slide) {
   const releaseH = 46;
   const gap = 14;
   const rowH = Math.min(34, (availableH - headerH - releaseH - gap) / rowCount);
-  const tableH = headerH + rowCount * rowH;
+  const rowHeights = [
+    headerH,
+    ...Array.from({ length: rowCount }, () => round3(rowH)),
+  ];
+  const tableH = rowHeights.reduce((sum, height) => sum + height, 0);
   const totalH = tableH + gap + releaseH;
   const blockY = 122 + (availableH - totalH) / 2;
+  const tableW = 816;
+  const markerX = 872;
+  const markerW = 40;
+  const evaluationWidths = [190, 484, 190].map((width) =>
+    round3((width * tableW) / 864),
+  );
+  evaluationWidths[1] = round3(
+    tableW - evaluationWidths[0] - evaluationWidths[2],
+  );
   tablePrimitive(
     ctx,
     "evaluation-table",
     "native-evaluation-table",
-    { x: 48, y: blockY, w: 864, h: tableH },
+    { x: 48, y: blockY, w: tableW, h: tableH },
     ["Cohort", "Expected behavior", "Result"],
     slide.content.cases.map((item) => [item.cohort, item.expected, item.result]),
-    [190, 484, 190],
-    [headerH, ...Array.from({ length: rowCount }, () => round3(rowH))],
+    slide.content.cases.map((item) => [...item.evidenceIds]),
+    evaluationWidths,
+    rowHeights,
   );
   slide.content.cases.forEach((item, index) => {
     textPrimitive(
@@ -1380,12 +1418,16 @@ function compileEvaluation(ctx, slide) {
       `case-${String(index + 1).padStart(2, "0")}-evidence-marker`,
       "evaluation-case-evidence-marker",
       {
-        x: 916,
-        y: blockY + headerH + index * rowH,
-        w: 36,
-        h: rowH,
+        x: markerX,
+        y:
+          blockY +
+          rowHeights
+            .slice(0, index + 1)
+            .reduce((sum, height) => sum + height, 0),
+        w: markerW,
+        h: rowHeights[index + 1],
       },
-      item.evidenceIds.join(", "),
+      `E${index + 1}`,
       {
         fontSize: 8,
         bold: true,
@@ -1984,7 +2026,14 @@ function overlap(a, b) {
   );
 }
 
-function validatePrimitive(primitive, path, stage, names, family) {
+function validatePrimitive(
+  primitive,
+  path,
+  stage,
+  names,
+  family,
+  slideEvidenceIds,
+) {
   if (!isPlainObject(primitive)) fail("E_SPEC_SCHEMA", path, "expected primitive object");
   const keys =
     primitive.kind === "text"
@@ -2073,6 +2122,44 @@ function validatePrimitive(primitive, path, stage, names, family) {
         assertTableText(cell, `${rowPath}[${cellIndex}]`),
       );
     });
+    if (
+      !isDenseArray(primitive.rowEvidenceIds) ||
+      primitive.rowEvidenceIds.length !== primitive.rows.length
+    ) {
+      fail(
+        "E_SPEC_SCHEMA",
+        `${path}.rowEvidenceIds`,
+        "row evidence arrays must match rows",
+      );
+    }
+    const declaredEvidence = new Set(slideEvidenceIds);
+    primitive.rowEvidenceIds.forEach((evidenceIds, rowIndex) => {
+      const evidencePath = `${path}.rowEvidenceIds[${rowIndex}]`;
+      if (
+        !isDenseArray(evidenceIds) ||
+        evidenceIds.length === 0 ||
+        !evidenceIds.every(
+          (evidenceId) =>
+            typeof evidenceId === "string" && evidenceId.length > 0,
+        ) ||
+        new Set(evidenceIds).size !== evidenceIds.length
+      ) {
+        fail(
+          "E_SPEC_SCHEMA",
+          evidencePath,
+          "expected a nonempty duplicate-free dense string array",
+        );
+      }
+      evidenceIds.forEach((evidenceId, evidenceIndex) => {
+        if (!declaredEvidence.has(evidenceId)) {
+          fail(
+            "E_EVIDENCE_NOT_DECLARED",
+            `${evidencePath}[${evidenceIndex}]`,
+            `${evidenceId} is absent from slide.evidenceIds`,
+          );
+        }
+      });
+    });
     if (family === "table") {
       if (
         primitive.role !== "native-table" ||
@@ -2104,6 +2191,15 @@ function validatePrimitive(primitive, path, stage, names, family) {
           "evaluation native table requires its exact headers and 3-8 rows",
         );
       }
+      primitive.rows.forEach((row, rowIndex) => {
+        if (!EVALUATION_RESULTS.has(row[2])) {
+          fail(
+            "E_SPEC_SCHEMA",
+            `${path}.rows[${rowIndex}][2]`,
+            "invalid evaluation result",
+          );
+        }
+      });
     } else {
       fail(
         "E_SPEC_SCHEMA",
@@ -2300,6 +2396,7 @@ function validateDrawingSpecSnapshot(spec) {
         spec.stage,
         names,
         slide.family,
+        slide.evidenceIds,
       ),
     );
     slide.primitives.forEach((primitive, primitiveIndex) => {

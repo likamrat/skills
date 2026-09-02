@@ -125,7 +125,7 @@ function tablePrimitiveFor(spec, family) {
 }
 
 function checkTableGeometry(table, label) {
-  check(table.x === 48 && table.w === 864, `${label}: table must span 48..912`);
+  check(table.x === 48 && table.w === 816, `${label}: table must span 48..864`);
   check(table.y + table.h <= 478, `${label}: table must remain above footer`);
   check(
     Math.abs(table.columnWidths.reduce((sum, value) => sum + value, 0) - table.w) <=
@@ -137,6 +137,29 @@ function checkTableGeometry(table, label) {
       0.01,
     `${label}: row heights must sum to height`,
   );
+}
+
+function checkEvidenceMarkers(slide, table, role, rowCount, label) {
+  const markers = slide.primitives.filter((primitive) => primitive.role === role);
+  check(markers.length === rowCount, `${label}: marker count must match row count`);
+  check(
+    JSON.stringify(markers.map((marker) => marker.text)) ===
+      JSON.stringify(Array.from({ length: rowCount }, (_, index) => `E${index + 1}`)),
+    `${label}: markers must use compact deterministic labels`,
+  );
+  markers.forEach((marker, index) => {
+    const rowY =
+      table.y +
+      table.rowHeights.slice(0, index + 1).reduce((sum, height) => sum + height, 0);
+    check(marker.x >= table.x + table.w, `${label}: marker ${index + 1} must not overlap table`);
+    check(marker.x + marker.w <= 912, `${label}: marker ${index + 1} must remain inside safe content`);
+    check(
+      Math.abs(marker.y - rowY) <= 0.001 &&
+        Math.abs(marker.h - table.rowHeights[index + 1]) <= 0.001,
+      `${label}: marker ${index + 1} must align vertically with its row`,
+    );
+    check(marker.y + marker.h <= 478, `${label}: marker ${index + 1} must not enter footer`);
+  });
 }
 
 try {
@@ -181,8 +204,13 @@ try {
         `${label}: cells must remain exact`,
       );
       check(
+        JSON.stringify(table.rowEvidenceIds) ===
+          JSON.stringify(tableSource.content.rows.map((row) => row.evidenceIds)),
+        `${label}: row evidence IDs must remain exact`,
+      );
+      check(
         table.columnWidths.every(
-          (width) => Math.abs(width - 864 / columnCount) < 0.001,
+          (width) => Math.abs(width - 816 / columnCount) < 0.001,
         ),
         `${label}: columns must be equal width`,
       );
@@ -191,25 +219,12 @@ try {
           table.rowHeights[0] === 28,
         `${label}: row heights must include the 28-point header`,
       );
-      check(
-        JSON.stringify(
-          slide.primitives
-            .filter(
-              (primitive) =>
-                primitive.role === "table-row-evidence-marker",
-            )
-            .map((primitive) => primitive.text),
-        ) ===
-          JSON.stringify(
-            tableSource.content.rows.map((row) => row.evidenceIds.join(", ")),
-          ),
-        `${label}: each row must receive its exact visible evidence marker`,
-      );
-      check(
-        slide.primitives.filter(
-          (primitive) => primitive.role === "table-row-evidence-marker",
-        ).length === rowCount,
-        `${label}: each row must receive a visible evidence marker`,
+      checkEvidenceMarkers(
+        slide,
+        table,
+        "table-row-evidence-marker",
+        rowCount,
+        label,
       );
       check(
         slide.primitives.some(
@@ -256,8 +271,9 @@ try {
       `${label}: headers must match the evaluation contract`,
     );
     check(
-      JSON.stringify(table.columnWidths) === JSON.stringify([190, 484, 190]),
-      `${label}: column widths must match the evaluation contract`,
+      JSON.stringify(table.columnWidths) ===
+        JSON.stringify([179.444, 457.112, 179.444]),
+      `${label}: column widths must match the proportional evaluation contract`,
     );
     check(
       JSON.stringify(table.rows) ===
@@ -271,20 +287,18 @@ try {
       `${label}: case strings, including result casing, must remain exact`,
     );
     check(
-      JSON.stringify(
-        slide.primitives
-          .filter(
-            (primitive) =>
-              primitive.role === "evaluation-case-evidence-marker",
-          )
-          .map((primitive) => primitive.text),
-      ) ===
+      JSON.stringify(table.rowEvidenceIds) ===
         JSON.stringify(
-          evaluationSource.content.cases.map((item) =>
-            item.evidenceIds.join(", "),
-          ),
+          evaluationSource.content.cases.map((item) => item.evidenceIds),
         ),
-      `${label}: each case must receive its exact visible evidence marker`,
+      `${label}: case evidence IDs must remain exact`,
+    );
+    checkEvidenceMarkers(
+      slide,
+      table,
+      "evaluation-case-evidence-marker",
+      caseCount,
+      label,
     );
     check(
       slide.primitives.some(
@@ -310,15 +324,24 @@ try {
 
   const full = compile(representative);
   const smoke = compile(representative, "smoke");
+  const inverseSmoke = compile(
+    buildPlan(sample, tableSlide(2, 1), evaluationSlide(sample, 8)),
+    "smoke",
+  );
   check(
     full.selectedSlideFamilies.includes("table") &&
       full.selectedSlideFamilies.includes("evaluation"),
     "full compilation must include table and evaluation",
   );
   check(
-    smoke.selectedSlideFamilies.includes("table") ||
-      smoke.selectedSlideFamilies.includes("evaluation"),
-    "smoke compilation must select a dense native-table family",
+    smoke.selectedSlideFamilies[2] === "table" &&
+      smoke.selectedSlideIds[2] === "native-table-6-10",
+    "smoke compilation must select the 16-density ordinary table",
+  );
+  check(
+    inverseSmoke.selectedSlideFamilies[2] === "evaluation" &&
+      inverseSmoke.selectedSlideIds[2] === "native-evaluation-8",
+    "smoke compilation must select the 8-density evaluation over a 3-density table",
   );
   const { slide: tableSlideSpec, table: baseTable } = tablePrimitiveFor(full, "table");
   const { slide: evaluationSlideSpec } = tablePrimitiveFor(full, "evaluation");
@@ -382,11 +405,43 @@ try {
   assertSpecCode("evaluation case count", "E_SPEC_SCHEMA", full, (candidate) => {
     const table = tablePrimitiveFor(candidate, "evaluation").table;
     table.rows = table.rows.slice(0, 2);
+    table.rowEvidenceIds = table.rowEvidenceIds.slice(0, 2);
     table.rowHeights = [table.rowHeights[0], table.h / 2, table.h / 2];
   });
   assertSpecCode("evaluation headers", "E_SPEC_SCHEMA", full, (candidate) => {
     tablePrimitiveFor(candidate, "evaluation").table.headers[1] = "Expected control";
   });
+  assertSpecCode("evaluation uppercase result", "E_SPEC_SCHEMA", full, (candidate) => {
+    tablePrimitiveFor(candidate, "evaluation").table.rows[0][2] = "PASS";
+  });
+  assertSpecCode("evaluation invalid result", "E_SPEC_SCHEMA", full, (candidate) => {
+    tablePrimitiveFor(candidate, "evaluation").table.rows[0][2] = "unknown";
+  });
+  assertSpecCode("row evidence count", "E_SPEC_SCHEMA", full, (candidate) => {
+    tablePrimitiveFor(candidate, "table").table.rowEvidenceIds.pop();
+  });
+  assertSpecCode("sparse row evidence", "E_SPEC_SCHEMA", full, (candidate) => {
+    delete tablePrimitiveFor(candidate, "table").table.rowEvidenceIds[0][0];
+  });
+  assertSpecCode("empty row evidence", "E_SPEC_SCHEMA", full, (candidate) => {
+    tablePrimitiveFor(candidate, "table").table.rowEvidenceIds[0] = [];
+  });
+  assertSpecCode("duplicate row evidence", "E_SPEC_SCHEMA", full, (candidate) => {
+    tablePrimitiveFor(candidate, "table").table.rowEvidenceIds[0] = [
+      "baseline-001",
+      "baseline-001",
+    ];
+  });
+  assertSpecCode(
+    "undeclared primitive row evidence",
+    "E_EVIDENCE_NOT_DECLARED",
+    full,
+    (candidate) => {
+      tablePrimitiveFor(candidate, "table").table.rowEvidenceIds[0] = [
+        "authority-001",
+      ];
+    },
+  );
   assertSpecCode("row height mismatch", "E_SPEC_SCHEMA", full, (candidate) => {
     tablePrimitiveFor(candidate, "table").table.rowHeights.pop();
   });
