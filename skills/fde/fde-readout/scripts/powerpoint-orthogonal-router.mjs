@@ -588,9 +588,13 @@ function compareStrings(a, b) {
     return true;
   }
 
-  function segmentClear(a, b, blockers, ignoredId = null) {
+  function segmentClear(a, b, blockers, ignoredIds = null) {
+    const ignored =
+      ignoredIds instanceof Set
+        ? ignoredIds
+        : new Set(ignoredIds === null ? [] : [ignoredIds]);
     return blockers.every(
-      (blocker) => blocker.id === ignoredId || !segmentCrossesOpenRect(a, b, blocker),
+      (blocker) => ignored.has(blocker.id) || !segmentCrossesOpenRect(a, b, blocker),
     );
   }
 
@@ -916,8 +920,9 @@ function compareStrings(a, b) {
     ) {
       return null;
     }
-    if (!segmentClear(pair.sourceAnchor, pair.egress, grid.blockers, sourceId)) return null;
-    if (!segmentClear(pair.ingress, pair.targetAnchor, grid.blockers, targetId)) return null;
+    const endpointIds = new Set([sourceId, targetId]);
+    if (!segmentClear(pair.sourceAnchor, pair.egress, grid.blockers, endpointIds)) return null;
+    if (!segmentClear(pair.ingress, pair.targetAnchor, grid.blockers, endpointIds)) return null;
     const startIndex = grid.nodeByKey.get(pointKey(pair.egress));
     const goalIndex = grid.nodeByKey.get(pointKey(pair.ingress));
     if (startIndex === undefined || goalIndex === undefined) return null;
@@ -1142,8 +1147,10 @@ function validateGeneratedGridRoute(route, grid, sourceId, targetId) {
   );
   for (let index = 1; index < unitPoints.length; index += 1) {
     const ignored = new Set();
-    if (index === 1) ignored.add(sourceId);
-    if (index === unitPoints.length - 1) ignored.add(targetId);
+    if (index === 1 || index === unitPoints.length - 1) {
+      ignored.add(sourceId);
+      ignored.add(targetId);
+    }
     for (const blocker of grid.blockers) {
       if (
         !ignored.has(blocker.id) &&
@@ -1486,8 +1493,8 @@ export function validateOrthogonalRoute(route, context = {}) {
     for (let index = 1; index < unitPoints.length; index += 1) {
       for (const blocker of blockers) {
         if (
-          (index === 1 && blocker.id === sourceRect.id) ||
-          (index === unitPoints.length - 1 && blocker.id === targetRect.id)
+          (index === 1 || index === unitPoints.length - 1) &&
+          (blocker.id === sourceRect.id || blocker.id === targetRect.id)
         ) {
           continue;
         }

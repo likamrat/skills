@@ -189,6 +189,31 @@ function assertDeterministic(label, routeInput) {
 }
 
 {
+  const source = rect("source", 0, 0, 20, 20);
+  const target = rect("target", 0, 0, 20, 20);
+  const farObstacle = rect("far", 100, 100, 10, 10);
+  const withoutObstacle = routeOrthogonalEdge(input(source, target, []));
+  const withObstacle = routeOrthogonalEdge(input(source, target, [farObstacle]));
+  check(
+    withoutObstacle.sourceId === withObstacle.sourceId &&
+      withoutObstacle.targetId === withObstacle.targetId &&
+      withoutObstacle.fromSide === withObstacle.fromSide &&
+      withoutObstacle.toSide === withObstacle.toSide,
+    "coincident distinct-ID endpoints remain routable when a far obstacle enables the grid layer",
+  );
+  check(
+    stableRouteJson(withObstacle) ===
+      stableRouteJson(routeOrthogonalEdge(input(source, target, [farObstacle]))),
+    "coincident endpoint-halo exemptions remain deterministic",
+  );
+  validateOrthogonalRoute(withObstacle, {
+    sourceRect: source,
+    targetRect: target,
+    obstacles: [farObstacle],
+  });
+}
+
+{
   const source = rect("source", 0, 40, 20, 20);
   const target = rect("target", 100, 40, 20, 20);
   const expected = stableRouteJson(routeOrthogonalEdge(input(source, target, [])));
