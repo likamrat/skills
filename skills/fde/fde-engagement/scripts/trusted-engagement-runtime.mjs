@@ -22,8 +22,7 @@ async function checkedPaths(logPath, checkpointPath) {
   const display = names;
   const identities = await Promise.all(names.map(async (path) => {
     try {
-      const value = await stat(path);
-      return `${value.dev}:${value.ino}`;
+      return await stat(path, { bigint: true });
     } catch (error) {
       if (error.code === "ENOENT") return null;
       throw error;
@@ -31,13 +30,14 @@ async function checkedPaths(logPath, checkpointPath) {
   }));
   requireValue(display[0] !== display[1] && display[1] !== display[2] &&
     (identities[1] === null ||
-      (identities[0] !== identities[1] && identities[1] !== identities[2])),
+      ((identities[0] === null || !sameIdentity(identities[0], identities[1])) &&
+        (identities[2] === null || !sameIdentity(identities[1], identities[2])))),
     "log and checkpoint paths must differ",
   );
   return { logPath: names[0], checkpointPath: names[1] };
 }
 function requireSingleLink(value, label) {
-  requireValue(value.nlink === 1, `${label} must have exactly one filesystem link`);
+  requireValue(value.nlink === 1n, `${label} must have exactly one filesystem link`);
 }
 
 function sameIdentity(left, right) {
@@ -47,11 +47,11 @@ function sameIdentity(left, right) {
 async function readStableLog(logPath) {
   const handle = await open(logPath, "r");
   try {
-    const before = await handle.stat();
+    const before = await handle.stat({ bigint: true });
     requireSingleLink(before, "log");
     const bytes = await handle.readFile();
-    const after = await handle.stat();
-    const named = await stat(logPath);
+    const after = await handle.stat({ bigint: true });
+    const named = await stat(logPath, { bigint: true });
     requireValue(
       sameIdentity(before, after) && sameIdentity(before, named),
       "log identity changed during verification",
@@ -139,7 +139,7 @@ async function reserveCheckpoint(checkpointPath, logIdentity) {
     throw error;
   }
   try {
-    requireValue(!sameIdentity(logIdentity, await handle.stat()),
+    requireValue(!sameIdentity(logIdentity, await handle.stat({ bigint: true })),
       "checkpoint path aliases the initialized log");
   } finally { await handle.close(); }
 }
@@ -170,7 +170,7 @@ async function initializeInput({ logPath, checkpointPath }, syncParent) {
     let identity;
     try {
       await handle.sync();
-      identity = await handle.stat();
+      identity = await handle.stat({ bigint: true });
       requireSingleLink(identity, "log");
     } finally {
       await handle.close();
@@ -201,7 +201,7 @@ async function appendTransformed(options, keyProvider, transform) {
     const entry = await signEntry(record, current.head, keyId, keyProvider);
     const handle = await open(logPath, "a", 0o600);
     try {
-      const identity = await handle.stat();
+      const identity = await handle.stat({ bigint: true });
       requireValue(
         sameIdentity(identity, current.identity),
         "log identity changed before append",
@@ -209,7 +209,7 @@ async function appendTransformed(options, keyProvider, transform) {
       requireSingleLink(identity, "log");
       await handle.writeFile(`${serializeJson(entry)}\n`);
       await handle.sync();
-      requireSingleLink(await handle.stat(), "log");
+      requireSingleLink(await handle.stat({ bigint: true }), "log");
     } finally {
       await handle.close();
     }

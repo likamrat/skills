@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { access, link, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { access, link, mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeKeyHex, EMPTY_HEAD, mintSubmission, replayRecords } from "./trusted-engagement-auth.mjs";
@@ -106,6 +106,23 @@ try {
     await access(logPath); await assert.rejects(() => access(ordered.checkpointPath));
     parentSyncObserved = true; });
   assert.ok(parentSyncObserved, "log parent sync must precede checkpoint creation");
+  const concurrentFiles = Array.from({ length: 64 }, (_, index) => paths(`concurrent-${index}`));
+  await Promise.all(concurrentFiles.map((files) => initializeLog(files)));
+  await Promise.all(concurrentFiles.map(async (files) => {
+    const [logIdentity, checkpointIdentity] = await Promise.all([
+      stat(files.logPath, { bigint: true }),
+      stat(files.checkpointPath, { bigint: true }),
+    ]);
+    assert.equal(typeof logIdentity.dev, "bigint");
+    assert.equal(typeof logIdentity.ino, "bigint");
+    assert.ok(logIdentity.dev !== checkpointIdentity.dev ||
+      logIdentity.ino !== checkpointIdentity.ino,
+    "independent log and checkpoint files must have distinct identities");
+    const replayed = await verifyAndReplay({
+      ...files, trustedHead: EMPTY_HEAD, keyProvider: provider,
+    });
+    assert.deepEqual(replayed.head, EMPTY_HEAD);
+  }));
   const snapshotted = await initialized("snapshotted-inputs");
   let releaseSubmission;
   const submissionWait = new Promise((resolve) => { releaseSubmission = resolve; });
