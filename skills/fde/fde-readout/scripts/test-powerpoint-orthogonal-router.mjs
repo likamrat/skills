@@ -848,12 +848,12 @@ assertThrows("routeOrthogonalEdge missing key", "E_ROUTER_INPUT", () =>
 assertThrows("routeOrthogonalEdge extra key", "E_ROUTER_INPUT", () =>
   routeOrthogonalEdge(routeInput(rect("a", 0, 0, 10, 10), rect("b", 20, 0, 10, 10), { extra: true })),
 );
-assertThrows("routeOrthogonalEdge self edge", "E_ROUTER_UNSUPPORTED", () => {
+assertThrows("routeOrthogonalEdge mismatched self rect", "E_ROUTER_INPUT", () => {
   const a = rect("same", 0, 0, 10, 10);
   const b = rect("same", 20, 0, 10, 10);
   routeOrthogonalEdge(routeInput(a, b));
 });
-assertThrows("routeOrthogonalEdge nonempty existingRoutes", "E_ROUTER_UNSUPPORTED", () =>
+assertThrows("routeOrthogonalEdge malformed existing route", "E_ROUTER_INPUT", () =>
   routeOrthogonalEdge(
     routeInput(rect("a", 0, 0, 10, 10), rect("b", 20, 0, 10, 10), {
       existingRoutes: [{ sourceId: "x", targetId: "y" }],

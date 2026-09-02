@@ -10,6 +10,7 @@ const ROUTE_KEYS = [
   "segments",
   "cost",
 ];
+const ROUTE_OPTIONAL_KEYS = ["routeId"];
 const POINT_KEYS = ["x", "y"];
 const SEGMENT_KEYS = ["x1", "y1", "x2", "y2", "index"];
 const NORMALS = {
@@ -20,14 +21,19 @@ const NORMALS = {
 };
 const BEND_COST = 18;
 const PREFERENCE_COST = 20;
+const CROSSING_COST = 12;
+const OVERLAP_COST_PER_POINT = 60n;
 const THOUSAND = 1000;
 const OBSTACLE_CLEARANCE_UNITS = 6 * THOUSAND;
 const GRID_LINE_CLEARANCE_UNITS = 2 * THOUSAND;
 const MAP_CLEARANCE_UNITS = 24 * THOUSAND;
 const MAX_GRID_NODES = 12000;
 const MAX_SEARCH_STATES = 50000;
+const MAX_EXISTING_ROUTE_SEGMENTS = 4096;
 const BEND_COST_UNITS = BigInt(BEND_COST * THOUSAND);
 const PREFERENCE_COST_UNITS = BigInt(PREFERENCE_COST * THOUSAND);
+const CROSSING_COST_UNITS = BigInt(CROSSING_COST * THOUSAND);
+const SELF_CLEARANCE_UNITS = 10 * THOUSAND;
 
 export class RouterError extends Error {
   constructor(code, path, message) {
@@ -127,16 +133,16 @@ function descriptorFor(value, key, path) {
  * caller cannot observe further mutation of, or accessor/proxy tricks on,
  * the original input.
  */
-function snapshotGeometryAt(value, path, active) {
+function snapshotGeometryAt(value, path, active, budget) {
   try {
-    return snapshotGeometryValue(value, path, active);
+    return snapshotGeometryValue(value, path, active, budget);
   } catch (error) {
     if (error instanceof RouterError) throw error;
     fail("E_ROUTER_INPUT", path, "property inspection failed");
   }
 }
 
-function snapshotGeometryValue(value, path, active) {
+function snapshotGeometryValue(value, path, active, budget) {
   if (value === null) fail("E_ROUTER_INPUT", path, "null is not allowed");
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
@@ -194,10 +200,54 @@ function snapshotGeometryValue(value, path, active) {
       ) {
         fail("E_ROUTER_INPUT", path, "array must contain only dense owned indexes");
       }
+      if (
+        (path === "$.existingRoutes" || path === "$context.existingRoutes") &&
+        length > MAX_EXISTING_ROUTE_SEGMENTS
+      ) {
+        fail(
+          "E_WORKFLOW_ROUTE",
+          path,
+          `existing routes exceed the ${MAX_EXISTING_ROUTE_SEGMENTS}-route interaction limit`,
+        );
+      }
+      const routeArrayMatch = path.match(
+        /^(\$|\$context)\.existingRoutes\[(\d+)\]\.(points|segments)$/,
+      );
+      if (routeArrayMatch) {
+        const routeKey = `${routeArrayMatch[1]}:${routeArrayMatch[2]}`;
+        const previous = budget.routeSegments.get(routeKey) ?? {
+          points: 0,
+          segments: 0,
+        };
+        const next = {
+          ...previous,
+          [routeArrayMatch[3]]:
+            routeArrayMatch[3] === "points" ? Math.max(0, length - 1) : length,
+        };
+        const previousCount = Math.max(previous.points, previous.segments);
+        const nextCount = Math.max(next.points, next.segments);
+        budget.submittedExistingSegments += nextCount - previousCount;
+        budget.routeSegments.set(routeKey, next);
+        if (
+          nextCount > MAX_EXISTING_ROUTE_SEGMENTS ||
+          budget.submittedExistingSegments > MAX_EXISTING_ROUTE_SEGMENTS
+        ) {
+          fail(
+            "E_WORKFLOW_ROUTE",
+            path,
+            `existing routes exceed the ${MAX_EXISTING_ROUTE_SEGMENTS}-segment interaction limit`,
+          );
+        }
+      }
       const snapshot = new Array(length);
       for (let index = 0; index < length; index += 1) {
         const descriptor = descriptorFor(value, String(index), `${path}[${index}]`);
-        snapshot[index] = snapshotGeometryAt(descriptor.value, `${path}[${index}]`, active);
+        snapshot[index] = snapshotGeometryAt(
+          descriptor.value,
+          `${path}[${index}]`,
+          active,
+          budget,
+        );
       }
       return snapshot;
     }
@@ -210,7 +260,7 @@ function snapshotGeometryValue(value, path, active) {
     for (const key of keys) {
       const descriptor = descriptorFor(value, key, `${path}.${key}`);
       Object.defineProperty(snapshot, key, {
-        value: snapshotGeometryAt(descriptor.value, `${path}.${key}`, active),
+        value: snapshotGeometryAt(descriptor.value, `${path}.${key}`, active, budget),
         enumerable: true,
         writable: true,
         configurable: true,
@@ -223,7 +273,10 @@ function snapshotGeometryValue(value, path, active) {
 }
 
 export function snapshotGeometry(value, path = "$") {
-  return snapshotGeometryAt(value, path, new WeakSet());
+  return snapshotGeometryAt(value, path, new WeakSet(), {
+    submittedExistingSegments: 0,
+    routeSegments: new Map(),
+  });
 }
 
 function exactKeys(value, expected, path) {
@@ -489,6 +542,104 @@ function manhattanLengthUnits(points) {
   return total;
 }
 
+function segmentOrientation(a, b) {
+  if (a.y === b.y && a.x !== b.x) return "horizontal";
+  if (a.x === b.x && a.y !== b.y) return "vertical";
+  fail("E_WORKFLOW_ROUTE", "$.points", "route segments must be nonzero and orthogonal");
+}
+
+function strictlyBetween(value, first, second) {
+  return value > Math.min(first, second) && value < Math.max(first, second);
+}
+
+function segmentInteraction(firstA, firstB, secondA, secondB) {
+  const firstOrientation = segmentOrientation(firstA, firstB);
+  const secondOrientation = segmentOrientation(secondA, secondB);
+  if (firstOrientation !== secondOrientation) {
+    const horizontalA = firstOrientation === "horizontal" ? firstA : secondA;
+    const horizontalB = firstOrientation === "horizontal" ? firstB : secondB;
+    const verticalA = firstOrientation === "vertical" ? firstA : secondA;
+    const verticalB = firstOrientation === "vertical" ? firstB : secondB;
+    return {
+      crossing:
+          strictlyBetween(verticalA.x, horizontalA.x, horizontalB.x) &&
+          strictlyBetween(horizontalA.y, verticalA.y, verticalB.y),
+      overlapUnits: 0,
+    };
+  }
+
+  if (
+    (firstOrientation === "horizontal" && firstA.y !== secondA.y) ||
+    (firstOrientation === "vertical" && firstA.x !== secondA.x)
+  ) {
+    return { crossing: false, overlapUnits: 0 };
+  }
+  const firstStart = firstOrientation === "horizontal" ? firstA.x : firstA.y;
+  const firstEnd = firstOrientation === "horizontal" ? firstB.x : firstB.y;
+  const secondStart = secondOrientation === "horizontal" ? secondA.x : secondA.y;
+  const secondEnd = secondOrientation === "horizontal" ? secondB.x : secondB.y;
+  const overlapUnits =
+    Math.min(Math.max(firstStart, firstEnd), Math.max(secondStart, secondEnd)) -
+    Math.max(Math.min(firstStart, firstEnd), Math.min(secondStart, secondEnd));
+  return { crossing: false, overlapUnits: Math.max(0, overlapUnits) };
+}
+
+function interactionStats(points, existingSegments) {
+  let crossingCount = 0;
+  let overlapIntervals = 0;
+  let overlapUnits = 0n;
+  for (let index = 1; index < points.length; index += 1) {
+    const firstA = points[index - 1];
+    const firstB = points[index];
+    for (const segment of existingSegments) {
+      const interaction = segmentInteraction(firstA, firstB, segment.a, segment.b);
+      if (interaction.crossing) crossingCount += 1;
+      if (interaction.overlapUnits > 0) {
+          overlapIntervals += 1;
+          overlapUnits += BigInt(interaction.overlapUnits);
+      }
+    }
+  }
+  return { crossingCount, overlapIntervals, overlapUnits };
+}
+
+function routeCostUnits(points, preferenceRank, existingSegments) {
+  const interactions = interactionStats(points, existingSegments);
+  return (
+    manhattanLengthUnits(points) +
+    BigInt(points.length - 2) * BEND_COST_UNITS +
+    BigInt(preferenceRank) * PREFERENCE_COST_UNITS +
+    BigInt(interactions.crossingCount) * CROSSING_COST_UNITS +
+    interactions.overlapUnits * OVERLAP_COST_PER_POINT
+  );
+}
+
+function segmentInteractionCostUnits(a, b, existingSegments, previousDirection = null) {
+  const direction = directionName(a, b);
+  const orientation = segmentOrientation(a, b);
+  let crossings = 0;
+  let overlapUnits = 0n;
+  for (const segment of existingSegments) {
+    const interaction = segmentInteraction(a, b, segment.a, segment.b);
+    crossings += interaction.crossing ? 1 : 0;
+    overlapUnits += BigInt(interaction.overlapUnits);
+    if (
+      previousDirection === direction &&
+      orientation !== segmentOrientation(segment.a, segment.b)
+    ) {
+      const continuesThroughCrossing =
+        orientation === "horizontal"
+          ? segment.a.x === a.x && strictlyBetween(a.y, segment.a.y, segment.b.y)
+          : segment.a.y === a.y && strictlyBetween(a.x, segment.a.x, segment.b.x);
+      crossings += continuesThroughCrossing ? 1 : 0;
+    }
+  }
+  return (
+    BigInt(crossings) * CROSSING_COST_UNITS +
+    overlapUnits * OVERLAP_COST_PER_POINT
+  );
+}
+
 function comparePointSequences(a, b) {
   const length = Math.max(a.length, b.length);
   for (let index = 0; index < length; index += 1) {
@@ -696,6 +847,42 @@ function compareStrings(a, b) {
     adjacency[secondIndex].push({ nodeIndex: firstIndex, distance });
   }
 
+  function endpointEscape(anchor, normal, endpointBlockers, path) {
+    let distance = OBSTACLE_CLEARANCE_UNITS;
+    for (const blocker of endpointBlockers) {
+      if (
+        normal.x !== 0 &&
+        anchor.y > blocker.top &&
+        anchor.y < blocker.bottom
+      ) {
+        const nearDistance =
+          normal.x > 0 ? blocker.left - anchor.x : anchor.x - blocker.right;
+        const boundaryDistance =
+          normal.x > 0 ? blocker.right - anchor.x : anchor.x - blocker.left;
+        if (nearDistance <= distance && boundaryDistance > distance) {
+          distance = boundaryDistance;
+        }
+      }
+      if (
+        normal.y !== 0 &&
+        anchor.x > blocker.left &&
+        anchor.x < blocker.right
+      ) {
+        const nearDistance =
+          normal.y > 0 ? blocker.top - anchor.y : anchor.y - blocker.bottom;
+        const boundaryDistance =
+          normal.y > 0 ? blocker.bottom - anchor.y : anchor.y - blocker.top;
+        if (nearDistance <= distance && boundaryDistance > distance) {
+          distance = boundaryDistance;
+        }
+      }
+    }
+    return {
+      x: safeUnitAdd(anchor.x, normal.x * distance, `${path}.x`),
+      y: safeUnitAdd(anchor.y, normal.y * distance, `${path}.y`),
+    };
+  }
+
   function buildGrid(source, target, obstacles, stage) {
     const sourceBounds = rectToUnitBounds(source, "$.sourceRect");
     const targetBounds = rectToUnitBounds(target, "$.targetRect");
@@ -706,6 +893,7 @@ function compareStrings(a, b) {
     const blockers = actualBounds.map((bounds, index) =>
       inflateBounds(bounds, index === 0 ? "$.sourceRect" : index === 1 ? "$.targetRect" : `$.obstacles[${index - 2}]`),
     );
+    const endpointBlockers = blockers.slice(0, 2);
 
     let mapBounds;
     if (stage) {
@@ -736,30 +924,18 @@ function compareStrings(a, b) {
       const targetAnchor = pointToUnits(pair.targetAnchor, "$.targetAnchor");
       const sourceNormal = NORMALS[pair.sourceSide];
       const targetNormal = NORMALS[pair.targetSide];
-      const egress = {
-        x: safeUnitAdd(
-          sourceAnchor.x,
-          sourceNormal.x * OBSTACLE_CLEARANCE_UNITS,
-          "$.egress.x",
-        ),
-        y: safeUnitAdd(
-          sourceAnchor.y,
-          sourceNormal.y * OBSTACLE_CLEARANCE_UNITS,
-          "$.egress.y",
-        ),
-      };
-      const ingress = {
-        x: safeUnitAdd(
-          targetAnchor.x,
-          targetNormal.x * OBSTACLE_CLEARANCE_UNITS,
-          "$.ingress.x",
-        ),
-        y: safeUnitAdd(
-          targetAnchor.y,
-          targetNormal.y * OBSTACLE_CLEARANCE_UNITS,
-          "$.ingress.y",
-        ),
-      };
+      const egress = endpointEscape(
+        sourceAnchor,
+        sourceNormal,
+        endpointBlockers,
+        "$.egress",
+      );
+      const ingress = endpointEscape(
+        targetAnchor,
+        targetNormal,
+        endpointBlockers,
+        "$.ingress",
+      );
       return { ...pair, sourceAnchor, targetAnchor, egress, ingress };
     });
 
@@ -881,7 +1057,7 @@ function compareStrings(a, b) {
     };
   }
 
-  function directVisibilityCandidate(grid, pair) {
+  function directVisibilityCandidate(grid, pair, existingSegments) {
     const direction = segmentDirection(pair.sourceAnchor, pair.targetAnchor);
     if (
       pointsEqual(pair.sourceAnchor, pair.targetAnchor) ||
@@ -896,9 +1072,11 @@ function compareStrings(a, b) {
     return {
       pair,
       points: [pair.sourceAnchor, pair.targetAnchor],
-      costUnits:
-        manhattanLengthUnits([pair.sourceAnchor, pair.targetAnchor]) +
-        BigInt(pair.preferenceRank) * PREFERENCE_COST_UNITS,
+      costUnits: routeCostUnits(
+        [pair.sourceAnchor, pair.targetAnchor],
+        pair.preferenceRank,
+        existingSegments,
+      ),
     };
   }
 
@@ -911,7 +1089,7 @@ function compareStrings(a, b) {
     );
   }
 
-  function searchGridPair(grid, pair, sourceId, targetId) {
+  function searchGridPair(grid, pair, sourceId, targetId, existingSegments) {
     if (
       !pointInsideBounds(pair.sourceAnchor, grid.mapBounds) ||
       !pointInsideBounds(pair.targetAnchor, grid.mapBounds) ||
@@ -932,14 +1110,13 @@ function compareStrings(a, b) {
     const initial = {
       nodeIndex: startIndex,
       direction: startDirection,
-      cost:
-        BigInt(OBSTACLE_CLEARANCE_UNITS) +
-        BigInt(pair.preferenceRank) * PREFERENCE_COST_UNITS,
       path: collapseCollinearPoints([pair.sourceAnchor, grid.nodes[startIndex]]),
     };
+    initial.cost = routeCostUnits(initial.path, pair.preferenceRank, existingSegments);
     const heap = new MinHeap(compareSearchEntries);
     const bestStates = new Map();
-    const startKey = `${startIndex}|${startDirection}`;
+    const stateKey = (state) => `${state.nodeIndex}|${state.direction}`;
+    const startKey = stateKey(initial);
     bestStates.set(startKey, initial);
     heap.push(initial);
     let bestGoal = null;
@@ -947,8 +1124,8 @@ function compareStrings(a, b) {
 
     while (heap.length > 0) {
       const current = heap.pop();
-      const stateKey = `${current.nodeIndex}|${current.direction}`;
-      const recorded = bestStates.get(stateKey);
+      const currentKey = stateKey(current);
+      const recorded = bestStates.get(currentKey);
       if (
         !recorded ||
         current.cost !== recorded.cost ||
@@ -963,10 +1140,26 @@ function compareStrings(a, b) {
       }
 
       if (current.nodeIndex === goalIndex) {
-        const terminalBend = current.direction === finalDirection ? 0n : BEND_COST_UNITS;
-        const cost = current.cost + BigInt(OBSTACLE_CLEARANCE_UNITS) + terminalBend;
         const points = collapseCollinearPoints([...current.path, pair.targetAnchor]);
-        const candidate = { pair, points, costUnits: cost };
+        const terminalBend = current.direction === finalDirection ? 0n : BEND_COST_UNITS;
+        const terminalCost =
+          manhattanLengthUnits([grid.nodes[goalIndex], pair.targetAnchor]) +
+          terminalBend +
+          segmentInteractionCostUnits(
+            grid.nodes[goalIndex],
+            pair.targetAnchor,
+            existingSegments,
+            current.direction,
+          );
+        const candidate = {
+          pair,
+          points,
+          costUnits: current.cost + terminalCost,
+        };
+        const exactCost = routeCostUnits(points, pair.preferenceRank, existingSegments);
+        if (candidate.costUnits !== exactCost) {
+          fail("E_WORKFLOW_ROUTE", "$.existingRoutes", "incremental interaction cost mismatch");
+        }
         if (
           !bestGoal ||
           candidate.costUnits < bestGoal.costUnits ||
@@ -982,14 +1175,24 @@ function compareStrings(a, b) {
         const nextPoint = grid.nodes[neighbor.nodeIndex];
         const nextDirection = directionName(grid.nodes[current.nodeIndex], nextPoint);
         const bend = nextDirection === current.direction ? 0n : BEND_COST_UNITS;
+        const path = collapseCollinearPoints([...current.path, nextPoint]);
         const next = {
           nodeIndex: neighbor.nodeIndex,
           direction: nextDirection,
-          cost: current.cost + neighbor.distance + bend,
-          path: collapseCollinearPoints([...current.path, nextPoint]),
+          cost:
+            current.cost +
+            neighbor.distance +
+            bend +
+            segmentInteractionCostUnits(
+              grid.nodes[current.nodeIndex],
+              nextPoint,
+              existingSegments,
+              current.direction,
+            ),
+          path,
         };
         if (bestGoal && next.cost > bestGoal.costUnits) continue;
-        const nextKey = `${next.nodeIndex}|${next.direction}`;
+        const nextKey = stateKey(next);
         const previous = bestStates.get(nextKey);
         if (
           previous &&
@@ -1020,15 +1223,168 @@ function buildSegments(points) {
   return segments;
 }
 
-function validateExistingRoutes(value, path) {
+function routeSortKey(route) {
+  return JSON.stringify(
+    canonical({
+      sourceId: route.sourceId,
+      targetId: route.targetId,
+      points: route.points,
+      ...(route.routeId ? { routeId: route.routeId } : {}),
+    }),
+  );
+}
+
+function validateExistingRoutes(value, path, rects = [], stage = null) {
   if (!Array.isArray(value)) fail("E_ROUTER_INPUT", path, "expected an array");
-  if (value.length > 0) {
+  if (value.length > MAX_EXISTING_ROUTE_SEGMENTS) {
     fail(
-      "E_ROUTER_UNSUPPORTED",
+      "E_WORKFLOW_ROUTE",
       path,
-      "existing-route-aware routing is not supported by this grid layer",
+      `existing routes exceed the ${MAX_EXISTING_ROUTE_SEGMENTS}-route interaction limit`,
     );
   }
+  const rectById = new Map(rects.map((rect) => [rect.id, rect]));
+  const routeIds = new Set();
+  let submittedSegments = 0;
+  let canonicalSegments = 0;
+  const routes = value.map((route, index) => {
+    const routePath = `${path}[${index}]`;
+    const snapshot = snapshotGeometry(route, routePath);
+    exactOptionalKeys(snapshot, ROUTE_KEYS, ROUTE_OPTIONAL_KEYS, routePath);
+    if (!Array.isArray(snapshot.points) || !Array.isArray(snapshot.segments)) {
+      fail("E_ROUTER_INPUT", routePath, "route points and segments must be arrays");
+    }
+    const routeSubmittedSegments = Math.max(
+      snapshot.points.length > 0 ? snapshot.points.length - 1 : 0,
+      snapshot.segments.length,
+    );
+    submittedSegments += routeSubmittedSegments;
+    if (
+      routeSubmittedSegments > MAX_EXISTING_ROUTE_SEGMENTS ||
+      submittedSegments > MAX_EXISTING_ROUTE_SEGMENTS
+    ) {
+      fail(
+        "E_WORKFLOW_ROUTE",
+        routePath,
+        `existing routes exceed the ${MAX_EXISTING_ROUTE_SEGMENTS}-segment interaction limit`,
+      );
+    }
+    if (Object.hasOwn(snapshot, "routeId")) {
+      const routeId = requireNonEmptyString(snapshot.routeId, `${routePath}.routeId`);
+      if (routeIds.has(routeId)) {
+        fail("E_ROUTER_INPUT", `${routePath}.routeId`, "route IDs must be unique");
+      }
+      routeIds.add(routeId);
+    }
+    const sourceRect = rectById.get(snapshot.sourceId);
+    const targetRect = rectById.get(snapshot.targetId);
+    if (rects.length > 0 && (!sourceRect || !targetRect)) {
+      fail(
+        "E_ROUTER_INPUT",
+        routePath,
+        "existing route endpoints must identify supplied rectangles",
+      );
+    }
+    const baseContext =
+      sourceRect && targetRect
+        ? {
+            sourceRect,
+            targetRect,
+            ...(stage
+              ? { stage: { x: stage.x, y: stage.y, w: stage.w, h: stage.h } }
+              : {}),
+          }
+        : {};
+    validateOrthogonalRoute(snapshot, baseContext);
+    const canonicalPoints = collapseCollinearPoints(snapshot.points);
+    const canonicalRoute = {
+      ...snapshot,
+      points: canonicalPoints,
+      segments: buildSegments(canonicalPoints),
+    };
+    const routeCanonicalSegments = canonicalRoute.segments.length;
+    canonicalSegments += routeCanonicalSegments;
+    if (
+      routeCanonicalSegments > MAX_EXISTING_ROUTE_SEGMENTS ||
+      canonicalSegments > MAX_EXISTING_ROUTE_SEGMENTS
+    ) {
+      fail(
+        "E_WORKFLOW_ROUTE",
+        routePath,
+        `existing routes exceed the ${MAX_EXISTING_ROUTE_SEGMENTS}-segment interaction limit`,
+      );
+    }
+    const unrelatedObstacles =
+      sourceRect && targetRect
+        ? rects.filter(
+            (rect) => rect.id !== sourceRect.id && rect.id !== targetRect.id,
+          )
+        : [];
+    let canonicalFoundation = null;
+    if (sourceRect && targetRect && sourceRect.id !== targetRect.id) {
+      const foundation = routeWithoutObstacles(sourceRect, targetRect);
+      const foundationPoints = collapseCollinearPoints(foundation.points);
+      canonicalFoundation = {
+        ...foundation,
+        points: foundationPoints,
+        segments: buildSegments(foundationPoints),
+      };
+    }
+    const comparableRoute = { ...canonicalRoute };
+    delete comparableRoute.routeId;
+    const isFoundationRoute =
+      canonicalFoundation !== null &&
+      stableRouteJson(comparableRoute) === stableRouteJson(canonicalFoundation);
+    if (isFoundationRoute) {
+      const blockers = unrelatedObstacles.map((obstacle, obstacleIndex) =>
+        inflateBounds(
+          rectToUnitBounds(obstacle, `${routePath}.obstacles[${obstacleIndex}]`),
+          `${routePath}.obstacles[${obstacleIndex}]`,
+        ),
+      );
+      const unitPoints = canonicalRoute.points.map((point, pointIndex) =>
+        pointToUnits(point, `${routePath}.points[${pointIndex}]`),
+      );
+      for (let pointIndex = 1; pointIndex < unitPoints.length; pointIndex += 1) {
+        if (
+          blockers.some((blocker) =>
+            segmentCrossesOpenRect(
+              unitPoints[pointIndex - 1],
+              unitPoints[pointIndex],
+              blocker,
+            ),
+          )
+        ) {
+          fail(
+            "E_WORKFLOW_ROUTE",
+            `${routePath}.segments[${pointIndex - 1}]`,
+            "existing route crosses an inflated obstacle interior",
+          );
+        }
+      }
+    } else {
+      validateOrthogonalRoute(
+        canonicalRoute,
+        sourceRect && targetRect
+          ? { ...baseContext, obstacles: unrelatedObstacles }
+          : {},
+      );
+    }
+    return canonicalRoute;
+  });
+  routes.sort((a, b) => compareStrings(routeSortKey(a), routeSortKey(b)));
+  const segments = [];
+  for (const [routeIndex, route] of routes.entries()) {
+    const points = collapseCollinearPoints(
+      route.points.map((point, pointIndex) =>
+        pointToUnits(point, `${path}[${routeIndex}].points[${pointIndex}]`),
+      ),
+    );
+    for (let index = 1; index < points.length; index += 1) {
+      segments.push({ a: points[index - 1], b: points[index] });
+    }
+  }
+  return { routes, segments };
 }
 
 function routeWithoutObstacles(source, target) {
@@ -1141,6 +1497,126 @@ function routeFromGridCandidate(source, target, candidate) {
   };
 }
 
+function selfLoopUnitPoints(bounds, side, lane, centerX, centerY) {
+  const distance = SELF_CLEARANCE_UNITS + lane * SELF_CLEARANCE_UNITS;
+  const outer = distance + SELF_CLEARANCE_UNITS;
+  switch (side) {
+    case "right":
+      return [
+        { x: bounds.right, y: centerY },
+        { x: bounds.right + distance, y: centerY },
+        { x: bounds.right + distance, y: bounds.bottom + outer },
+        { x: centerX + distance, y: bounds.bottom + outer },
+        { x: centerX + distance, y: bounds.bottom + distance },
+        { x: centerX, y: bounds.bottom + distance },
+        { x: centerX, y: bounds.bottom },
+      ];
+    case "bottom":
+      return [
+        { x: centerX, y: bounds.bottom },
+        { x: centerX, y: bounds.bottom + distance },
+        { x: bounds.left - outer, y: bounds.bottom + distance },
+        { x: bounds.left - outer, y: centerY + distance },
+        { x: bounds.left - distance, y: centerY + distance },
+        { x: bounds.left - distance, y: centerY },
+        { x: bounds.left, y: centerY },
+      ];
+    case "left":
+      return [
+        { x: bounds.left, y: centerY },
+        { x: bounds.left - distance, y: centerY },
+        { x: bounds.left - distance, y: bounds.top - outer },
+        { x: centerX - distance, y: bounds.top - outer },
+        { x: centerX - distance, y: bounds.top - distance },
+        { x: centerX, y: bounds.top - distance },
+        { x: centerX, y: bounds.top },
+      ];
+    case "top":
+      return [
+        { x: centerX, y: bounds.top },
+        { x: centerX, y: bounds.top - distance },
+        { x: bounds.right + outer, y: bounds.top - distance },
+        { x: bounds.right + outer, y: centerY - distance },
+        { x: bounds.right + distance, y: centerY - distance },
+        { x: bounds.right + distance, y: centerY },
+        { x: bounds.right, y: centerY },
+      ];
+    default:
+      throw new Error(`unreachable self-loop side ${side}`);
+  }
+}
+
+function routeSelfEdge(source, obstacles, stage, existingSegments) {
+  const bounds = rectToUnitBounds(source, "$.sourceRect");
+  const centerX = pointToUnits(anchorPoint(source, "top"), "$.selfCenterX").x;
+  const centerY = pointToUnits(anchorPoint(source, "left"), "$.selfCenterY").y;
+  const obstacleBlockers = obstacles.map((obstacle, index) =>
+    inflateBounds(
+      rectToUnitBounds(obstacle, `$.obstacles[${index}]`),
+      `$.obstacles[${index}]`,
+    ),
+  );
+  const mapBounds = stage ?? {
+    left: clampedUnitAdd(
+      Math.min(bounds.left, ...obstacleBlockers.map((item) => item.left)),
+      -MAP_CLEARANCE_UNITS,
+    ),
+    top: clampedUnitAdd(
+      Math.min(bounds.top, ...obstacleBlockers.map((item) => item.top)),
+      -MAP_CLEARANCE_UNITS,
+    ),
+    right: clampedUnitAdd(
+      Math.max(bounds.right, ...obstacleBlockers.map((item) => item.right)),
+      MAP_CLEARANCE_UNITS,
+    ),
+    bottom: clampedUnitAdd(
+      Math.max(bounds.bottom, ...obstacleBlockers.map((item) => item.bottom)),
+      MAP_CLEARANCE_UNITS,
+    ),
+  };
+  const sideOrder = ["right", "bottom", "left", "top"];
+  const toSide = { right: "bottom", bottom: "left", left: "top", top: "right" };
+  const maxLanes = 8;
+  let best = null;
+  for (let lane = 0; lane < maxLanes; lane += 1) {
+    for (const [sideRank, side] of sideOrder.entries()) {
+      const points = selfLoopUnitPoints(bounds, side, lane, centerX, centerY);
+      if (!points.every((point) => pointInsideBounds(point, mapBounds))) continue;
+      if (
+        points.some((point, index) =>
+          index === 0 || index === points.length - 1
+            ? false
+            : obstacleBlockers.some((blocker) => pointInOpenRect(point, blocker)),
+        )
+      ) {
+        continue;
+      }
+      let clear = true;
+      for (let index = 1; index < points.length && clear; index += 1) {
+        clear = segmentClear(points[index - 1], points[index], obstacleBlockers);
+      }
+      if (!clear) continue;
+      const candidate = {
+        pair: { sourceSide: side, targetSide: toSide[side] },
+        points,
+        costUnits: routeCostUnits(points, sideRank, existingSegments),
+      };
+      if (
+        !best ||
+        candidate.costUnits < best.costUnits ||
+        (candidate.costUnits === best.costUnits &&
+          comparePointSequences(candidate.points, best.points) < 0)
+      ) {
+        best = candidate;
+      }
+    }
+  }
+  if (!best) {
+    fail("E_WORKFLOW_ROUTE", "$", "no bounded obstacle-avoiding self route exists");
+  }
+  return routeFromGridCandidate(source, source, best);
+}
+
 function validateGeneratedGridRoute(route, grid, sourceId, targetId) {
   const unitPoints = route.points.map((point, index) =>
     pointToUnits(point, `$.points[${index}]`),
@@ -1163,10 +1639,9 @@ function validateGeneratedGridRoute(route, grid, sourceId, targetId) {
 }
 
 /**
- * Route one non-self orthogonal edge around zero or more rectangular
- * obstacles. Existing routes remain unsupported in this layer. An optional
- * stage bounds the candidate grid; otherwise routing uses a finite envelope
- * around the nodes and obstacles.
+ * Route one orthogonal edge around rectangular obstacles and previously routed
+ * edges. Existing routes are canonicalized before their crossing and overlap
+ * costs are applied. Self edges try right, bottom, left, then top loop lanes.
  */
 export function routeOrthogonalEdge(input) {
   const snapshot = snapshotGeometry(input, "$");
@@ -1179,20 +1654,38 @@ export function routeOrthogonalEdge(input) {
 
   const source = validateRect(snapshot.sourceRect, "$.sourceRect");
   const target = validateRect(snapshot.targetRect, "$.targetRect");
-  validateExistingRoutes(snapshot.existingRoutes, "$.existingRoutes");
-  if (source.id === target.id) {
-    fail(
-      "E_ROUTER_UNSUPPORTED",
-      "$.targetRect.id",
-      "self-edge routing is not supported by this grid layer",
-    );
+  if (
+    source.id === target.id &&
+    ["x", "y", "w", "h"].some((key) => source[key] !== target[key])
+  ) {
+    fail("E_ROUTER_INPUT", "$.targetRect", "self-edge rectangles must be identical");
   }
   const obstacles = validateAndSortObstacles(snapshot.obstacles, source, target);
   const stage = Object.hasOwn(snapshot, "stage")
     ? validateStageAt(snapshot.stage, "$.stage")
     : null;
+  const existing = validateExistingRoutes(
+    snapshot.existingRoutes,
+    "$.existingRoutes",
+    [source, ...(target.id === source.id ? [] : [target]), ...obstacles],
+    stage,
+  );
 
-  if (obstacles.length === 0) {
+  if (source.id === target.id) {
+    const route = routeSelfEdge(source, obstacles, stage, existing.segments);
+    validateOrthogonalRoute(route, {
+      sourceRect: source,
+      targetRect: target,
+      obstacles,
+      existingRoutes: existing.routes,
+      ...(stage
+        ? { stage: { x: stage.x, y: stage.y, w: stage.w, h: stage.h } }
+        : {}),
+    });
+    return route;
+  }
+
+  if (obstacles.length === 0 && existing.routes.length === 0) {
     const foundationRoute = routeWithoutObstacles(source, target);
     if (!stage) return foundationRoute;
     try {
@@ -1207,13 +1700,17 @@ export function routeOrthogonalEdge(input) {
     }
   }
 
-  const direct = rankZeroDirectCandidate(source, target, obstacles, stage);
+  const direct =
+    existing.routes.length === 0
+      ? rankZeroDirectCandidate(source, target, obstacles, stage)
+      : null;
   if (direct) {
     const route = routeFromGridCandidate(source, target, direct);
     validateOrthogonalRoute(route, {
       sourceRect: source,
       targetRect: target,
       obstacles,
+      existingRoutes: existing.routes,
       ...(stage
         ? { stage: { x: stage.x, y: stage.y, w: stage.w, h: stage.h } }
         : {}),
@@ -1225,8 +1722,8 @@ export function routeOrthogonalEdge(input) {
   let best = null;
   for (const pair of grid.pairs) {
     for (const candidate of [
-      directVisibilityCandidate(grid, pair),
-      searchGridPair(grid, pair, source.id, target.id),
+      directVisibilityCandidate(grid, pair, existing.segments),
+      searchGridPair(grid, pair, source.id, target.id, existing.segments),
     ]) {
       if (
         candidate &&
@@ -1240,6 +1737,38 @@ export function routeOrthogonalEdge(input) {
     }
   }
   if (!best) {
+    if (obstacles.length === 0) {
+      const foundationRoute = routeWithoutObstacles(source, target);
+      const pair = preferredAnchorPairs(source, target).find(
+        (candidatePair) =>
+          candidatePair.sourceSide === foundationRoute.fromSide &&
+          candidatePair.targetSide === foundationRoute.toSide,
+      );
+      const points = collapseCollinearPoints(
+        foundationRoute.points.map((point, index) =>
+          pointToUnits(point, `$.foundationFallback.points[${index}]`),
+        ),
+      );
+      if (
+        pair &&
+        (!stage || points.every((point) => pointInsideBounds(point, stage)))
+      ) {
+        const route = routeFromGridCandidate(source, target, {
+          pair,
+          points,
+          costUnits: routeCostUnits(points, pair.preferenceRank, existing.segments),
+        });
+        validateOrthogonalRoute(route, {
+          sourceRect: source,
+          targetRect: target,
+          existingRoutes: existing.routes,
+          ...(stage
+            ? { stage: { x: stage.x, y: stage.y, w: stage.w, h: stage.h } }
+            : {}),
+        });
+        return route;
+      }
+    }
     fail("E_WORKFLOW_ROUTE", "$", "no bounded obstacle-avoiding route exists");
   }
 
@@ -1249,6 +1778,7 @@ export function routeOrthogonalEdge(input) {
     sourceRect: source,
     targetRect: target,
     obstacles,
+    existingRoutes: existing.routes,
     ...(stage
       ? { stage: { x: stage.x, y: stage.y, w: stage.w, h: stage.h } }
       : {}),
@@ -1319,20 +1849,23 @@ function withinStage(x, y, stage, path) {
  */
 export function validateOrthogonalRoute(route, context = {}) {
   const routeSnapshot = snapshotGeometry(route, "$");
-  exactKeys(routeSnapshot, ROUTE_KEYS, "$");
+  exactOptionalKeys(routeSnapshot, ROUTE_KEYS, ROUTE_OPTIONAL_KEYS, "$");
 
   const contextSnapshot = snapshotGeometry(context, "$context");
   if (!isPlainObject(contextSnapshot)) {
     fail("E_ROUTER_INPUT", "$context", "expected plain object");
   }
   for (const key of Object.keys(contextSnapshot)) {
-    if (!["sourceRect", "targetRect", "stage", "obstacles"].includes(key)) {
+    if (!["sourceRect", "targetRect", "stage", "obstacles", "existingRoutes"].includes(key)) {
       fail("E_ROUTER_INPUT", `$context.${key}`, "unknown context field");
     }
   }
 
   const sourceId = requireNonEmptyString(routeSnapshot.sourceId, "$.sourceId");
   const targetId = requireNonEmptyString(routeSnapshot.targetId, "$.targetId");
+  const routeId = Object.hasOwn(routeSnapshot, "routeId")
+    ? requireNonEmptyString(routeSnapshot.routeId, "$.routeId")
+    : null;
   const fromSide = requireSide(routeSnapshot.fromSide, "$.fromSide");
   const toSide = requireSide(routeSnapshot.toSide, "$.toSide");
 
@@ -1466,10 +1999,27 @@ export function validateOrthogonalRoute(route, context = {}) {
       }
       ids.add(obstacle.id);
     }
-    const validationRects =
-      contextObstacles.length === 0
-        ? []
-        : [sourceRect, targetRect, ...contextObstacles];
+    const validationRects = [
+      sourceRect,
+      ...(targetRect.id === sourceRect.id ? [] : [targetRect]),
+      ...contextObstacles,
+    ];
+    const sourceHalo = inflateBounds(
+      rectToUnitBounds(sourceRect, "$context.sourceRect"),
+      "$context.sourceRect",
+    );
+    const targetHalo =
+      targetRect.id === sourceRect.id
+        ? sourceHalo
+        : inflateBounds(
+            rectToUnitBounds(targetRect, "$context.targetRect"),
+            "$context.targetRect",
+          );
+    const endpointHalosOverlap =
+      sourceHalo.left <= targetHalo.right &&
+      sourceHalo.right >= targetHalo.left &&
+      sourceHalo.top <= targetHalo.bottom &&
+      sourceHalo.bottom >= targetHalo.top;
     const blockers = validationRects.map((rect, index) =>
       inflateBounds(
         rectToUnitBounds(
@@ -1492,9 +2042,14 @@ export function validateOrthogonalRoute(route, context = {}) {
     );
     for (let index = 1; index < unitPoints.length; index += 1) {
       for (const blocker of blockers) {
+        const firstSegment = index === 1;
+        const lastSegment = index === unitPoints.length - 1;
         if (
-          (index === 1 || index === unitPoints.length - 1) &&
-          (blocker.id === sourceRect.id || blocker.id === targetRect.id)
+          (firstSegment && blocker.id === sourceRect.id) ||
+          (lastSegment && blocker.id === targetRect.id) ||
+          (endpointHalosOverlap &&
+            ((firstSegment && blocker.id === targetRect.id) ||
+              (lastSegment && blocker.id === sourceRect.id)))
         ) {
           continue;
         }
@@ -1530,7 +2085,76 @@ export function validateOrthogonalRoute(route, context = {}) {
     });
   }
 
-  return { sourceId, targetId, fromSide, toSide, points, segments, cost };
+  if (Object.hasOwn(contextSnapshot, "existingRoutes")) {
+    const rects = [
+      ...(sourceRect ? [sourceRect] : []),
+      ...(targetRect && targetRect.id !== sourceRect?.id ? [targetRect] : []),
+    ];
+    if (Object.hasOwn(contextSnapshot, "obstacles")) {
+      for (const obstacle of contextSnapshot.obstacles) {
+        if (!rects.some((rect) => rect.id === obstacle.id)) {
+          rects.push(validateRect(obstacle, "$context.obstacles"));
+        }
+      }
+    }
+    const interactionRoutes = validateExistingRoutes(
+      contextSnapshot.existingRoutes,
+      "$context.existingRoutes",
+      rects,
+      Object.hasOwn(contextSnapshot, "stage")
+        ? validateStageAt(contextSnapshot.stage, "$context.stage")
+        : null,
+    );
+    const unitPoints = points.map((point, index) =>
+      pointToUnits(point, `$.points[${index}]`),
+    );
+    const canonicalPoints = collapseCollinearPoints(unitPoints);
+    if (canonicalPoints.length !== unitPoints.length) {
+      fail(
+        "E_WORKFLOW_ROUTE",
+        "$.points",
+        "interaction-aware routes must collapse consecutive collinear points",
+      );
+    }
+    let preferenceRank;
+    if (sourceRect && targetRect && sourceRect.id === targetRect.id) {
+      preferenceRank = ["right", "bottom", "left", "top"].indexOf(fromSide);
+      const expectedToSide = {
+        right: "bottom",
+        bottom: "left",
+        left: "top",
+        top: "right",
+      }[fromSide];
+      if (toSide !== expectedToSide) {
+        fail("E_WORKFLOW_ROUTE", "$.toSide", "self route must terminate on the next clockwise side");
+      }
+    } else if (sourceRect && targetRect) {
+      preferenceRank = preferredAnchorPairs(sourceRect, targetRect).find(
+        (pair) => pair.sourceSide === fromSide && pair.targetSide === toSide,
+      )?.preferenceRank;
+    }
+    if (preferenceRank === undefined || preferenceRank < 0) {
+      fail("E_WORKFLOW_ROUTE", "$", "route anchor pair cannot be ranked");
+    }
+    const expectedCost = fromBigIntThousandths(
+      routeCostUnits(canonicalPoints, preferenceRank, interactionRoutes.segments),
+      "$.cost",
+    );
+    if (cost !== expectedCost) {
+      fail("E_WORKFLOW_ROUTE", "$.cost", "cost does not match route geometry and interactions");
+    }
+  }
+
+  return {
+    sourceId,
+    targetId,
+    fromSide,
+    toSide,
+    points,
+    segments,
+    cost,
+    ...(routeId ? { routeId } : {}),
+  };
 }
 
 function canonical(value) {

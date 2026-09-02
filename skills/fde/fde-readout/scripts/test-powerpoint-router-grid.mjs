@@ -459,14 +459,14 @@ assertThrows("obstacle duplicates source ID", "E_ROUTER_INPUT", () =>
   check(performance.now() - started < 10000, "300 obstacle routes finish within ten seconds");
 }
 
-assertThrows("self edge remains unsupported", "E_ROUTER_UNSUPPORTED", () =>
+assertThrows("mismatched self rectangles are rejected", "E_ROUTER_INPUT", () =>
   routeOrthogonalEdge(
     input(rect("same", 0, 0, 20, 20), rect("same", 100, 0, 20, 20), [
       rect("blocker", 40, 0, 20, 20),
     ]),
   ),
 );
-assertThrows("existing routes remain unsupported", "E_ROUTER_UNSUPPORTED", () =>
+assertThrows("malformed existing routes are rejected", "E_ROUTER_INPUT", () =>
   routeOrthogonalEdge({
     ...input(rect("s", 0, 0, 20, 20), rect("t", 100, 0, 20, 20), []),
     existingRoutes: [{ sourceId: "x", targetId: "y" }],

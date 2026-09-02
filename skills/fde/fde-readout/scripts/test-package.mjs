@@ -369,6 +369,7 @@ for (const script of [
   "test-powerpoint-chart-family.mjs",
   "test-powerpoint-orthogonal-router.mjs",
   "test-powerpoint-router-grid.mjs",
+  "test-powerpoint-router-interactions.mjs",
 ]) {
   const result = spawnSync(process.execPath, [join(skillRoot, "scripts", script)], {
     encoding: "utf8",
