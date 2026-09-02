@@ -860,13 +860,6 @@ assertThrows("routeOrthogonalEdge nonempty existingRoutes", "E_ROUTER_UNSUPPORTE
     }),
   ),
 );
-assertThrows("routeOrthogonalEdge nonempty obstacles", "E_ROUTER_UNSUPPORTED", () =>
-  routeOrthogonalEdge(
-    routeInput(rect("a", 0, 0, 10, 10), rect("b", 20, 0, 10, 10), {
-      obstacles: [rect("obstacle", 5, 5, 2, 2)],
-    }),
-  ),
-);
 assertThrows("routeOrthogonalEdge non-array existingRoutes", "E_ROUTER_INPUT", () =>
   routeOrthogonalEdge(
     routeInput(rect("a", 0, 0, 10, 10), rect("b", 20, 0, 10, 10), { existingRoutes: "none" }),
