@@ -19,6 +19,7 @@ param(
         'shape',
         'line',
         'table',
+        'connector',
         'activation',
         'hwnd',
         'process-acquired',
@@ -34,6 +35,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+Import-Module `
+    -Name (Join-Path $PSScriptRoot 'powerpoint-workflow-connectors.psm1') `
+    -Force
 
 Add-Type @'
 using System;
@@ -543,7 +548,7 @@ function Add-LinePrimitive {
         $line.Weight = [single]$Primitive.width
         $line.DashStyle = Get-DashStyle -Dash ([string]$Primitive.dash)
         $line.BeginArrowheadStyle = if ($Primitive.arrowStart -eq 'open') { 3 } else { 1 }
-        $line.EndArrowheadStyle = if ($Primitive.arrowEnd -eq 'open') { 3 } else { 1 }
+        $line.EndArrowheadStyle = if ($Primitive.arrowEnd -ceq 'open') { 3 } else { 1 }
     }
     finally {
         Release-ComRef -Reference ([ref]$lineColor) -Label 'line color'
@@ -1708,6 +1713,182 @@ function Invoke-TestTableMutation {
     }
 }
 
+function Add-WorkflowConnectorPrimitive {
+    param(
+        [Parameter(Mandatory = $true)]$Shapes,
+        [Parameter(Mandatory = $true)]$Primitive,
+        [Parameter(Mandatory = $true)]$Theme
+    )
+
+    $shape = $null
+    $line = $null
+    $lineColor = $null
+    try {
+        $shape = $Shapes.AddConnector(
+            1,
+            [single]$Primitive.x1,
+            [single]$Primitive.y1,
+            [single]$Primitive.x2,
+            [single]$Primitive.y2
+        )
+        $shape.Name = [string]$Primitive.name
+        if ([int]$shape.ZOrderPosition -ne [int]$Primitive.z) {
+            throw "Connector z-order does not match $($Primitive.name)."
+        }
+        $line = $shape.Line
+        $lineColor = $line.ForeColor
+        $lineColor.RGB = Get-RoleColor -Theme $Theme -Role ([string]$Primitive.colorRole)
+        $line.Transparency = [single]$Primitive.transparency
+        $line.Weight = [single]$Primitive.width
+        $line.DashStyle = Get-DashStyle -Dash ([string]$Primitive.dash)
+        $line.BeginArrowheadStyle = 1
+        $line.EndArrowheadStyle = if ($Primitive.arrowEnd -ceq 'open') { 3 } else { 1 }
+    }
+    finally {
+        Release-ComRef -Reference ([ref]$lineColor) -Label 'workflow connector line color'
+        Release-ComRef -Reference ([ref]$line) -Label 'workflow connector line format'
+        Release-ComRef -Reference ([ref]$shape) -Label 'workflow connector shape'
+    }
+}
+
+function Get-WorkflowConnectorEndpoints {
+    param([Parameter(Mandatory = $true)]$Shape)
+
+    $left = [single]$Shape.Left
+    $top = [single]$Shape.Top
+    $right = [single]($left + [single]$Shape.Width)
+    $bottom = [single]($top + [single]$Shape.Height)
+    $horizontalFlip = [int]$Shape.HorizontalFlip -eq -1
+    $verticalFlip = [int]$Shape.VerticalFlip -eq -1
+    return [pscustomobject]@{
+        x1 = if ($horizontalFlip) { $right } else { $left }
+        y1 = if ($verticalFlip) { $bottom } else { $top }
+        x2 = if ($horizontalFlip) { $left } else { $right }
+        y2 = if ($verticalFlip) { $top } else { $bottom }
+    }
+}
+
+function Assert-WorkflowConnectorShape {
+    param(
+        [Parameter(Mandatory = $true)]$Shape,
+        [Parameter(Mandatory = $true)]$Primitive,
+        [Parameter(Mandatory = $true)]$Theme,
+        [Parameter(Mandatory = $true)][int]$SlideIndex
+    )
+
+    $line = $null
+    $lineColor = $null
+    try {
+        if (
+            [int]$Shape.Connector -ne -1 -or
+            -not [string]::Equals(
+                [string]$Shape.Name,
+                [string]$Primitive.name,
+                [StringComparison]::Ordinal
+            ) -or
+            [int]$Shape.ZOrderPosition -ne [int]$Primitive.z
+        ) {
+            throw "Reopened connector identity or z-order changed on slide $SlideIndex."
+        }
+        $endpoints = Get-WorkflowConnectorEndpoints -Shape $Shape
+        if (
+            [single]$endpoints.x1 -ne [single]$Primitive.x1 -or
+            [single]$endpoints.y1 -ne [single]$Primitive.y1 -or
+            [single]$endpoints.x2 -ne [single]$Primitive.x2 -or
+            [single]$endpoints.y2 -ne [single]$Primitive.y2
+        ) {
+            throw "Reopened connector geometry changed for $($Primitive.name) on slide $SlideIndex."
+        }
+        $line = $Shape.Line
+        $lineColor = $line.ForeColor
+        if (
+            [int]$lineColor.RGB -ne (
+                Get-RoleColor -Theme $Theme -Role ([string]$Primitive.colorRole)
+            ) -or
+            [single]$line.Transparency -ne [single]$Primitive.transparency -or
+            [single]$line.Weight -ne [single]$Primitive.width -or
+            [int]$line.DashStyle -ne (
+                Get-DashStyle -Dash ([string]$Primitive.dash)
+            ) -or
+            [int]$line.BeginArrowheadStyle -ne 1 -or
+            [int]$line.EndArrowheadStyle -ne $(if ($Primitive.arrowEnd -ceq 'open') { 3 } else { 1 })
+        ) {
+            throw "Reopened connector style changed for $($Primitive.name) on slide $SlideIndex."
+        }
+    }
+    finally {
+        Release-ComRef -Reference ([ref]$lineColor) -Label 'reopened workflow connector line color'
+        Release-ComRef -Reference ([ref]$line) -Label 'reopened workflow connector line format'
+    }
+}
+
+function Assert-WorkflowConnectors {
+    param(
+        [Parameter(Mandatory = $true)]$Slide,
+        [Parameter(Mandatory = $true)]$SlideSpec,
+        [Parameter(Mandatory = $true)]$Theme,
+        [Parameter(Mandatory = $true)][int]$SlideIndex
+    )
+
+    $shapes = $null
+    $shape = $null
+    $verified = 0
+    try {
+        $shapes = $Slide.Shapes
+        $primitives = @($SlideSpec.primitives)
+        for ($primitiveIndex = 0; $primitiveIndex -lt $primitives.Count; $primitiveIndex++) {
+            $primitive = $primitives[$primitiveIndex]
+            if (-not (Test-WorkflowConnectorPrimitive -Primitive $primitive)) {
+                continue
+            }
+            $shape = $shapes.Item($primitiveIndex + 1)
+            try {
+                Assert-WorkflowConnectorShape `
+                    -Shape $shape `
+                    -Primitive $primitive `
+                    -Theme $Theme `
+                    -SlideIndex $SlideIndex
+                $verified += 1
+            }
+            finally {
+                Release-ComRef -Reference ([ref]$shape) -Label 'reopened workflow connector shape'
+            }
+        }
+    }
+    finally {
+        Release-ComRef -Reference ([ref]$shape) -Label 'reopened workflow connector shape'
+        Release-ComRef -Reference ([ref]$shapes) -Label 'reopened workflow connector shapes'
+    }
+    return $verified
+}
+
+function Invoke-WorkflowConnectorMutationHook {
+    param(
+        [Parameter(Mandatory = $true)]$Slide,
+        [Parameter(Mandatory = $true)]$SlideSpec
+    )
+
+    $shapes = $null
+    $shape = $null
+    try {
+        $shapes = $Slide.Shapes
+        $primitives = @($SlideSpec.primitives)
+        for ($primitiveIndex = 0; $primitiveIndex -lt $primitives.Count; $primitiveIndex++) {
+            if (-not (Test-WorkflowConnectorPrimitive -Primitive $primitives[$primitiveIndex])) {
+                continue
+            }
+            $shape = $shapes.Item($primitiveIndex + 1)
+            $shape.Left = [single]$shape.Left + 1
+            return
+        }
+    }
+    finally {
+        Release-ComRef -Reference ([ref]$shape) -Label 'mutated workflow connector shape'
+        Release-ComRef -Reference ([ref]$shapes) -Label 'mutated workflow connector shapes'
+    }
+    throw 'Connector mutation hook requires at least one workflow connector.'
+}
+
 function Get-NativeNotesText {
     param([Parameter(Mandatory = $true)]$Slide)
 
@@ -2068,6 +2249,8 @@ $baselinePowerPointIdentities = @()
 $nativeNotes = [System.Collections.Generic.List[string]]::new()
 $slideReports = [System.Collections.Generic.List[object]]::new()
 $tableMutationApplied = $false
+$connectorSpecReport = $null
+$connectorSlideReportById = @{}
 
 try {
     $rawPaths = [ordered]@{
@@ -2139,7 +2322,7 @@ try {
         for ($primitiveIndex = 0; $primitiveIndex -lt $primitives.Count; $primitiveIndex++) {
             $kind = [string]$primitives[$primitiveIndex].kind
             if ($kind -notin @('text', 'shape', 'line', 'table')) {
-                throw "Unsupported primitive kind '$kind'. The PowerPoint worker supports text, shape, line, and table; nativeChart and connector require later layers."
+                throw "Unsupported primitive kind '$kind'. The PowerPoint worker supports text, shape, line, table, and workflow line connectors; nativeChart requires a later layer."
             }
             if ($kind -eq 'table') {
                 Assert-TablePrimitiveSpec `
@@ -2149,11 +2332,21 @@ try {
             }
         }
     }
+    $connectorSpecReport = Get-WorkflowConnectorSpecReport -SpecObject $specObject
+    foreach ($connectorSlideReport in @($connectorSpecReport.slides)) {
+        $connectorSlideReportById[[string]$connectorSlideReport.id] = $connectorSlideReport
+    }
     if ($PSBoundParameters.ContainsKey('FailAfter') -and $env:FDE_POWERPOINT_TEST_FAILPOINTS -ne '1') {
         throw 'PowerPoint worker failpoints require FDE_POWERPOINT_TEST_FAILPOINTS=1.'
     }
     if ($env:FDE_POWERPOINT_CODE_ONLY -eq '1') {
         throw 'PowerPoint worker code-only guard prevented COM activation.'
+    }
+    if (
+        $env:FDE_POWERPOINT_TEST_MUTATE_CONNECTOR_BEFORE_VERIFY -eq '1' -and
+        $env:FDE_POWERPOINT_TEST_FAILPOINTS -ne '1'
+    ) {
+        throw 'Connector mutation hooks require FDE_POWERPOINT_TEST_FAILPOINTS=1.'
     }
 
     $stagingDirectory = Join-Path $outputParent ".$([IO.Path]::GetFileName($outputPath)).$token.worker-stage"
@@ -2311,8 +2504,17 @@ try {
                                 Invoke-TestFailpoint -Stage 'shape'
                             }
                             'line' {
-                                Add-LinePrimitive -Shapes $shapes -Primitive $primitive -Theme $specObject.theme
-                                Invoke-TestFailpoint -Stage 'line'
+                                if (Test-WorkflowConnectorPrimitive -Primitive $primitive) {
+                                    Add-WorkflowConnectorPrimitive `
+                                        -Shapes $shapes `
+                                        -Primitive $primitive `
+                                        -Theme $specObject.theme
+                                    Invoke-TestFailpoint -Stage 'connector'
+                                }
+                                else {
+                                    Add-LinePrimitive -Shapes $shapes -Primitive $primitive -Theme $specObject.theme
+                                    Invoke-TestFailpoint -Stage 'line'
+                                }
                             }
                             'table' {
                                 Add-TablePrimitive -Shapes $shapes -Primitive $primitive -Theme $specObject.theme
@@ -2355,6 +2557,28 @@ try {
         if ($reopenedSlides.Count -ne $slidesSpec.Count) {
             throw "Final presentation slide count does not match the drawing spec."
         }
+        if ($env:FDE_POWERPOINT_TEST_MUTATE_CONNECTOR_BEFORE_VERIFY -eq '1') {
+            for ($slideIndex = 1; $slideIndex -le $reopenedSlides.Count; $slideIndex++) {
+                $slide = $null
+                try {
+                    $slide = $reopenedSlides.Item($slideIndex)
+                    $slideSpec = $slidesSpec[$slideIndex - 1]
+                    if (
+                        @(
+                            $slideSpec.primitives | Where-Object {
+                                Test-WorkflowConnectorPrimitive -Primitive $_
+                            }
+                        ).Count -gt 0
+                    ) {
+                        Invoke-WorkflowConnectorMutationHook -Slide $slide -SlideSpec $slideSpec
+                        break
+                    }
+                }
+                finally {
+                    Release-ComRef -Reference ([ref]$slide) -Label 'connector mutation slide'
+                }
+            }
+        }
         for ($slideIndex = 1; $slideIndex -le $reopenedSlides.Count; $slideIndex++) {
             $slide = $null
             try {
@@ -2380,6 +2604,15 @@ try {
                     $expectedNames.Add([string]$slideSpec.primitives[$primitiveIndex].name)
                 }
                 Assert-ExactShapeNames -Expected $expectedNames.ToArray() -Actual $actualNames -SlideIndex $slideIndex
+                $verifiedConnectorCount = Assert-WorkflowConnectors `
+                    -Slide $slide `
+                    -SlideSpec $slideSpec `
+                    -Theme $specObject.theme `
+                    -SlideIndex $slideIndex
+                $connectorSlideReport = $connectorSlideReportById[[string]$slideSpec.id]
+                if ($verifiedConnectorCount -ne [int]$connectorSlideReport.segmentCount) {
+                    throw "Reopened connector count changed on slide $slideIndex."
+                }
                 Assert-TextFits -Slide $slide -SlideSpec $slideSpec
                 Assert-NativeTables -Slide $slide -SlideSpec $slideSpec -Theme $specObject.theme
             }
@@ -2412,6 +2645,7 @@ try {
                         )
                     }
                 }
+                $connectorSlideReport = $connectorSlideReportById[[string]$slideSpec.id]
                 $slideReports.Add([pscustomobject]@{
                     index = $slideIndex
                     id = [string]$slideSpec.id
@@ -2423,6 +2657,12 @@ try {
                     shapeNamesSha256 = Get-TextSha256 -Text ($shapeNames -join "`n")
                     nativeTableCount = $nativeTableCount
                     nativeTableCellCount = $nativeTableCellCount
+                    connectorRouteCount = [int]$connectorSlideReport.routeCount
+                    connectorSegmentCount = [int]$connectorSlideReport.segmentCount
+                    connectorPrimitiveSha256 = [string]$connectorSlideReport.connectorPrimitiveSha256
+                    connectorRouteMetadataSha256 = [string]$connectorSlideReport.routeMetadataSha256
+                    connectorPointSequenceSha256 = [string]$connectorSlideReport.pointSequenceSha256
+                    connectorCostStatus = [string]$connectorSlideReport.costStatus
                     render = $renderName
                     renderSha256 = Get-Sha256 -Path $renderFile
                     notesSha256 = Get-TextSha256 -Text $nativeNotes[$slideIndex - 1]
@@ -2613,7 +2853,7 @@ try {
     $reportObject = [ordered]@{
         status = 'WORKER_PASS'
         stagingEvidence = $true
-        worker = 'fde-powerpoint-tables/1.0'
+        worker = 'fde-powerpoint-tables-connectors/1.0'
         spec = $specPath
         specSha256 = $actualSpecSha256
         skeleton = $skeletonPath
@@ -2626,6 +2866,18 @@ try {
         contactSheetSha256 = Get-Sha256 -Path $contactSheetTemporaryPath
         selectedSlideIds = $selectedSlideIds
         selectedSlideFamilies = $selectedSlideFamilies
+        connectors = [ordered]@{
+            drawingNameCount = [int]$connectorSpecReport.drawingNameCount
+            slideCount = [int]$connectorSpecReport.slideCount
+            routeCount = [int]$connectorSpecReport.routeCount
+            segmentCount = [int]$connectorSpecReport.segmentCount
+            primitiveSha256 = [string]$connectorSpecReport.connectorPrimitiveSha256
+            routeMetadataSha256 = [string]$connectorSpecReport.routeMetadataSha256
+            pointSequenceSha256 = [string]$connectorSpecReport.pointSequenceSha256
+            costStatus = [string]$connectorSpecReport.costStatus
+            reopenedExactVerification = $true
+            slides = @($connectorSpecReport.slides)
+        }
         slides = $slideReports.ToArray()
         cleanup = $cleanupReceiptObject
         elapsedMilliseconds = $elapsedMilliseconds

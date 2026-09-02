@@ -173,7 +173,7 @@ for (const [name, pattern] of [
   ["table report count", /nativeTableCount/],
   ["table cell report count", /nativeTableCellCount/],
   ["table verification mutation hook", /FDE_POWERPOINT_TEST_MUTATE_TABLE_BEFORE_VERIFY/],
-  ["table worker receipt version", /fde-powerpoint-tables\/1\.0/],
+  ["integrated table worker receipt version", /fde-powerpoint-tables-connectors\/1\.0/],
 ]) {
   check(pattern.test(workerSource), `worker omits ${name}`);
 }
@@ -666,7 +666,7 @@ if (failures.length === 0) {
         );
         check(
           report.status === "WORKER_PASS" &&
-            report.worker === "fde-powerpoint-tables/1.0" &&
+            report.worker === "fde-powerpoint-tables-connectors/1.0" &&
             report.cleanup?.exited === true &&
             tableSlides.length === 2 &&
             tableSlides.every(

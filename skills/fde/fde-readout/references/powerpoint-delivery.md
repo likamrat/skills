@@ -62,8 +62,8 @@ When an Office presentation tool is available:
 2. verify the copied seed's slide size before content;
 3. create and verify the complete slide-and-notes skeleton in the native PowerPoint host;
 4. map plan families to layouts without changing slide structure in the canvas;
-5. build `table` families as native PowerPoint tables; build chart and diagram families with editable PowerPoint shapes and connectors so the package contains no embedded workbook or media parts;
-6. use exact coordinates for connectors and repeated geometry;
+5. build `table` families as native PowerPoint tables; build chart and other diagram families with editable PowerPoint shapes so the package contains no embedded workbook or media parts;
+6. build workflow routes as ordered native straight-connector segments, then validate exact connector names, endpoints, shared anchors, semantic styles, arrow termination, and z-order before save and after reopen;
 7. preserve the plan's evidence IDs and footer;
 8. inspect package and render every slide.
 

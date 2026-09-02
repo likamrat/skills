@@ -18,6 +18,7 @@ const plan = join(
 );
 const failures = [];
 const helperSource = await readFile(helper, "utf8");
+const staticOnly = process.argv.slice(2).includes("--static-only");
 
 for (const [name, pattern] of [
   ["PowerPoint HWND lookup", /\$powerPoint\.HWND/],
@@ -197,7 +198,9 @@ try {
     { encoding: "utf8" },
   );
   const hasPowerPoint =
-    availability.status === 0 && availability.stdout.trim() === "True";
+    !staticOnly &&
+    availability.status === 0 &&
+    availability.stdout.trim() === "True";
 
   if (hasPowerPoint) {
     const planBytes = await readFile(plan);

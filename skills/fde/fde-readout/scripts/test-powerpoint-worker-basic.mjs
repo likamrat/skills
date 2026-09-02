@@ -203,7 +203,7 @@ for (const [name, pattern] of [
   ["failpoint bundle publish", /Invoke-TestFailpoint -Stage 'publish-bundle'/],
   ["failpoint environment guard", /FDE_POWERPOINT_TEST_FAILPOINTS/],
   ["internal staging evidence", /status = 'WORKER_PASS'[\s\S]*stagingEvidence = \$true/],
-  ["unsupported later primitive rejection", /nativeChart and connector/],
+  ["unsupported later primitive rejection", /nativeChart requires a later layer/],
 ]) {
   if (!pattern.test(workerSource)) failures.push(`worker omits ${name}`);
 }

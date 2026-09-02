@@ -27,6 +27,7 @@
     "check:cli": "node --no-deprecation scripts/test-cli-commands.mjs",
     "test:powerpoint-router-interactions": "node skills/fde/fde-readout/scripts/test-powerpoint-router-interactions.mjs",
     "test:powerpoint-workflow-family": "node skills/fde/fde-readout/scripts/test-powerpoint-workflow-family.mjs",
+    "test:powerpoint-worker-connectors": "node skills/fde/fde-readout/scripts/test-powerpoint-worker-connectors.mjs",
     "check:fde:e2e": "node scripts/test-fde-evaluator.mjs",
     "check:links": "node scripts/check-links.mjs --external",
     "qa:pptx": "node skills/fde/fde-readout/scripts/pptx-package-qa.mjs",

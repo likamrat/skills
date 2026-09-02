@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const skillRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const failures = [];
+const staticOnly = process.argv.slice(2).includes("--static-only");
 
 function check(condition, message) {
   if (!condition) failures.push(message);
@@ -211,6 +212,14 @@ const requiredAssets = [
     join(skillRoot, "scripts", "pptx-package-qa.mjs"),
     "dependency-free PPTX package QA CLI",
   ],
+  [
+    join(skillRoot, "scripts", "render-powerpoint-worker.ps1"),
+    "native PowerPoint worker",
+  ],
+  [
+    join(skillRoot, "scripts", "powerpoint-workflow-connectors.psm1"),
+    "PowerPoint workflow connector validator",
+  ],
 ];
 for (const [path, label] of requiredAssets) {
   try {
@@ -377,10 +386,20 @@ for (const script of [
   "test-powerpoint-router-interactions.mjs",
   "test-powerpoint-workflow-family.mjs",
   "test-pptx-package-qa.mjs",
+  "test-powerpoint-worker-connectors.mjs",
 ]) {
-  const result = spawnSync(process.execPath, [join(skillRoot, "scripts", script)], {
-    encoding: "utf8",
-  });
+  const result = spawnSync(
+    process.execPath,
+    [
+      join(skillRoot, "scripts", script),
+      ...(staticOnly && script === "test-powerpoint-skeleton.mjs"
+        ? ["--static-only"]
+        : []),
+    ],
+    {
+      encoding: "utf8",
+    },
+  );
   if (result.status !== 0) {
     failures.push(`${script} failed:\n${result.stdout}${result.stderr}`);
   }
