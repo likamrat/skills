@@ -13,6 +13,7 @@ const SUPPORTED_FAMILIES = new Set([
   "responsibility",
   "risks",
   "timeline",
+  "chart",
   "table",
   "evaluation",
   "evidence",
@@ -126,6 +127,53 @@ const TABLE_KEYS = [
   "bodyFontColorRole",
   "cellMargin",
 ];
+const CHART_KEYS = [
+  ...BASE_KEYS,
+  "chartType",
+  "x",
+  "y",
+  "w",
+  "h",
+  "unit",
+  "unitLabel",
+  "plot",
+  "axis",
+  "categories",
+  "legend",
+  "dataGrid",
+  "series",
+];
+const CHART_LABEL_KEYS = [
+  "name",
+  "text",
+  "x",
+  "y",
+  "w",
+  "h",
+  "fontSize",
+  "bold",
+  "colorRole",
+  "horizontalAlign",
+  "verticalAlign",
+  "rotation",
+];
+const NAMED_LINE_KEYS = [
+  "name",
+  "x1",
+  "y1",
+  "x2",
+  "y2",
+  "colorRole",
+  "width",
+  "dash",
+  "transparency",
+];
+const CHART_SERIES_STYLES = Object.freeze([
+  Object.freeze({ colorRole: "system", dash: "solid" }),
+  Object.freeze({ colorRole: "decision", dash: "dash" }),
+  Object.freeze({ colorRole: "ink", dash: "dot" }),
+  Object.freeze({ colorRole: "muted", dash: "dashDot" }),
+]);
 
 export class DrawingSpecError extends Error {
   constructor(code, path, message) {
@@ -412,6 +460,375 @@ function tablePrimitive(
     bodyFontColorRole: "ink",
     cellMargin: 6,
   });
+}
+
+function chartName(ctx, semanticPath) {
+  return primitiveName(ctx.sourceIndex, ctx.id, `chart-${semanticPath}`);
+}
+
+function chartLabel(ctx, semanticPath, text, box, options = {}) {
+  return {
+    name: chartName(ctx, semanticPath),
+    text,
+    ...Object.fromEntries(
+      Object.entries(box).map(([key, value]) => [key, round3(value)]),
+    ),
+    fontSize: options.fontSize ?? 8,
+    bold: options.bold ?? false,
+    colorRole: options.colorRole ?? "ink",
+    horizontalAlign: options.horizontalAlign ?? "left",
+    verticalAlign: options.verticalAlign ?? "middle",
+    rotation: options.rotation ?? 0,
+  };
+}
+
+function namedChartLine(ctx, semanticPath, points, options = {}) {
+  return {
+    name: chartName(ctx, semanticPath),
+    ...Object.fromEntries(
+      Object.entries(points).map(([key, value]) => [key, round3(value)]),
+    ),
+    colorRole: options.colorRole ?? "line",
+    width: options.width ?? 0.75,
+    dash: options.dash ?? "solid",
+    transparency: options.transparency ?? 0,
+  };
+}
+
+function cleanNumber(value) {
+  const cleaned = Number.parseFloat(value.toPrecision(12));
+  return Object.is(cleaned, -0) ? 0 : cleaned;
+}
+
+function nextNiceStep(step) {
+  const power = 10 ** Math.floor(Math.log10(step));
+  const mantissa = cleanNumber(step / power);
+  if (mantissa < 2) return 2 * power;
+  if (mantissa < 5) return 5 * power;
+  return 10 * power;
+}
+
+function niceAxis(values) {
+  const domainMin = Math.min(0, ...values);
+  const domainMax = Math.max(0, ...values);
+  const adjustedMax =
+    domainMin === domainMax ? (domainMin === 0 ? 1 : domainMin + 1) : domainMax;
+  const rough = (adjustedMax - domainMin) / 4;
+  if (rough === 0) {
+    const step = Number.MIN_VALUE;
+    const min = Math.floor(domainMin / step) * step;
+    const max = Math.ceil(adjustedMax / step) * step;
+    const count = Math.round((max - min) / step);
+    return {
+      min,
+      max,
+      step,
+      ticks: Array.from({ length: count + 1 }, (_, index) =>
+        cleanNumber(min + index * step),
+      ),
+    };
+  }
+  const power = 10 ** Math.floor(Math.log10(rough));
+  const mantissa = rough / power;
+  let step = (mantissa <= 1 ? 1 : mantissa <= 2 ? 2 : mantissa <= 5 ? 5 : 10) * power;
+  let min = Math.floor(domainMin / step) * step;
+  let max = Math.ceil(adjustedMax / step) * step;
+  while (Math.round((max - min) / step) + 1 > 6) {
+    step = nextNiceStep(step);
+    min = Math.floor(domainMin / step) * step;
+    max = Math.ceil(adjustedMax / step) * step;
+  }
+  if (![min, max, step].every(Number.isFinite)) {
+    const min = domainMin;
+    const max = adjustedMax;
+    const step = Math.max(Math.abs(min), Math.abs(max));
+    const ticks = [min, 0, max]
+      .filter((value, index, array) => array.indexOf(value) === index)
+      .sort((left, right) => left - right);
+    return { min, max, step, ticks };
+  }
+  min = cleanNumber(min);
+  max = cleanNumber(max);
+  step = cleanNumber(step);
+  const count = Math.round((max - min) / step);
+  const ticks = Array.from({ length: count + 1 }, (_, index) =>
+    cleanNumber(min + index * step),
+  );
+  return { min, max, step, ticks };
+}
+
+function scaleChartY(value, axis, plot) {
+  const range = axis.max - axis.min;
+  let ratio;
+  if (Number.isFinite(range)) {
+    ratio = (axis.max - value) / range;
+  } else {
+    const scale = Math.max(Math.abs(axis.min), Math.abs(axis.max));
+    ratio =
+      (axis.max / scale - value / scale) /
+      (axis.max / scale - axis.min / scale);
+  }
+  return round3(plot.y + ratio * plot.h);
+}
+
+function compileChart(ctx, slide) {
+  addStandardHeader(ctx, slide);
+  const content = slide.content;
+  const categoryCount = content.categories.length;
+  const seriesCount = content.series.length;
+  const plot = { x: 112, y: 160, w: 800, h: 180 };
+  const axisValues = content.series.flatMap((series) => series.values);
+  const axisShape = niceAxis(axisValues);
+  const scaleY = (value) => scaleChartY(value, axisShape, plot);
+  const zeroY = scaleY(0);
+  const tickLabelX = 48;
+  const tickLabelW = 56;
+  const axis = {
+    min: axisShape.min,
+    max: axisShape.max,
+    step: axisShape.step,
+    zeroY,
+    baseline: namedChartLine(
+      ctx,
+      "axis-baseline",
+      { x1: plot.x, y1: zeroY, x2: plot.x + plot.w, y2: zeroY },
+      { colorRole: "ink", width: 1 },
+    ),
+    ticks: axisShape.ticks
+      .slice()
+      .reverse()
+      .map((value, index) => {
+        const y = scaleY(value);
+        return {
+          value,
+          label: String(value),
+          gridLine: namedChartLine(
+            ctx,
+            `axis-tick-${String(index + 1).padStart(2, "0")}-grid`,
+            { x1: plot.x, y1: y, x2: plot.x + plot.w, y2: y },
+            { transparency: 0.35 },
+          ),
+          labelBox: chartLabel(
+            ctx,
+            `axis-tick-${String(index + 1).padStart(2, "0")}-label`,
+            String(value),
+            {
+              x: tickLabelX,
+              y: Math.max(plot.y, Math.min(plot.y + plot.h - 12, y - 6)),
+              w: tickLabelW,
+              h: 12,
+            },
+            { colorRole: "muted", horizontalAlign: "right" },
+          ),
+        };
+      }),
+  };
+  const categoryWidth = plot.w / categoryCount;
+  const categories = content.categories.map((label, index) => ({
+    index,
+    label,
+    labelBox: chartLabel(
+      ctx,
+      `category-${String(index + 1).padStart(2, "0")}-label`,
+      label,
+      { x: plot.x + index * categoryWidth, y: 344, w: categoryWidth, h: 28 },
+      { horizontalAlign: "center" },
+    ),
+  }));
+  const legendWidth = 864 / seriesCount;
+  const legend = content.series.map((series, index) => ({
+    seriesIndex: index,
+    colorRole: CHART_SERIES_STYLES[index].colorRole,
+    swatchName: chartName(ctx, `legend-${String(index + 1).padStart(2, "0")}-swatch`),
+    swatch: {
+      x: round3(48 + index * legendWidth + 8),
+      y: 128,
+      w: 16,
+      h: 4,
+    },
+    labelBox: chartLabel(
+      ctx,
+      `legend-${String(index + 1).padStart(2, "0")}-label`,
+      series.name,
+      { x: 48 + index * legendWidth + 30, y: 120, w: legendWidth - 38, h: 20 },
+      { bold: true },
+    ),
+  }));
+  const rowHeight = 60 / seriesCount;
+  const valueWidth = 800 / categoryCount;
+  const dataGrid = {
+    x: 48,
+    y: 376,
+    w: 864,
+    h: 60,
+    seriesLabelWidth: 64,
+    rowHeight: round3(rowHeight),
+    rows: content.series.map((series, seriesIndex) => ({
+      seriesIndex,
+      labelBox: chartLabel(
+        ctx,
+        `data-row-${String(seriesIndex + 1).padStart(2, "0")}-series`,
+        series.name,
+        { x: 48, y: 376 + seriesIndex * rowHeight, w: 64, h: rowHeight },
+        { bold: true },
+      ),
+      values: series.values.map((value, categoryIndex) => ({
+        categoryIndex,
+        value,
+        labelBox: chartLabel(
+          ctx,
+          `data-row-${String(seriesIndex + 1).padStart(2, "0")}-value-${String(categoryIndex + 1).padStart(2, "0")}`,
+          String(value),
+          {
+            x: 112 + categoryIndex * valueWidth,
+            y: 376 + seriesIndex * rowHeight,
+            w: valueWidth,
+            h: rowHeight,
+          },
+          { horizontalAlign: "center" },
+        ),
+      })),
+    })),
+  };
+  const groupW = plot.w / categoryCount;
+  const usableW = groupW * 0.84;
+  const barGap = Math.max(1, groupW * 0.02);
+  const barW = (usableW - barGap * (seriesCount - 1)) / seriesCount;
+  const series = content.series.map((sourceSeries, seriesIndex) => {
+    const style = CHART_SERIES_STYLES[seriesIndex];
+    const base = {
+      index: seriesIndex,
+      name: sourceSeries.name,
+      evidenceIds: [...sourceSeries.evidenceIds],
+      colorRole: style.colorRole,
+      dash: style.dash,
+    };
+    if (content.chartType === "bar") {
+      return {
+        ...base,
+        bars: sourceSeries.values.map((value, categoryIndex) => {
+          const groupX =
+            plot.x + categoryIndex * groupW + (groupW - usableW) / 2;
+          const x = groupX + seriesIndex * (barW + barGap);
+          const valueY = scaleY(value);
+          const isZero = value === 0;
+          const height = round3(Math.abs(valueY - zeroY));
+          const visibleHeight = isZero ? 1 : Math.max(1, height);
+          const y =
+            value > 0
+              ? Math.max(plot.y, zeroY - visibleHeight)
+              : Math.min(valueY, zeroY);
+          return {
+            kind: isZero ? "line" : "rect",
+            name: chartName(
+              ctx,
+              `series-${String(seriesIndex + 1).padStart(2, "0")}-bar-${String(categoryIndex + 1).padStart(2, "0")}`,
+            ),
+            categoryIndex,
+            value,
+            x: round3(x),
+            y: isZero
+              ? round3(
+                  Math.max(
+                    plot.y,
+                    Math.min(plot.y + plot.h - 1, zeroY - 0.5),
+                  ),
+                )
+              : round3(y),
+            w: round3(barW),
+            h: visibleHeight,
+            fillTransparency: 0,
+          };
+        }),
+      };
+    }
+    const points = sourceSeries.values.map((value, categoryIndex) => ({
+      categoryIndex,
+      value,
+      x: round3(plot.x + (categoryIndex + 0.5) * groupW),
+      y: scaleY(value),
+    }));
+    return {
+      ...base,
+      segments: points.slice(1).map((point, index) => ({
+        name: chartName(
+          ctx,
+          `series-${String(seriesIndex + 1).padStart(2, "0")}-segment-${String(index + 1).padStart(2, "0")}`,
+        ),
+        fromCategoryIndex: index,
+        toCategoryIndex: index + 1,
+        x1: points[index].x,
+        y1: points[index].y,
+        x2: point.x,
+        y2: point.y,
+      })),
+      markers: points.map((point) => ({
+        name: chartName(
+          ctx,
+          `series-${String(seriesIndex + 1).padStart(2, "0")}-marker-${String(point.categoryIndex + 1).padStart(2, "0")}`,
+        ),
+        categoryIndex: point.categoryIndex,
+        value: point.value,
+        cx: point.x,
+        cy: point.y,
+        diameter: 6,
+      })),
+    };
+  });
+  ctx.add({
+    kind: "nativeChart",
+    name: primitiveName(ctx.sourceIndex, ctx.id, "native-chart"),
+    role: "native-chart",
+    chartType: content.chartType,
+    x: 48,
+    y: 120,
+    w: 864,
+    h: 318,
+    unit: content.unit,
+    unitLabel: chartLabel(
+      ctx,
+      "unit-label",
+      content.unit,
+      { x: 48, y: 142, w: 864, h: 14 },
+      { bold: true, colorRole: "muted" },
+    ),
+    plot,
+    axis,
+    categories,
+    legend,
+    dataGrid,
+    series,
+  });
+  linePrimitive(
+    ctx,
+    "insight-rule",
+    "chart-insight-rule",
+    { x1: 48, y1: 446, x2: 912, y2: 446 },
+    { colorRole: "decision", width: 2 },
+  );
+  textPrimitive(
+    ctx,
+    "insight",
+    "chart-insight",
+    { x: 48, y: 454, w: 704, h: 24 },
+    content.insight.statement,
+    { fontSize: 11, bold: true, verticalAlign: "middle", maxLines: 2 },
+  );
+  textPrimitive(
+    ctx,
+    "insight-evidence",
+    "chart-insight-evidence",
+    { x: 768, y: 454, w: 144, h: 24 },
+    content.insight.evidenceIds.join(", "),
+    {
+      fontSize: 8,
+      colorRole: "muted",
+      horizontalAlign: "right",
+      verticalAlign: "middle",
+      maxLines: 2,
+    },
+  );
+  addFooter(ctx, slide);
 }
 
 function createContext(slide, sourceIndex) {
@@ -1491,6 +1908,9 @@ function compileSlide(plan, slide, sourceIndex) {
     case "timeline":
       compileTimeline(ctx, slide);
       break;
+    case "chart":
+      compileChart(ctx, slide);
+      break;
     case "table":
       compileTable(ctx, slide);
       break;
@@ -1562,6 +1982,12 @@ function validateNestedEvidence(slide, slideIndex) {
       nested = [
         { item: slide.content.decision, path: `${path}.decision` },
         ...entries(slide.content.milestones, "milestones"),
+      ];
+      break;
+    case "chart":
+      nested = [
+        ...entries(slide.content.series, "series"),
+        { item: slide.content.insight, path: `${path}.insight` },
       ];
       break;
     case "table":
@@ -1825,6 +2251,50 @@ function validateSupportedContent(slide, slideIndex) {
         );
       });
       break;
+    case "chart":
+      allowedKeys(
+        slide.content,
+        ["chartType", "categories", "series", "unit", "insight"],
+        ["chartType", "categories", "series", "unit", "insight"],
+        path,
+      );
+      if (!["bar", "line"].includes(slide.content.chartType)) {
+        fail("E_SPEC_SCHEMA", `${path}.chartType`, "chart type must be bar or line");
+      }
+      validateContentArray(slide.content.categories, `${path}.categories`, 2, 12);
+      slide.content.categories.forEach((category, index) =>
+        validateContentString(category, `${path}.categories[${index}]`),
+      );
+      validateContentString(slide.content.unit, `${path}.unit`);
+      validateContentArray(slide.content.series, `${path}.series`, 1, 4);
+      slide.content.series.forEach((series, seriesIndex) => {
+        const seriesPath = `${path}.series[${seriesIndex}]`;
+        allowedKeys(
+          series,
+          ["name", "values", "evidenceIds"],
+          ["name", "values", "evidenceIds"],
+          seriesPath,
+        );
+        validateContentString(series.name, `${seriesPath}.name`);
+        validateContentArray(
+          series.values,
+          `${seriesPath}.values`,
+          slide.content.categories.length,
+          slide.content.categories.length,
+        );
+        series.values.forEach((value, valueIndex) => {
+          if (!Number.isFinite(value)) {
+            fail(
+              "E_GEOMETRY_NONFINITE",
+              `${seriesPath}.values[${valueIndex}]`,
+              "chart value must be finite",
+            );
+          }
+        });
+        validateEvidenceArray(series.evidenceIds, `${seriesPath}.evidenceIds`);
+      });
+      validateClaimContent(slide.content.insight, `${path}.insight`);
+      break;
     case "table":
       allowedKeys(slide.content, ["columns", "rows", "insight"], ["columns", "rows", "insight"], path);
       validateContentArray(slide.content.columns, `${path}.columns`, 2, 6);
@@ -2026,6 +2496,569 @@ function overlap(a, b) {
   );
 }
 
+function registerDrawingName(value, path, names) {
+  if (!NAME_PATTERN.test(value) || value.length > 120) {
+    fail(
+      "E_NAME_INVALID",
+      path,
+      "name must be <=120 characters of ASCII lowercase kebab-case",
+    );
+  }
+  const folded = value.toLowerCase();
+  if (names.has(folded)) fail("E_NAME_DUPLICATE", path, value);
+  names.add(folded);
+}
+
+function closeEnough(left, right) {
+  return Math.abs(left - right) <= 0.001;
+}
+
+function assertChartText(value, path) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    fail("E_TEXT_EMPTY", path, "chart text is blank");
+  }
+  if (STRICT_CONTROL_PATTERN.test(value)) {
+    fail("E_TEXT_CONTROL_CHAR", path, "chart text contains a control character");
+  }
+}
+
+function boxWithin(inner, outer) {
+  const tolerance = 0.001;
+  return (
+    inner.x >= outer.x - tolerance &&
+    inner.y >= outer.y - tolerance &&
+    inner.x + inner.w <= outer.x + outer.w + tolerance &&
+    inner.y + inner.h <= outer.y + outer.h + tolerance
+  );
+}
+
+function validateChartLabel(label, path, stage, names, container) {
+  exactKeys(label, CHART_LABEL_KEYS, path);
+  registerDrawingName(label.name, `${path}.name`, names);
+  assertChartText(label.text, `${path}.text`);
+  assertGeometryBox(label, path, stage);
+  if (container && !boxWithin(label, container)) {
+    fail("E_GEOMETRY_BOUNDS", path, "chart label must remain inside its region");
+  }
+  if (label.fontSize !== 8 || typeof label.bold !== "boolean") {
+    fail("E_SPEC_SCHEMA", path, "chart labels require 8-point text and boolean bold");
+  }
+  assertColorRole(label.colorRole, `${path}.colorRole`);
+  if (!["left", "center", "right"].includes(label.horizontalAlign)) {
+    fail("E_SPEC_SCHEMA", `${path}.horizontalAlign`, "invalid chart label alignment");
+  }
+  if (!["top", "middle", "bottom"].includes(label.verticalAlign)) {
+    fail("E_SPEC_SCHEMA", `${path}.verticalAlign`, "invalid chart label alignment");
+  }
+  if (label.rotation !== 0) {
+    fail("E_SPEC_SCHEMA", `${path}.rotation`, "chart labels cannot be rotated");
+  }
+}
+
+function validateNamedChartLine(line, path, stage, names, container) {
+  exactKeys(line, NAMED_LINE_KEYS, path);
+  registerDrawingName(line.name, `${path}.name`, names);
+  for (const key of ["x1", "y1", "x2", "y2", "width", "transparency"]) {
+    if (!Number.isFinite(line[key])) {
+      fail("E_GEOMETRY_NONFINITE", `${path}.${key}`, "expected finite number");
+    }
+  }
+  if (
+    line.width <= 0 ||
+    line.transparency < 0 ||
+    line.transparency > 1 ||
+    (line.x1 === line.x2 && line.y1 === line.y2)
+  ) {
+    fail("E_GEOMETRY_BOUNDS", path, "chart line geometry is invalid");
+  }
+  const pointBox = {
+    x: Math.min(line.x1, line.x2),
+    y: Math.min(line.y1, line.y2),
+    w: Math.abs(line.x2 - line.x1),
+    h: Math.abs(line.y2 - line.y1),
+  };
+  const target = container ?? { x: 0, y: 0, w: stage.width, h: stage.height };
+  if (
+    pointBox.x < target.x - 0.001 ||
+    pointBox.y < target.y - 0.001 ||
+    pointBox.x + pointBox.w > target.x + target.w + 0.001 ||
+    pointBox.y + pointBox.h > target.y + target.h + 0.001
+  ) {
+    fail("E_GEOMETRY_BOUNDS", path, "chart line must remain inside its region");
+  }
+  assertColorRole(line.colorRole, `${path}.colorRole`);
+  if (!["solid", "dash", "dot", "dashDot"].includes(line.dash)) {
+    fail("E_SPEC_SCHEMA", `${path}.dash`, "invalid chart line dash");
+  }
+}
+
+function validateNativeChart(primitive, path, stage, names, family, slideEvidenceIds) {
+  if (family !== "chart" || primitive.role !== "native-chart") {
+    fail("E_SPEC_SCHEMA", path, "nativeChart is supported only by chart slides");
+  }
+  assertGeometryBox(primitive, path, stage);
+  for (const [key, value] of Object.entries({ x: 48, y: 120, w: 864, h: 318 })) {
+    if (primitive[key] !== value) {
+      fail("E_GEOMETRY_BOUNDS", `${path}.${key}`, "native chart bounds are fixed");
+    }
+  }
+  if (!["bar", "line"].includes(primitive.chartType)) {
+    fail("E_SPEC_SCHEMA", `${path}.chartType`, "chart type must be bar or line");
+  }
+  assertChartText(primitive.unit, `${path}.unit`);
+  const chartBounds = { x: primitive.x, y: primitive.y, w: primitive.w, h: primitive.h };
+  validateChartLabel(
+    primitive.unitLabel,
+    `${path}.unitLabel`,
+    stage,
+    names,
+    chartBounds,
+  );
+  if (
+    primitive.unitLabel.text !== primitive.unit ||
+    primitive.unitLabel.x !== 48 ||
+    primitive.unitLabel.y !== 142 ||
+    primitive.unitLabel.w !== 864 ||
+    primitive.unitLabel.h !== 14
+  ) {
+    fail("E_SPEC_SCHEMA", `${path}.unitLabel`, "unit label must match the fixed contract");
+  }
+  exactKeys(primitive.plot, ["x", "y", "w", "h"], `${path}.plot`);
+  assertGeometryBox(primitive.plot, `${path}.plot`, stage);
+  for (const [key, value] of Object.entries({ x: 112, y: 160, w: 800, h: 180 })) {
+    if (primitive.plot[key] !== value) {
+      fail("E_GEOMETRY_BOUNDS", `${path}.plot.${key}`, "plot bounds are fixed");
+    }
+  }
+  if (!boxWithin(primitive.plot, chartBounds)) {
+    fail("E_GEOMETRY_BOUNDS", `${path}.plot`, "plot must remain inside chart");
+  }
+  if (
+    !isDenseArray(primitive.categories) ||
+    primitive.categories.length < 2 ||
+    primitive.categories.length > 12
+  ) {
+    fail("E_SPEC_SCHEMA", `${path}.categories`, "expected 2-12 dense categories");
+  }
+  const categoryWidth = primitive.plot.w / primitive.categories.length;
+  primitive.categories.forEach((category, index) => {
+    const categoryPath = `${path}.categories[${index}]`;
+    exactKeys(category, ["index", "label", "labelBox"], categoryPath);
+    if (category.index !== index) {
+      fail("E_SPEC_SCHEMA", `${categoryPath}.index`, "category indexes must be contiguous");
+    }
+    assertChartText(category.label, `${categoryPath}.label`);
+    validateChartLabel(
+      category.labelBox,
+      `${categoryPath}.labelBox`,
+      stage,
+      names,
+      chartBounds,
+    );
+    if (
+      category.labelBox.text !== category.label ||
+      !closeEnough(category.labelBox.x, primitive.plot.x + index * categoryWidth) ||
+      category.labelBox.y !== 344 ||
+      !closeEnough(category.labelBox.w, categoryWidth) ||
+      category.labelBox.h !== 28
+    ) {
+      fail("E_GEOMETRY_BOUNDS", `${categoryPath}.labelBox`, "category label geometry is invalid");
+    }
+  });
+  if (
+    !isDenseArray(primitive.series) ||
+    primitive.series.length < 1 ||
+    primitive.series.length > 4
+  ) {
+    fail("E_SPEC_SCHEMA", `${path}.series`, "expected 1-4 dense chart series");
+  }
+  const declaredEvidence = new Set(slideEvidenceIds);
+  const allValues = [];
+  primitive.series.forEach((series, seriesIndex) => {
+    const seriesPath = `${path}.series[${seriesIndex}]`;
+    exactKeys(
+      series,
+      primitive.chartType === "bar"
+        ? ["index", "name", "evidenceIds", "colorRole", "dash", "bars"]
+        : ["index", "name", "evidenceIds", "colorRole", "dash", "segments", "markers"],
+      seriesPath,
+    );
+    if (series.index !== seriesIndex) {
+      fail("E_SPEC_SCHEMA", `${seriesPath}.index`, "series indexes must be contiguous");
+    }
+    assertChartText(series.name, `${seriesPath}.name`);
+    const expectedStyle = CHART_SERIES_STYLES[seriesIndex];
+    if (
+      series.colorRole !== expectedStyle.colorRole ||
+      series.dash !== expectedStyle.dash
+    ) {
+      fail("E_SPEC_SCHEMA", seriesPath, "series style does not match its stable index");
+    }
+    if (
+      !isDenseArray(series.evidenceIds) ||
+      series.evidenceIds.length === 0 ||
+      new Set(series.evidenceIds).size !== series.evidenceIds.length
+    ) {
+      fail("E_SPEC_SCHEMA", `${seriesPath}.evidenceIds`, "invalid series evidence array");
+    }
+    series.evidenceIds.forEach((evidenceId, evidenceIndex) => {
+      assertChartText(evidenceId, `${seriesPath}.evidenceIds[${evidenceIndex}]`);
+      if (!declaredEvidence.has(evidenceId)) {
+        fail(
+          "E_EVIDENCE_NOT_DECLARED",
+          `${seriesPath}.evidenceIds[${evidenceIndex}]`,
+          `${evidenceId} is absent from slide.evidenceIds`,
+        );
+      }
+    });
+    const marks = primitive.chartType === "bar" ? series.bars : series.markers;
+    if (!isDenseArray(marks) || marks.length !== primitive.categories.length) {
+      fail("E_SPEC_SCHEMA", seriesPath, "chart mark count must match categories");
+    }
+    marks.forEach((mark, categoryIndex) => {
+      if (!Number.isFinite(mark.value)) {
+        fail("E_GEOMETRY_NONFINITE", `${seriesPath}.value`, "chart value must be finite");
+      }
+      allValues.push(mark.value);
+      if (mark.categoryIndex !== categoryIndex) {
+        fail("E_SPEC_SCHEMA", `${seriesPath}.categoryIndex`, "mark indexes must be contiguous");
+      }
+    });
+  });
+  const expectedAxis = niceAxis(allValues);
+  exactKeys(
+    primitive.axis,
+    ["min", "max", "step", "zeroY", "baseline", "ticks"],
+    `${path}.axis`,
+  );
+  for (const key of ["min", "max", "step", "zeroY"]) {
+    if (!Number.isFinite(primitive.axis[key])) {
+      fail("E_GEOMETRY_NONFINITE", `${path}.axis.${key}`, "axis value must be finite");
+    }
+  }
+  const expectedZeroY = scaleChartY(0, expectedAxis, primitive.plot);
+  if (
+    primitive.axis.min !== expectedAxis.min ||
+    primitive.axis.max !== expectedAxis.max ||
+    primitive.axis.step !== expectedAxis.step ||
+    !closeEnough(primitive.axis.zeroY, expectedZeroY) ||
+    primitive.axis.min > 0 ||
+    primitive.axis.max < 0 ||
+    primitive.axis.min >= primitive.axis.max ||
+    primitive.axis.step <= 0
+  ) {
+    fail("E_SPEC_SCHEMA", `${path}.axis`, "axis is not the zero-inclusive nice domain");
+  }
+  validateNamedChartLine(
+    primitive.axis.baseline,
+    `${path}.axis.baseline`,
+    stage,
+    names,
+    primitive.plot,
+  );
+  if (
+    primitive.axis.baseline.x1 !== primitive.plot.x ||
+    primitive.axis.baseline.x2 !== primitive.plot.x + primitive.plot.w ||
+    !closeEnough(primitive.axis.baseline.y1, primitive.axis.zeroY) ||
+    !closeEnough(primitive.axis.baseline.y2, primitive.axis.zeroY)
+  ) {
+    fail("E_GEOMETRY_BOUNDS", `${path}.axis.baseline`, "baseline must represent zero");
+  }
+  const expectedTicks = expectedAxis.ticks.slice().reverse();
+  if (
+    !isDenseArray(primitive.axis.ticks) ||
+    primitive.axis.ticks.length !== expectedTicks.length ||
+    primitive.axis.ticks.length > 6
+  ) {
+    fail("E_SPEC_SCHEMA", `${path}.axis.ticks`, "axis requires at most six exact ticks");
+  }
+  primitive.axis.ticks.forEach((tick, index) => {
+    const tickPath = `${path}.axis.ticks[${index}]`;
+    exactKeys(tick, ["value", "label", "gridLine", "labelBox"], tickPath);
+    const expectedValue = expectedTicks[index];
+    const expectedY = scaleChartY(expectedValue, primitive.axis, primitive.plot);
+    const expectedLabelY = round3(
+      Math.max(
+        primitive.plot.y,
+        Math.min(primitive.plot.y + primitive.plot.h - 12, expectedY - 6),
+      ),
+    );
+    if (
+      tick.value !== expectedValue ||
+      tick.label !== String(expectedValue)
+    ) {
+      fail("E_SPEC_SCHEMA", tickPath, "tick value and label are inconsistent");
+    }
+    validateNamedChartLine(
+      tick.gridLine,
+      `${tickPath}.gridLine`,
+      stage,
+      names,
+      primitive.plot,
+    );
+    validateChartLabel(
+      tick.labelBox,
+      `${tickPath}.labelBox`,
+      stage,
+      names,
+      chartBounds,
+    );
+    if (
+      !closeEnough(tick.gridLine.y1, expectedY) ||
+      !closeEnough(tick.gridLine.y2, expectedY) ||
+      tick.gridLine.x1 !== primitive.plot.x ||
+      tick.gridLine.x2 !== primitive.plot.x + primitive.plot.w ||
+      tick.labelBox.text !== tick.label ||
+      tick.labelBox.x !== 48 ||
+      tick.labelBox.y !== expectedLabelY ||
+      tick.labelBox.w !== 56 ||
+      tick.labelBox.h !== 12
+    ) {
+      fail("E_GEOMETRY_BOUNDS", tickPath, "tick geometry is inconsistent");
+    }
+  });
+  if (
+    !isDenseArray(primitive.legend) ||
+    primitive.legend.length !== primitive.series.length
+  ) {
+    fail("E_SPEC_SCHEMA", `${path}.legend`, "legend must match chart series");
+  }
+  const legendWidth = primitive.w / primitive.series.length;
+  primitive.legend.forEach((entry, index) => {
+    const entryPath = `${path}.legend[${index}]`;
+    exactKeys(
+      entry,
+      ["seriesIndex", "colorRole", "swatchName", "swatch", "labelBox"],
+      entryPath,
+    );
+    if (
+      entry.seriesIndex !== index ||
+      entry.colorRole !== primitive.series[index].colorRole
+    ) {
+      fail("E_SPEC_SCHEMA", entryPath, "legend entry must match series");
+    }
+    registerDrawingName(entry.swatchName, `${entryPath}.swatchName`, names);
+    exactKeys(entry.swatch, ["x", "y", "w", "h"], `${entryPath}.swatch`);
+    assertGeometryBox(entry.swatch, `${entryPath}.swatch`, stage);
+    validateChartLabel(
+      entry.labelBox,
+      `${entryPath}.labelBox`,
+      stage,
+      names,
+      chartBounds,
+    );
+    if (
+      !boxWithin(entry.swatch, chartBounds) ||
+      !closeEnough(entry.swatch.x, 48 + index * legendWidth + 8) ||
+      entry.swatch.y !== 128 ||
+      entry.swatch.w !== 16 ||
+      entry.swatch.h !== 4 ||
+      entry.labelBox.text !== primitive.series[index].name ||
+      !closeEnough(entry.labelBox.x, 48 + index * legendWidth + 30) ||
+      entry.labelBox.y !== 120 ||
+      !closeEnough(entry.labelBox.w, legendWidth - 38) ||
+      entry.labelBox.h !== 20
+    ) {
+      fail("E_GEOMETRY_BOUNDS", entryPath, "legend geometry is invalid");
+    }
+  });
+  exactKeys(
+    primitive.dataGrid,
+    ["x", "y", "w", "h", "seriesLabelWidth", "rowHeight", "rows"],
+    `${path}.dataGrid`,
+  );
+  for (const [key, value] of Object.entries({
+    x: 48,
+    y: 376,
+    w: 864,
+    h: 60,
+    seriesLabelWidth: 64,
+  })) {
+    if (primitive.dataGrid[key] !== value) {
+      fail("E_GEOMETRY_BOUNDS", `${path}.dataGrid.${key}`, "data grid bounds are fixed");
+    }
+  }
+  assertGeometryBox(primitive.dataGrid, `${path}.dataGrid`, stage);
+  if (!boxWithin(primitive.dataGrid, chartBounds)) {
+    fail("E_GEOMETRY_BOUNDS", `${path}.dataGrid`, "data grid must remain inside chart");
+  }
+  const expectedRowHeight = round3(60 / primitive.series.length);
+  if (
+    primitive.dataGrid.rowHeight !== expectedRowHeight ||
+    !isDenseArray(primitive.dataGrid.rows) ||
+    primitive.dataGrid.rows.length !== primitive.series.length
+  ) {
+    fail("E_SPEC_SCHEMA", `${path}.dataGrid`, "data grid rows must match series");
+  }
+  primitive.dataGrid.rows.forEach((row, seriesIndex) => {
+    const rowPath = `${path}.dataGrid.rows[${seriesIndex}]`;
+    exactKeys(row, ["seriesIndex", "labelBox", "values"], rowPath);
+    if (
+      row.seriesIndex !== seriesIndex ||
+      !isDenseArray(row.values) ||
+      row.values.length !== primitive.categories.length
+    ) {
+      fail("E_SPEC_SCHEMA", rowPath, "data row dimensions are invalid");
+    }
+    validateChartLabel(row.labelBox, `${rowPath}.labelBox`, stage, names, primitive.dataGrid);
+    const expectedRowY = round3(376 + seriesIndex * (60 / primitive.series.length));
+    if (
+      row.labelBox.text !== primitive.series[seriesIndex].name ||
+      row.labelBox.x !== 48 ||
+      row.labelBox.y !== expectedRowY ||
+      row.labelBox.w !== 64 ||
+      !closeEnough(row.labelBox.h, 60 / primitive.series.length)
+    ) {
+      fail("E_GEOMETRY_BOUNDS", `${rowPath}.labelBox`, "series label geometry is invalid");
+    }
+    row.values.forEach((cell, categoryIndex) => {
+      const cellPath = `${rowPath}.values[${categoryIndex}]`;
+      exactKeys(cell, ["categoryIndex", "value", "labelBox"], cellPath);
+      if (
+        cell.categoryIndex !== categoryIndex ||
+        cell.value !== allValues[seriesIndex * primitive.categories.length + categoryIndex]
+      ) {
+        fail("E_SPEC_SCHEMA", cellPath, "data grid value must match chart mark");
+      }
+      validateChartLabel(
+        cell.labelBox,
+        `${cellPath}.labelBox`,
+        stage,
+        names,
+        primitive.dataGrid,
+      );
+      const expectedValueWidth = 800 / primitive.categories.length;
+      if (
+        cell.labelBox.text !== String(cell.value) ||
+        !closeEnough(cell.labelBox.x, 112 + categoryIndex * expectedValueWidth) ||
+        cell.labelBox.y !== expectedRowY ||
+        !closeEnough(cell.labelBox.w, expectedValueWidth) ||
+        !closeEnough(cell.labelBox.h, 60 / primitive.series.length)
+      ) {
+        fail("E_GEOMETRY_BOUNDS", `${cellPath}.labelBox`, "value label geometry is invalid");
+      }
+    });
+  });
+  const groupW = primitive.plot.w / primitive.categories.length;
+  const usableW = groupW * 0.84;
+  const barGap = Math.max(1, groupW * 0.02);
+  const barW = (usableW - barGap * (primitive.series.length - 1)) / primitive.series.length;
+  const scaleY = (value) => scaleChartY(value, primitive.axis, primitive.plot);
+  primitive.series.forEach((series, seriesIndex) => {
+    const seriesPath = `${path}.series[${seriesIndex}]`;
+    if (primitive.chartType === "bar") {
+      series.bars.forEach((bar, categoryIndex) => {
+        const barPath = `${seriesPath}.bars[${categoryIndex}]`;
+        exactKeys(
+          bar,
+          ["kind", "name", "categoryIndex", "value", "x", "y", "w", "h", "fillTransparency"],
+          barPath,
+        );
+        registerDrawingName(bar.name, `${barPath}.name`, names);
+        const groupX =
+          primitive.plot.x + categoryIndex * groupW + (groupW - usableW) / 2;
+        const expectedX = round3(groupX + seriesIndex * (barW + barGap));
+        const valueY = scaleY(bar.value);
+        const zeroLineY = round3(
+          Math.max(
+            primitive.plot.y,
+            Math.min(primitive.plot.y + primitive.plot.h - 1, primitive.axis.zeroY - 0.5),
+          ),
+        );
+        const height = round3(Math.abs(valueY - primitive.axis.zeroY));
+        const visibleHeight = bar.value === 0 ? 1 : Math.max(1, height);
+        const expected = {
+          kind: bar.value === 0 ? "line" : "rect",
+          x: expectedX,
+          y:
+            bar.value === 0
+              ? zeroLineY
+              : round3(
+                  bar.value > 0
+                    ? Math.max(primitive.plot.y, primitive.axis.zeroY - visibleHeight)
+                    : Math.min(valueY, primitive.axis.zeroY),
+                ),
+          w: round3(barW),
+          h: visibleHeight,
+        };
+        if (
+          bar.kind !== expected.kind ||
+          !closeEnough(bar.x, expected.x) ||
+          !closeEnough(bar.y, expected.y) ||
+          !closeEnough(bar.w, expected.w) ||
+          !closeEnough(bar.h, expected.h) ||
+          bar.fillTransparency !== 0 ||
+          !boxWithin(bar, primitive.plot)
+        ) {
+          fail("E_GEOMETRY_BOUNDS", barPath, "bar geometry is invalid");
+        }
+      });
+    } else {
+      if (
+        !isDenseArray(series.segments) ||
+        series.segments.length !== primitive.categories.length - 1
+      ) {
+        fail("E_SPEC_SCHEMA", `${seriesPath}.segments`, "line segments must join categories");
+      }
+      series.markers.forEach((marker, categoryIndex) => {
+        const markerPath = `${seriesPath}.markers[${categoryIndex}]`;
+        exactKeys(
+          marker,
+          ["name", "categoryIndex", "value", "cx", "cy", "diameter"],
+          markerPath,
+        );
+        registerDrawingName(marker.name, `${markerPath}.name`, names);
+        const expectedX = round3(
+          primitive.plot.x + (categoryIndex + 0.5) * groupW,
+        );
+        if (
+          marker.diameter !== 6 ||
+          !closeEnough(marker.cx, expectedX) ||
+          !closeEnough(marker.cy, scaleY(marker.value)) ||
+          marker.cx < primitive.plot.x ||
+          marker.cx > primitive.plot.x + primitive.plot.w ||
+          marker.cy < primitive.plot.y ||
+          marker.cy > primitive.plot.y + primitive.plot.h
+        ) {
+          fail("E_GEOMETRY_BOUNDS", markerPath, "line marker geometry is invalid");
+        }
+      });
+      series.segments.forEach((segment, segmentIndex) => {
+        const segmentPath = `${seriesPath}.segments[${segmentIndex}]`;
+        exactKeys(
+          segment,
+          ["name", "fromCategoryIndex", "toCategoryIndex", "x1", "y1", "x2", "y2"],
+          segmentPath,
+        );
+        registerDrawingName(segment.name, `${segmentPath}.name`, names);
+        const left = series.markers[segmentIndex];
+        const right = series.markers[segmentIndex + 1];
+        if (
+          segment.fromCategoryIndex !== segmentIndex ||
+          segment.toCategoryIndex !== segmentIndex + 1 ||
+          !closeEnough(segment.x1, left.cx) ||
+          !closeEnough(segment.y1, left.cy) ||
+          !closeEnough(segment.x2, right.cx) ||
+          !closeEnough(segment.y2, right.cy) ||
+          (segment.x1 === segment.x2 && segment.y1 === segment.y2)
+        ) {
+          fail("E_GEOMETRY_BOUNDS", segmentPath, "line segment geometry is invalid");
+        }
+      });
+    }
+  });
+  if (primitive.chartType === "bar") {
+    const bars = primitive.series.flatMap((series) => series.bars);
+    bars.forEach((left, index) => {
+      bars.slice(index + 1).forEach((right) => {
+        if (overlap(left, right)) {
+          fail("E_GEOMETRY_OVERLAP", path, "native chart bars overlap");
+        }
+      });
+    });
+  }
+}
+
 function validatePrimitive(
   primitive,
   path,
@@ -2044,15 +3077,12 @@ function validatePrimitive(
           ? LINE_KEYS
           : primitive.kind === "table"
             ? TABLE_KEYS
-          : undefined;
+            : primitive.kind === "nativeChart"
+              ? CHART_KEYS
+              : undefined;
   if (!keys) fail("E_SPEC_SCHEMA", `${path}.kind`, "primitive kind is not supported");
   exactKeys(primitive, keys, path);
-  if (!NAME_PATTERN.test(primitive.name) || primitive.name.length > 120) {
-    fail("E_NAME_INVALID", `${path}.name`, "name must be <=120 characters of ASCII lowercase kebab-case");
-  }
-  const folded = primitive.name.toLowerCase();
-  if (names.has(folded)) fail("E_NAME_DUPLICATE", `${path}.name`, primitive.name);
-  names.add(folded);
+  registerDrawingName(primitive.name, `${path}.name`, names);
   assertString(primitive.role, `${path}.role`);
   if (!Number.isInteger(primitive.z) || primitive.z < 1) fail("E_NONDETERMINISTIC_OUTPUT", `${path}.z`, "z must be positive integer");
   if (primitive.kind === "text") {
@@ -2102,7 +3132,7 @@ function validatePrimitive(
     if (!["solid", "dash", "dot", "dashDot"].includes(primitive.dash) || primitive.arrowStart !== "none" || !["none", "open"].includes(primitive.arrowEnd)) {
       fail("E_SPEC_SCHEMA", path, "line style is invalid");
     }
-  } else {
+  } else if (primitive.kind === "table") {
     assertGeometryBox(primitive, path, stage);
     if (!isDenseArray(primitive.headers) || primitive.headers.length === 0) {
       fail("E_SPEC_SCHEMA", `${path}.headers`, "expected nonempty dense string array");
@@ -2252,6 +3282,15 @@ function validatePrimitive(
         fail("E_SPEC_SCHEMA", `${path}.${key}`, "table font size must be 8");
       }
     }
+  } else {
+    validateNativeChart(
+      primitive,
+      path,
+      stage,
+      names,
+      family,
+      slideEvidenceIds,
+    );
   }
 }
 
@@ -2412,6 +3451,53 @@ function validateDrawingSpecSnapshot(spec) {
           "E_SPEC_SCHEMA",
           `${path}.primitives`,
           "table families require exactly one native table primitive",
+        );
+      }
+    }
+    if (slide.family === "chart") {
+      const chartCount = slide.primitives.filter(
+        (primitive) => primitive.kind === "nativeChart",
+      ).length;
+      if (chartCount !== 1) {
+        fail(
+          "E_SPEC_SCHEMA",
+          `${path}.primitives`,
+          "chart family requires exactly one nativeChart primitive",
+        );
+      }
+      const insightRule = slide.primitives.filter(
+        (primitive) => primitive.role === "chart-insight-rule",
+      );
+      const insightText = slide.primitives.filter(
+        (primitive) => primitive.role === "chart-insight",
+      );
+      const insightEvidence = slide.primitives.filter(
+        (primitive) => primitive.role === "chart-insight-evidence",
+      );
+      if (
+        insightRule.length !== 1 ||
+        insightRule[0].kind !== "line" ||
+        insightRule[0].x1 !== 48 ||
+        insightRule[0].y1 !== 446 ||
+        insightRule[0].x2 !== 912 ||
+        insightRule[0].y2 !== 446 ||
+        insightText.length !== 1 ||
+        insightText[0].kind !== "text" ||
+        insightText[0].x !== 48 ||
+        insightText[0].y !== 454 ||
+        insightText[0].w !== 704 ||
+        insightText[0].h !== 24 ||
+        insightEvidence.length !== 1 ||
+        insightEvidence[0].kind !== "text" ||
+        insightEvidence[0].x !== 768 ||
+        insightEvidence[0].y !== 454 ||
+        insightEvidence[0].w !== 144 ||
+        insightEvidence[0].h !== 24
+      ) {
+        fail(
+          "E_GEOMETRY_BOUNDS",
+          `${path}.primitives`,
+          "chart insight geometry does not match the fixed contract",
         );
       }
     }

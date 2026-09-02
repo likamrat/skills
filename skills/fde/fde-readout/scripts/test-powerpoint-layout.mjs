@@ -367,7 +367,7 @@ try {
     spec.slides[0].primitives[0].kind = "image";
   }, full);
   assertThrowsCode("unknown family", "E_UNSUPPORTED_FAMILY", (spec) => {
-    spec.slides[0].family = "chart";
+    spec.slides[0].family = "workflow";
   }, full);
   assertThrowsCode("null", "E_SPEC_SCHEMA", (spec) => {
     spec.theme.requiredFooter = null;
