@@ -168,6 +168,21 @@ function preferredPair(source, target) {
 }
 
 {
+  for (const dxSign of [-1, 1]) {
+    for (const dySign of [-1, 1]) {
+      const source = rect("s", 0, 0, 1, 1);
+      const target = rect("t", dxSign * 1.2345, dySign * 1.2345, 1, 1);
+      const pair = preferredPair(source, target);
+      check(
+        pair.sourceSide === (dxSign < 0 ? "left" : "right") &&
+          pair.targetSide === (dxSign < 0 ? "right" : "left"),
+        `symmetric quantized diagonal (${dxSign}, ${dySign}) resolves horizontal-first`,
+      );
+    }
+  }
+}
+
+{
   const source = rect("s", 0, 0, 20, 20);
   const target = rect("t", -61.308, -61.308, 20, 20);
   const pair = preferredPair(source, target);
@@ -290,14 +305,12 @@ function referenceAnchors(rectangle) {
 function referencePairs(source, target) {
   const sourceAnchors = referenceAnchors(source);
   const targetAnchors = referenceAnchors(target);
-  const dx = referenceUnits(
-    target.x + target.w / 2 - (source.x + source.w / 2),
-  );
-  const dy = referenceUnits(
-    target.y + target.h / 2 - (source.y + source.h / 2),
-  );
+  const dx = target.x + target.w / 2 - (source.x + source.w / 2);
+  const dy = target.y + target.h / 2 - (source.y + source.h / 2);
+  const dxMagnitude = referenceUnits(Math.abs(dx));
+  const dyMagnitude = referenceUnits(Math.abs(dy));
   const preferred =
-    Math.abs(dx) >= Math.abs(dy)
+    dxMagnitude >= dyMagnitude
       ? dx >= 0
         ? { sourceSide: "right", targetSide: "left" }
         : { sourceSide: "left", targetSide: "right" }
@@ -640,6 +653,35 @@ assertThrows("overflowing anchor arithmetic is deterministic", "E_ROUTER_NONFINI
       { x: -normalFor(route.toSide).x, y: -normalFor(route.toSide).y },
     ),
     "quantized coincident route approaches on the inward target normal",
+  );
+  validateOrthogonalRoute(route, { sourceRect, targetRect });
+}
+
+{
+  const sourceRect = rect("overflow-loser-source", -400, -400, 400, 1);
+  const targetRect = rect(
+    "overflow-loser-target",
+    Number.MAX_SAFE_INTEGER / 1000 - 320,
+    -200,
+    0.002,
+    1,
+  );
+  const route = routeOrthogonalEdge(routeInput(sourceRect, targetRect));
+  check(
+    route.fromSide === "right" && route.toSide === "top",
+    "cost-overflowing losing candidate does not abort the safe right-to-top winner",
+  );
+  check(Number.isSafeInteger(route.cost * 1000), "selected winner exposes a safe numeric cost");
+  check(
+    route.segments.every(
+      (segment) => segment.x1 !== segment.x2 || segment.y1 !== segment.y2,
+    ),
+    "safe winner before an overflowing candidate emits no zero-length segments",
+  );
+  check(
+    stableRouteJson(route) ===
+      stableRouteJson(routeOrthogonalEdge(routeInput(sourceRect, targetRect))),
+    "safe winner before an overflowing candidate is deterministic",
   );
   validateOrthogonalRoute(route, { sourceRect, targetRect });
 }

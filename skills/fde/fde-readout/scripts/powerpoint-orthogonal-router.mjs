@@ -21,8 +21,8 @@ const NORMALS = {
 const BEND_COST = 18;
 const PREFERENCE_COST = 20;
 const THOUSAND = 1000;
-const BEND_COST_UNITS = BEND_COST * THOUSAND;
-const PREFERENCE_COST_UNITS = PREFERENCE_COST * THOUSAND;
+const BEND_COST_UNITS = BigInt(BEND_COST * THOUSAND);
+const PREFERENCE_COST_UNITS = BigInt(PREFERENCE_COST * THOUSAND);
 
 export class RouterError extends Error {
   constructor(code, path, message) {
@@ -77,6 +77,13 @@ function fromThousandths(units, path = "$") {
     fail("E_ROUTER_NONFINITE", path, "integer-thousandth value loses precision as a number");
   }
   return Object.is(value, -0) ? 0 : value;
+}
+
+function fromBigIntThousandths(units, path = "$") {
+  if (units > BigInt(Number.MAX_SAFE_INTEGER) || units < BigInt(Number.MIN_SAFE_INTEGER)) {
+    fail("E_ROUTER_NONFINITE", path, "integer-thousandth value is unsafe");
+  }
+  return fromThousandths(Number(units), path);
 }
 
 function isPlainObject(value) {
@@ -286,9 +293,11 @@ export function nodeAnchors(rect) {
 function dominantPreferredSides(source, target) {
   const sourceCenter = { x: source.x + source.w / 2, y: source.y + source.h / 2 };
   const targetCenter = { x: target.x + target.w / 2, y: target.y + target.h / 2 };
-  const dx = toThousandths(targetCenter.x - sourceCenter.x, "$.center.dx");
-  const dy = toThousandths(targetCenter.y - sourceCenter.y, "$.center.dy");
-  const horizontalDominant = Math.abs(dx) >= Math.abs(dy);
+  const dx = targetCenter.x - sourceCenter.x;
+  const dy = targetCenter.y - sourceCenter.y;
+  const dxMagnitude = toThousandths(Math.abs(dx), "$.center.dx");
+  const dyMagnitude = toThousandths(Math.abs(dy), "$.center.dy");
+  const horizontalDominant = dxMagnitude >= dyMagnitude;
   if (horizontalDominant) {
     return dx >= 0
       ? { sourceSide: "right", targetSide: "left" }
@@ -450,24 +459,13 @@ function collapsePoints(points) {
   return collapsed;
 }
 
-function safeAdd(total, value, path) {
-  const result = total + value;
-  if (!Number.isSafeInteger(result)) {
-    fail("E_ROUTER_NONFINITE", path, "route cost exceeds the safe integer-thousandth range");
-  }
-  return result;
-}
-
 function manhattanLengthUnits(points) {
-  let total = 0;
+  let total = 0n;
   for (let index = 1; index < points.length; index += 1) {
-    const dx = Math.abs(points[index].x - points[index - 1].x);
-    const dy = Math.abs(points[index].y - points[index - 1].y);
-    if (!Number.isSafeInteger(dx) || !Number.isSafeInteger(dy)) {
-      fail("E_ROUTER_NONFINITE", "$.cost", "route length exceeds the safe integer-thousandth range");
-    }
-    total = safeAdd(total, dx, "$.cost");
-    total = safeAdd(total, dy, "$.cost");
+    const dx = BigInt(points[index].x) - BigInt(points[index - 1].x);
+    const dy = BigInt(points[index].y) - BigInt(points[index - 1].y);
+    total += dx < 0n ? -dx : dx;
+    total += dy < 0n ? -dy : dy;
   }
   return total;
 }
@@ -550,14 +548,10 @@ export function routeOrthogonalEdge(input) {
       for (const rawPoints of result.candidates) {
         const points = collapsePoints(rawPoints);
         if (points.length < 2) continue;
-        const bendCount = points.length - 2;
+        const bendCount = BigInt(points.length - 2);
         let costUnits = manhattanLengthUnits(points);
-        costUnits = safeAdd(costUnits, bendCount * BEND_COST_UNITS, "$.cost");
-        costUnits = safeAdd(
-          costUnits,
-          pair.preferenceRank * PREFERENCE_COST_UNITS,
-          "$.cost",
-        );
+        costUnits += bendCount * BEND_COST_UNITS;
+        costUnits += BigInt(pair.preferenceRank) * PREFERENCE_COST_UNITS;
         const candidate = { pair, points, costUnits };
         if (
           !best ||
@@ -599,7 +593,7 @@ export function routeOrthogonalEdge(input) {
     toSide: best.pair.targetSide,
     points,
     segments,
-    cost: fromThousandths(best.costUnits, "$.cost"),
+    cost: fromBigIntThousandths(best.costUnits, "$.cost"),
   };
 }
 
