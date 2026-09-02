@@ -70,6 +70,12 @@ function u32(value) {
   return bytes;
 }
 
+function u64(value) {
+  const bytes = Buffer.alloc(8);
+  bytes.writeBigUInt64LE(BigInt(value));
+  return bytes;
+}
+
 function createZip(inputEntries, options = {}) {
   const localRecords = [];
   const centralRecords = [];
@@ -94,6 +100,7 @@ function createZip(inputEntries, options = {}) {
     const checksum = input.crc ?? crc32(data);
     const localExtra = asBuffer(input.localExtra ?? Buffer.alloc(0));
     const centralExtra = asBuffer(input.centralExtra ?? Buffer.alloc(0));
+    const centralComment = asBuffer(input.centralComment ?? Buffer.alloc(0));
     const local = Buffer.concat([
       u32(0x04034b50),
       u16(versionNeeded),
@@ -109,14 +116,16 @@ function createZip(inputEntries, options = {}) {
       localName,
       localExtra,
       compressed,
-      ...(input.dataDescriptor
-        ? [
-            u32(0x08074b50),
-            u32(checksum),
-            u32(compressed.length),
-            u32(data.length),
-          ]
-        : []),
+      ...(input.dataDescriptor === "unsigned"
+        ? [u32(checksum), u32(compressed.length), u32(data.length)]
+        : input.dataDescriptor
+          ? [
+              u32(0x08074b50),
+              u32(checksum),
+              u32(compressed.length),
+              u32(data.length),
+            ]
+          : []),
     ]);
     localRecords.push(local);
 
@@ -133,13 +142,14 @@ function createZip(inputEntries, options = {}) {
       u32(input.centralUncompressedSize ?? data.length),
       u16(name.length),
       u16(centralExtra.length),
-      u16(0),
+      u16(centralComment.length),
       u16(0),
       u16(0),
       u32(0),
       u32(input.localOffset ?? localOffset),
       name,
       centralExtra,
+      centralComment,
     ]);
     centralRecords.push(central);
     localOffset += local.length;
@@ -150,6 +160,25 @@ function createZip(inputEntries, options = {}) {
   const entryCount = options.zip64 ? 0xffff : inputEntries.length;
   const centralOffset =
     (options.centralOffset ?? localArea.length) >>> 0;
+  const archiveComment = asBuffer(options.archiveComment ?? Buffer.alloc(0));
+  const zip64Offset = localArea.length + centralArea.length;
+  const zip64Eocd = options.zip64
+    ? Buffer.concat([
+        u32(0x06064b50),
+        u64(44),
+        u16(45),
+        u16(45),
+        u32(0),
+        u32(0),
+        u64(inputEntries.length),
+        u64(inputEntries.length),
+        u64(centralArea.length),
+        u64(localArea.length),
+      ])
+    : Buffer.alloc(0);
+  const zip64Locator = options.zip64
+    ? Buffer.concat([u32(0x07064b50), u32(0), u64(zip64Offset), u32(1)])
+    : Buffer.alloc(0);
   const eocd = Buffer.concat([
     u32(0x06054b50),
     u16(0),
@@ -158,9 +187,29 @@ function createZip(inputEntries, options = {}) {
     u16(entryCount),
     u32(options.zip64 ? 0xffffffff : centralArea.length),
     u32(options.zip64 ? 0xffffffff : centralOffset),
-    u16(0),
+    u16(archiveComment.length),
+    archiveComment,
   ]);
-  return Buffer.concat([localArea, centralArea, eocd]);
+  return Buffer.concat([
+    localArea,
+    centralArea,
+    zip64Eocd,
+    zip64Locator,
+    eocd,
+  ]);
+}
+
+function fakeEocd(commentLength = 0) {
+  return Buffer.concat([
+    u32(0x06054b50),
+    u16(0),
+    u16(0),
+    u16(0),
+    u16(0),
+    u32(0),
+    u32(0),
+    u16(commentLength),
+  ]);
 }
 
 function xml(value) {
@@ -349,6 +398,46 @@ try {
   assert.deepEqual(
     clean.parts.map((part) => part.name),
     clean.parts.map((part) => part.name).toSorted(),
+  );
+
+  const deflatedDirectory = inspectPptxBytes(
+    createZip([
+      ...cleanParts(),
+      { data: Buffer.alloc(0), method: "deflate", name: "empty/" },
+    ]),
+  );
+  assert.equal(deflatedDirectory.valid, true);
+  assert.equal(deflatedDirectory.counts.archiveEntries, 13);
+  assert.equal(deflatedDirectory.counts.parts, 12);
+
+  assert.equal(
+    inspectPptxBytes(
+      createZip(cleanParts(), { archiveComment: fakeEocd() }),
+    ).valid,
+    true,
+    "EOCD signatures inside archive comments must not shadow the real EOCD",
+  );
+  const centralEocdCommentParts = cleanParts().map((part, index) =>
+    index === 0 ? { ...part, centralComment: fakeEocd(22) } : part,
+  );
+  assert.equal(
+    inspectPptxBytes(createZip(centralEocdCommentParts)).valid,
+    true,
+    "EOCD signatures inside central-entry comments must be ignored",
+  );
+  const fakeZip64Locator = Buffer.concat([
+    u32(0x07064b50),
+    u32(0),
+    u64(0),
+    u32(1),
+  ]);
+  const centralLocatorCommentParts = cleanParts().map((part, index) =>
+    index === 0 ? { ...part, centralComment: fakeZip64Locator } : part,
+  );
+  assert.equal(
+    inspectPptxBytes(createZip(centralLocatorCommentParts)).valid,
+    true,
+    "ZIP64 locator signatures inside central-entry comments must be ignored",
   );
 
   const hiddenParts = replacePart(
@@ -540,6 +629,58 @@ try {
     "EMBEDDED_ACTIVE_CONTENT_FORBIDDEN",
   );
 
+  const webExtensionPart = [
+    ...cleanParts(),
+    {
+      data: xml("<webExtension/>"),
+      method: "deflate",
+      name: "ppt/webExtensions/webExtension1.xml",
+    },
+  ];
+  assertInvalid(
+    createZip(webExtensionPart),
+    "EMBEDDED_ACTIVE_CONTENT_FORBIDDEN",
+  );
+
+  let webExtensionContentTypeParts = appendContentType(
+    cleanParts(),
+    '<Override PartName="/custom/addin.dat" ContentType="application/vnd.ms-office.webextension+xml"/>',
+  );
+  webExtensionContentTypeParts.push({
+    data: xml("<webExtension/>"),
+    method: "deflate",
+    name: "custom/addin.dat",
+  });
+  assertInvalid(
+    createZip(webExtensionContentTypeParts),
+    "EMBEDDED_ACTIVE_CONTENT_FORBIDDEN",
+  );
+
+  const webExtensionRelationshipParts = [
+    ...replacePart(
+      cleanParts(),
+      "ppt/_rels/presentation.xml.rels",
+      (data) =>
+        Buffer.from(
+          data
+            .toString("utf8")
+            .replace(
+              "</Relationships>",
+              '<Relationship Id="rIdTaskPane" Type="http://schemas.microsoft.com/office/2011/relationships/webextensiontaskpane" Target="../custom/taskpane.xml"/></Relationships>',
+            ),
+        ),
+    ),
+    {
+      data: xml("<taskPane/>"),
+      method: "deflate",
+      name: "custom/taskpane.xml",
+    },
+  ];
+  assertInvalid(
+    createZip(webExtensionRelationshipParts),
+    "UNSAFE_RELATIONSHIP_FORBIDDEN",
+  );
+
   let executableParts = appendContentType(
     cleanParts(),
     '<Default Extension="exe" ContentType="application/x-msdownload"/>',
@@ -644,6 +785,16 @@ try {
     },
   ];
   assertInvalid(createZip(malformedThemeParts), "XML_MALFORMED");
+
+  const malformedCommentParts = [
+    ...cleanParts(),
+    {
+      data: Buffer.from("<root><!--x---></root>"),
+      method: "deflate",
+      name: "custom/malformed-comment.xml",
+    },
+  ];
+  assertInvalid(createZip(malformedCommentParts), "XML_MALFORMED");
 
   for (const malformedXml of [
     "<?xml nope?><root/>",
@@ -831,6 +982,23 @@ try {
   assertInvalid(
     createZip([{ data: "zip64", name: "zip64.xml" }], { zip64: true }),
     "ZIP64_UNSUPPORTED",
+  );
+  const signatureCrcPayload = Buffer.from([0xac, 0x0a, 0x7a, 0xd5]);
+  assert.equal(crc32(signatureCrcPayload), 0x08074b50);
+  let unsignedDescriptorParts = appendContentType(
+    cleanParts(),
+    '<Override PartName="/custom/crc.dat" ContentType="text/plain"/>',
+  );
+  unsignedDescriptorParts.push({
+    data: signatureCrcPayload,
+    dataDescriptor: "unsigned",
+    method: "store",
+    name: "custom/crc.dat",
+  });
+  assert.equal(
+    inspectPptxBytes(createZip(unsignedDescriptorParts)).valid,
+    true,
+    "an unsigned descriptor CRC may equal the optional descriptor signature",
   );
   assertInvalid(
     createZip([{ data: "unsupported", method: 12, name: "unsupported.xml" }]),

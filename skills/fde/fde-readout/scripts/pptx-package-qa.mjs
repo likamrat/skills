@@ -275,16 +275,136 @@ function inspectExtraFields(bytes, label) {
   }
 }
 
+function centralDirectoryHasStructure(
+  bytes,
+  centralOffset,
+  centralSize,
+  entryCount,
+  endOffset,
+) {
+  if (
+    entryCount === 0 ||
+    centralOffset > endOffset ||
+    centralSize > endOffset ||
+    centralOffset + centralSize !== endOffset ||
+    centralSize < entryCount * 46
+  ) {
+    return false;
+  }
+  let cursor = centralOffset;
+  for (let index = 0; index < entryCount; index += 1) {
+    if (
+      cursor + 46 > endOffset ||
+      bytes.readUInt32LE(cursor) !== 0x02014b50
+    ) {
+      return false;
+    }
+    cursor +=
+      46 +
+      bytes.readUInt16LE(cursor + 28) +
+      bytes.readUInt16LE(cursor + 30) +
+      bytes.readUInt16LE(cursor + 32);
+    if (cursor > endOffset) return false;
+  }
+  return cursor === endOffset;
+}
+
+function hasValidZip64Locator(bytes, eocdOffset) {
+  if (
+    eocdOffset < 20 ||
+    bytes.readUInt32LE(eocdOffset - 20) !== 0x07064b50
+  ) {
+    return false;
+  }
+  const locatorOffset = eocdOffset - 20;
+  const zip64OffsetValue = bytes.readBigUInt64LE(locatorOffset + 8);
+  if (zip64OffsetValue > BigInt(Number.MAX_SAFE_INTEGER)) return false;
+  const zip64Offset = Number(zip64OffsetValue);
+  if (
+    bytes.readUInt32LE(locatorOffset + 4) !== 0 ||
+    bytes.readUInt32LE(locatorOffset + 16) !== 1 ||
+    zip64Offset < 0 ||
+    zip64Offset + 56 > locatorOffset ||
+    bytes.readUInt32LE(zip64Offset) !== 0x06064b50
+  ) {
+    return false;
+  }
+  const recordSize = bytes.readBigUInt64LE(zip64Offset + 4);
+  if (
+    recordSize < 44n ||
+    recordSize > BigInt(Number.MAX_SAFE_INTEGER) ||
+    zip64Offset + 12 + Number(recordSize) !== locatorOffset ||
+    bytes.readUInt32LE(zip64Offset + 16) !== 0 ||
+    bytes.readUInt32LE(zip64Offset + 20) !== 0
+  ) {
+    return false;
+  }
+  const diskEntries = bytes.readBigUInt64LE(zip64Offset + 24);
+  const entryCount = bytes.readBigUInt64LE(zip64Offset + 32);
+  const centralSize = bytes.readBigUInt64LE(zip64Offset + 40);
+  const centralOffset = bytes.readBigUInt64LE(zip64Offset + 48);
+  if (
+    diskEntries !== entryCount ||
+    entryCount > BigInt(Number.MAX_SAFE_INTEGER) ||
+    centralSize > BigInt(Number.MAX_SAFE_INTEGER) ||
+    centralOffset > BigInt(Number.MAX_SAFE_INTEGER)
+  ) {
+    return false;
+  }
+  return centralDirectoryHasStructure(
+    bytes,
+    Number(centralOffset),
+    Number(centralSize),
+    Number(entryCount),
+    zip64Offset,
+  );
+}
+
+function isStructurallyValidEocd(bytes, offset) {
+  const diskNumber = bytes.readUInt16LE(offset + 4);
+  const centralDisk = bytes.readUInt16LE(offset + 6);
+  const diskEntries = bytes.readUInt16LE(offset + 8);
+  const entryCount = bytes.readUInt16LE(offset + 10);
+  const centralSize = bytes.readUInt32LE(offset + 12);
+  const centralOffset = bytes.readUInt32LE(offset + 16);
+  if (
+    diskNumber !== 0 ||
+    centralDisk !== 0 ||
+    diskEntries !== entryCount
+  ) {
+    return false;
+  }
+  if (
+    entryCount === 0xffff ||
+    centralSize === 0xffffffff ||
+    centralOffset === 0xffffffff
+  ) {
+    return hasValidZip64Locator(bytes, offset);
+  }
+  return centralDirectoryHasStructure(
+    bytes,
+    centralOffset,
+    centralSize,
+    entryCount,
+    offset,
+  );
+}
+
 function findEndOfCentralDirectory(bytes) {
   if (bytes.length < 22) {
     throw new QaError("ZIP_EOCD_MISSING", "ZIP end-of-central-directory is missing");
   }
   const firstCandidate = Math.max(0, bytes.length - 22 - 0xffff);
-  for (let offset = bytes.length - 22; offset >= firstCandidate; offset -= 1) {
+  let malformedCandidate;
+  for (let offset = firstCandidate; offset <= bytes.length - 22; offset += 1) {
     if (bytes.readUInt32LE(offset) !== 0x06054b50) continue;
     const commentLength = readUInt16(bytes, offset + 20, "ZIP comment");
-    if (offset + 22 + commentLength === bytes.length) return offset;
+    if (offset + 22 + commentLength === bytes.length) {
+      malformedCandidate ??= offset;
+      if (isStructurallyValidEocd(bytes, offset)) return offset;
+    }
   }
+  if (malformedCandidate !== undefined) return malformedCandidate;
   throw new QaError("ZIP_EOCD_MISSING", "ZIP end-of-central-directory is missing");
 }
 
@@ -300,10 +420,7 @@ function readZipEntries(inputBytes) {
   }
 
   const eocdOffset = findEndOfCentralDirectory(bytes);
-  if (
-    eocdOffset >= 20 &&
-    bytes.readUInt32LE(eocdOffset - 20) === 0x07064b50
-  ) {
+  if (hasValidZip64Locator(bytes, eocdOffset)) {
     throw new QaError("ZIP64_UNSUPPORTED", "ZIP64 archives are not allowed");
   }
 
@@ -450,10 +567,10 @@ function readZipEntries(inputBytes) {
       bytes.subarray(extraStart, extraStart + extraLength),
       `central-directory extra field for ${name}`,
     );
-    if (isDirectory && (compressedSize !== 0 || uncompressedSize !== 0)) {
+    if (isDirectory && uncompressedSize !== 0) {
       throw new QaError(
         "ZIP_DIRECTORY_INVALID",
-        `directory entry must be empty: ${name}`,
+        `directory entry must expand to zero bytes: ${name}`,
       );
     }
     if (
@@ -630,32 +747,24 @@ function readZipEntries(inputBytes) {
 
     let recordEnd = dataEnd;
     if ((entry.flags & 0x0008) !== 0) {
-      const hasSignature =
+      const matchesDescriptorAt = (start) =>
+        start + 12 <= centralOffset &&
+        bytes.readUInt32LE(start) === entry.expectedCrc &&
+        bytes.readUInt32LE(start + 4) === entry.compressedSize &&
+        bytes.readUInt32LE(start + 8) === entry.uncompressedSize;
+      const unsignedDescriptor = matchesDescriptorAt(dataEnd);
+      const signedDescriptor =
         dataEnd + 4 <= centralOffset &&
-        bytes.readUInt32LE(dataEnd) === 0x08074b50;
-      const descriptorStart = dataEnd + (hasSignature ? 4 : 0);
-      if (descriptorStart + 12 > centralOffset) {
-        throw new QaError(
-          "ZIP_DATA_DESCRIPTOR_INVALID",
-          `data descriptor is truncated: ${entry.name}`,
-          entry.name,
-        );
-      }
-      const descriptorCrc = bytes.readUInt32LE(descriptorStart);
-      const descriptorCompressedSize = bytes.readUInt32LE(descriptorStart + 4);
-      const descriptorUncompressedSize = bytes.readUInt32LE(descriptorStart + 8);
-      if (
-        descriptorCrc !== entry.expectedCrc ||
-        descriptorCompressedSize !== entry.compressedSize ||
-        descriptorUncompressedSize !== entry.uncompressedSize
-      ) {
+        bytes.readUInt32LE(dataEnd) === 0x08074b50 &&
+        matchesDescriptorAt(dataEnd + 4);
+      if (!unsignedDescriptor && !signedDescriptor) {
         throw new QaError(
           "ZIP_DATA_DESCRIPTOR_INVALID",
           `data descriptor disagrees with the central directory: ${entry.name}`,
           entry.name,
         );
       }
-      recordEnd = descriptorStart + 12;
+      recordEnd = dataEnd + (unsignedDescriptor ? 12 : 16);
     }
 
     spans.push({ end: recordEnd, name: entry.name, start: offset });
@@ -944,7 +1053,8 @@ function parseXml(bytes, part) {
     }
     if (xml.startsWith("<!--", opening)) {
       const end = xml.indexOf("-->", opening + 4);
-      if (end < 0 || xml.slice(opening + 4, end).includes("--")) {
+      const comment = end < 0 ? "" : xml.slice(opening + 4, end);
+      if (end < 0 || comment.includes("--") || comment.endsWith("-")) {
         throw new QaError("XML_MALFORMED", "malformed XML comment", part);
       }
       cursor = end + 3;
@@ -1289,7 +1399,8 @@ function parseRelationships(entry, source, addFinding) {
     if (
       DANGEROUS_RELATIONSHIP_SUFFIXES.some((suffix) =>
         type.toLowerCase().endsWith(suffix),
-      )
+      ) ||
+      type.toLowerCase().includes("webextension")
     ) {
       addFinding(
         type.toLowerCase().endsWith("/attachedtemplate")
@@ -1484,6 +1595,7 @@ function startsWithBytes(bytes, signature) {
 function validateUnsafeParts(entriesByName, contentTypes, addFinding) {
   for (const [name, entry] of entriesByName) {
     const lowerName = name.toLowerCase();
+    const pathSegments = lowerName.split("/");
     const extension = packageExtension(name);
     const contentType = normalizedContentType(name, contentTypes);
     const allowedThumbnail =
@@ -1498,11 +1610,13 @@ function validateUnsafeParts(entriesByName, contentTypes, addFinding) {
       lowerName.includes("/activex/") ||
       lowerName.includes("/embeddings/") ||
       lowerName.includes("/oleobjects/") ||
+      pathSegments.some((segment) => segment.startsWith("webextension")) ||
       lowerName.endsWith("/vbaproject.bin") ||
       contentType.includes("macroenabled") ||
       contentType.includes("vbaproject") ||
       contentType.includes("activex") ||
       contentType.includes("oleobject") ||
+      contentType.includes("webextension") ||
       contentType.includes("openxmlformats-officedocument.package") ||
       contentType.includes("wordprocessingml.") ||
       contentType.includes("spreadsheetml.") ||
