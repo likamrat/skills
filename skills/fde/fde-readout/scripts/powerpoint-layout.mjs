@@ -135,6 +135,7 @@ const CHART_KEYS = [
   "w",
   "h",
   "unit",
+  "insightEvidenceIds",
   "unitLabel",
   "plot",
   "axis",
@@ -508,6 +509,20 @@ function nextNiceStep(step) {
   return 10 * power;
 }
 
+function niceBounds(domainMin, domainMax, step) {
+  let min = Math.floor(domainMin / step) * step;
+  let max = Math.ceil(domainMax / step) * step;
+  if (Number.isFinite(min) && min > domainMin) {
+    const extended = min - step;
+    min = Number.isFinite(extended) ? extended : domainMin;
+  }
+  if (Number.isFinite(max) && max < domainMax) {
+    const extended = max + step;
+    max = Number.isFinite(extended) ? extended : domainMax;
+  }
+  return { min, max };
+}
+
 function niceAxis(values) {
   const domainMin = Math.min(0, ...values);
   const domainMax = Math.max(0, ...values);
@@ -531,17 +546,16 @@ function niceAxis(values) {
   const power = 10 ** Math.floor(Math.log10(rough));
   const mantissa = rough / power;
   let step = (mantissa <= 1 ? 1 : mantissa <= 2 ? 2 : mantissa <= 5 ? 5 : 10) * power;
-  let min = Math.floor(domainMin / step) * step;
-  let max = Math.ceil(adjustedMax / step) * step;
+  let { min, max } = niceBounds(domainMin, adjustedMax, step);
   while (Math.round((max - min) / step) + 1 > 6) {
     step = nextNiceStep(step);
-    min = Math.floor(domainMin / step) * step;
-    max = Math.ceil(adjustedMax / step) * step;
+    ({ min, max } = niceBounds(domainMin, adjustedMax, step));
   }
   if (![min, max, step].every(Number.isFinite)) {
-    const min = domainMin;
-    const max = adjustedMax;
-    const step = Math.max(Math.abs(min), Math.abs(max));
+    const step = Math.max(Math.abs(domainMin), Math.abs(adjustedMax));
+    const mixed = domainMin < 0 && adjustedMax > 0;
+    const min = mixed ? -step : domainMin;
+    const max = mixed ? step : adjustedMax;
     const ticks = [min, 0, max]
       .filter((value, index, array) => array.indexOf(value) === index)
       .sort((left, right) => left - right);
@@ -717,7 +731,7 @@ function compileChart(ctx, slide) {
           const y =
             value > 0
               ? Math.max(plot.y, zeroY - visibleHeight)
-              : Math.min(valueY, zeroY);
+              : Math.min(zeroY, plot.y + plot.h - visibleHeight);
           return {
             kind: isZero ? "line" : "rect",
             name: chartName(
@@ -785,6 +799,7 @@ function compileChart(ctx, slide) {
     w: 864,
     h: 318,
     unit: content.unit,
+    insightEvidenceIds: [...content.insight.evidenceIds],
     unitLabel: chartLabel(
       ctx,
       "unit-label",
@@ -2606,6 +2621,32 @@ function validateNativeChart(primitive, path, stage, names, family, slideEvidenc
     fail("E_SPEC_SCHEMA", `${path}.chartType`, "chart type must be bar or line");
   }
   assertChartText(primitive.unit, `${path}.unit`);
+  if (
+    !isDenseArray(primitive.insightEvidenceIds) ||
+    primitive.insightEvidenceIds.length === 0 ||
+    new Set(primitive.insightEvidenceIds).size !==
+      primitive.insightEvidenceIds.length
+  ) {
+    fail(
+      "E_SPEC_SCHEMA",
+      `${path}.insightEvidenceIds`,
+      "expected a nonempty duplicate-free dense evidence array",
+    );
+  }
+  const declaredEvidence = new Set(slideEvidenceIds);
+  primitive.insightEvidenceIds.forEach((evidenceId, evidenceIndex) => {
+    assertChartText(
+      evidenceId,
+      `${path}.insightEvidenceIds[${evidenceIndex}]`,
+    );
+    if (!declaredEvidence.has(evidenceId)) {
+      fail(
+        "E_EVIDENCE_NOT_DECLARED",
+        `${path}.insightEvidenceIds[${evidenceIndex}]`,
+        `${evidenceId} is absent from slide.evidenceIds`,
+      );
+    }
+  });
   const chartBounds = { x: primitive.x, y: primitive.y, w: primitive.w, h: primitive.h };
   validateChartLabel(
     primitive.unitLabel,
@@ -2672,7 +2713,6 @@ function validateNativeChart(primitive, path, stage, names, family, slideEvidenc
   ) {
     fail("E_SPEC_SCHEMA", `${path}.series`, "expected 1-4 dense chart series");
   }
-  const declaredEvidence = new Set(slideEvidenceIds);
   const allValues = [];
   primitive.series.forEach((series, seriesIndex) => {
     const seriesPath = `${path}.series[${seriesIndex}]`;
@@ -2748,6 +2788,17 @@ function validateNativeChart(primitive, path, stage, names, family, slideEvidenc
     primitive.axis.step <= 0
   ) {
     fail("E_SPEC_SCHEMA", `${path}.axis`, "axis is not the zero-inclusive nice domain");
+  }
+  if (
+    allValues.some(
+      (value) => value < primitive.axis.min || value > primitive.axis.max,
+    )
+  ) {
+    fail(
+      "E_GEOMETRY_BOUNDS",
+      `${path}.axis`,
+      "axis must contain zero and every chart value",
+    );
   }
   validateNamedChartLine(
     primitive.axis.baseline,
@@ -2976,7 +3027,10 @@ function validateNativeChart(primitive, path, stage, names, family, slideEvidenc
               : round3(
                   bar.value > 0
                     ? Math.max(primitive.plot.y, primitive.axis.zeroY - visibleHeight)
-                    : Math.min(valueY, primitive.axis.zeroY),
+                    : Math.min(
+                        primitive.axis.zeroY,
+                        primitive.plot.y + primitive.plot.h - visibleHeight,
+                      ),
                 ),
           w: round3(barW),
           h: visibleHeight,
@@ -3455,10 +3509,10 @@ function validateDrawingSpecSnapshot(spec) {
       }
     }
     if (slide.family === "chart") {
-      const chartCount = slide.primitives.filter(
+      const charts = slide.primitives.filter(
         (primitive) => primitive.kind === "nativeChart",
-      ).length;
-      if (chartCount !== 1) {
+      );
+      if (charts.length !== 1) {
         fail(
           "E_SPEC_SCHEMA",
           `${path}.primitives`,
@@ -3492,7 +3546,8 @@ function validateDrawingSpecSnapshot(spec) {
         insightEvidence[0].x !== 768 ||
         insightEvidence[0].y !== 454 ||
         insightEvidence[0].w !== 144 ||
-        insightEvidence[0].h !== 24
+        insightEvidence[0].h !== 24 ||
+        insightEvidence[0].text !== charts[0].insightEvidenceIds.join(", ")
       ) {
         fail(
           "E_GEOMETRY_BOUNDS",

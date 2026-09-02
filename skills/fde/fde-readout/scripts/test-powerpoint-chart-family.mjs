@@ -171,6 +171,8 @@ function assertChart(spec, source, label) {
   check(
     chart.unit === source.content.unit &&
       chart.unitLabel.text === source.content.unit &&
+      JSON.stringify(chart.insightEvidenceIds) ===
+        JSON.stringify(source.content.insight.evidenceIds) &&
       JSON.stringify(chart.categories.map((item) => item.label)) ===
         JSON.stringify(source.content.categories) &&
       JSON.stringify(chart.series.map((item) => item.name)) ===
@@ -328,6 +330,7 @@ try {
   }
   for (const [label, values] of [
     ["subnormal", [Number.MIN_VALUE, 1e-323]],
+    ["negative subnormal", [-Number.MIN_VALUE, 10]],
     ["maximum", [Number.MAX_VALUE, 1]],
     ["mixed maximum", [-Number.MAX_VALUE, Number.MAX_VALUE]],
     ["wide tiny", [1e-20, 1e20]],
@@ -341,6 +344,23 @@ try {
         `${chartType} ${label}`,
       );
     }
+  }
+  for (const [label, values, smallIndex] of [
+    ["maximum with tiny negative", [Number.MAX_VALUE, -1], 1],
+    ["minimum with tiny positive", [-Number.MAX_VALUE, 1], 1],
+  ]) {
+    const source = chartSlide("bar", 2, 1, "mixed");
+    source.content.series[0].values = values;
+    const spec = compile(buildPlan(sample, source));
+    assertChart(spec, source, `bar ${label}`);
+    const { chart } = chartFor(spec);
+    const smallBar = chart.series[0].bars[smallIndex];
+    check(
+      smallBar.value < 0
+        ? smallBar.y >= chart.axis.zeroY - 0.001
+        : smallBar.y + smallBar.h <= chart.axis.zeroY + 0.001,
+      `${label}: one-point bar must remain on the correct side of zero`,
+    );
   }
 
   const denseSource = chartSlide("bar", 12, 4, "mixed");
@@ -387,6 +407,11 @@ try {
     }],
     ["unsupported media field", lineSpec, (_, { chart }) => (chart.oleObject = "forbidden")],
     ["undeclared evidence", lineSpec, (_, { chart }) => chart.series[0].evidenceIds.push("not-declared")],
+    ["undeclared insight evidence", lineSpec, (_, { chart }) => chart.insightEvidenceIds.push("not-declared")],
+    ["insight evidence text mismatch", lineSpec, (_, { slide }) => {
+      slide.primitives.find((item) => item.role === "chart-insight-evidence").text =
+        "eval-001";
+    }],
     ["content footer overlap", lineSpec, (_, { slide }) => {
       slide.primitives.find((item) => item.role === "chart-insight").h = 40;
     }],
