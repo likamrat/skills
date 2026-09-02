@@ -343,11 +343,11 @@ function referenceCandidates(pair, withOffsets) {
   };
   const dx = t.x - s.x;
   const dy = t.y - s.y;
-  if (dx === 0 && dy === 0) return [];
   const exitNormal = normalFor(pair.sourceSide);
   const targetNormal = normalFor(pair.targetSide);
   const entryNormal = { x: -targetNormal.x, y: -targetNormal.y };
   const candidates = [];
+  if (!withOffsets && dx === 0 && dy === 0) return candidates;
   if (!withOffsets && (dx === 0 || dy === 0)) {
     if (vecEq(dirOf(s, t), exitNormal) && vecEq(dirOf(s, t), entryNormal)) {
       candidates.push([s, t]);
@@ -582,9 +582,67 @@ assertThrows("unsafe integer-thousandth route coordinates fail closed", "E_ROUTE
     routeInput(rect("s", 1e13, 0, 20, 20), rect("t", 1e13 + 100, 0, 20, 20)),
   ),
 );
+assertThrows("integer-thousandth costs that collapse as numbers fail closed", "E_ROUTER_NONFINITE", () =>
+  routeOrthogonalEdge(
+    routeInput(
+      rect("s", 0.001, 0, 0.002, 1),
+      rect("t", Number.MAX_SAFE_INTEGER / 1000 - 1, 0, 0.002, 1),
+    ),
+  ),
+);
 assertThrows("overflowing anchor arithmetic is deterministic", "E_ROUTER_NONFINITE", () =>
   nodeAnchors(rect("overflow", Number.MAX_VALUE, 0, Number.MAX_VALUE, 1)),
 );
+
+{
+  const edgeX = Number.MAX_SAFE_INTEGER / 1000 - 1;
+  for (const x of [edgeX, edgeX - 0.002, edgeX - 0.004]) {
+    const sourceRect = rect("edge-source", x, 0, 0.002, 1);
+    const targetRect = rect("edge-target", x, 0, 0.002, 1);
+    const route = routeOrthogonalEdge(routeInput(sourceRect, targetRect));
+    check(
+      route.segments.every(
+        (segment) => segment.x1 !== segment.x2 || segment.y1 !== segment.y2,
+      ),
+      `representable egress near ${x} emits no zero-length segments`,
+    );
+    check(
+      route.points[0].x !== route.points[1].x || route.points[0].y !== route.points[1].y,
+      `representable egress near ${x} remains distinct after number conversion`,
+    );
+    check(
+      stableRouteJson(route) ===
+        stableRouteJson(routeOrthogonalEdge(routeInput(sourceRect, targetRect))),
+      `representable egress near ${x} is deterministic`,
+    );
+    validateOrthogonalRoute(route, { sourceRect, targetRect });
+  }
+}
+
+{
+  const sourceRect = rect("tiny-source", 0, 0, 0.0001, 0.0001);
+  const targetRect = rect("tiny-target", 0.0002, 0, 0.0001, 0.0001);
+  const route = routeOrthogonalEdge(routeInput(sourceRect, targetRect));
+  check(route.points.length >= 4, "quantized coincident anchors use offset fallback");
+  check(
+    route.segments.every(
+      (segment) => segment.x1 !== segment.x2 || segment.y1 !== segment.y2,
+    ),
+    "quantized coincident anchors emit no zero-length segments",
+  );
+  check(
+    vecEq(dirOf(route.points[0], route.points[1]), normalFor(route.fromSide)),
+    "quantized coincident route exits on the outward source normal",
+  );
+  check(
+    vecEq(
+      dirOf(route.points.at(-2), route.points.at(-1)),
+      { x: -normalFor(route.toSide).x, y: -normalFor(route.toSide).y },
+    ),
+    "quantized coincident route approaches on the inward target normal",
+  );
+  validateOrthogonalRoute(route, { sourceRect, targetRect });
+}
 
 // ---------------------------------------------------------------------------
 // Determinism and stable JSON
@@ -875,6 +933,32 @@ assertRouteThrows("mismatched sourceId", "E_WORKFLOW_ROUTE", (route) => {
   const generousStage = { ...context, stage: { x: -50, y: -50, w: 500, h: 500 } };
   const validated = validateOrthogonalRoute(route, generousStage);
   check(validated.cost === route.cost, "route within a generous stage still validates");
+}
+
+{
+  const sourceRect = rect("stage-source", 0.7, 0.2, 0.05, 0.1);
+  const boundaryTarget = rect("stage-target", 0.8, 0.2, 0.05, 0.1);
+  const stage = { x: 0.7, y: 0, w: 0.1, h: 1 };
+  const boundaryRoute = routeOrthogonalEdge(routeInput(sourceRect, boundaryTarget));
+  check(
+    boundaryRoute.points.some((point) => point.x === 0.8),
+    "stage boundary regression includes the quantized x=0.8 endpoint",
+  );
+  validateOrthogonalRoute(boundaryRoute, { sourceRect, targetRect: boundaryTarget, stage });
+
+  const outsideTarget = rect("stage-target", 0.801, 0.2, 0.05, 0.1);
+  const outsideRoute = routeOrthogonalEdge(routeInput(sourceRect, outsideTarget));
+  assertThrows("quantized stage rejects x=0.801", "E_ROUTER_BOUNDS", () =>
+    validateOrthogonalRoute(outsideRoute, { sourceRect, targetRect: outsideTarget, stage }),
+  );
+
+  assertThrows("overflowing stage extent fails closed", "E_ROUTER_NONFINITE", () =>
+    validateOrthogonalRoute(boundaryRoute, {
+      sourceRect,
+      targetRect: boundaryTarget,
+      stage: { x: Number.MAX_VALUE, y: 0, w: Number.MAX_VALUE, h: 1 },
+    }),
+  );
 }
 
 assertThrows("validateOrthogonalRoute unknown context key", "E_ROUTER_INPUT", () => {

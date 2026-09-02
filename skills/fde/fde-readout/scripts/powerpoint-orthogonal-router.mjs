@@ -73,6 +73,9 @@ function fromThousandths(units, path = "$") {
   if (!Number.isFinite(value)) {
     fail("E_ROUTER_NONFINITE", path, "integer-thousandth value is nonfinite");
   }
+  if (toThousandths(value, path) !== units) {
+    fail("E_ROUTER_NONFINITE", path, "integer-thousandth value loses precision as a number");
+  }
   return Object.is(value, -0) ? 0 : value;
 }
 
@@ -362,23 +365,39 @@ function pointToUnits(point, path) {
   };
 }
 
+function representableOffset(point, normal, path, minimumDistance = 1) {
+  for (let distance = minimumDistance; distance < minimumDistance + 4; distance += 1) {
+    const x = point.x + normal.x * distance;
+    const y = point.y + normal.y * distance;
+    if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)) continue;
+    if (
+      toThousandths(x / THOUSAND, `${path}.x`) === x &&
+      toThousandths(y / THOUSAND, `${path}.y`) === y
+    ) {
+      return { x, y };
+    }
+  }
+  return null;
+}
+
 function candidateRoutes(sourceAnchor, targetAnchor, sourceSide, targetSide, withOffsets) {
   const source = pointToUnits(sourceAnchor, "$.sourceAnchor");
   const target = pointToUnits(targetAnchor, "$.targetAnchor");
   const dx = target.x - source.x;
   const dy = target.y - source.y;
-  if (dx === 0 && dy === 0) return [];
 
   const exitNormal = NORMALS[sourceSide];
   const entryNormal = negate(NORMALS[targetSide]);
   const candidates = [];
+
+  if (!withOffsets && dx === 0 && dy === 0) return { candidates, precisionBlocked: false };
 
   if (!withOffsets && (dx === 0 || dy === 0)) {
     const direction = segmentDirection(source, target);
     if (sameVector(direction, exitNormal) && sameVector(direction, entryNormal)) {
       candidates.push([source, target]);
     }
-    return candidates;
+    return { candidates, precisionBlocked: false };
   }
 
   if (!withOffsets) {
@@ -395,14 +414,15 @@ function candidateRoutes(sourceAnchor, targetAnchor, sourceSide, targetSide, wit
     if (sameVector(firstVH, exitNormal) && sameVector(secondVH, entryNormal)) {
       candidates.push([source, bendVH, target]);
     }
-    return candidates;
+    return { candidates, precisionBlocked: false };
   }
 
-  const egress = { x: source.x + exitNormal.x, y: source.y + exitNormal.y };
-  const ingress = {
-    x: target.x + NORMALS[targetSide].x,
-    y: target.y + NORMALS[targetSide].y,
-  };
+  const egress = representableOffset(source, exitNormal, "$.egress");
+  let ingress = representableOffset(target, NORMALS[targetSide], "$.ingress");
+  if (egress && ingress && pointsEqual(egress, ingress)) {
+    ingress = representableOffset(target, NORMALS[targetSide], "$.ingress", 2);
+  }
+  if (!egress || !ingress) return { candidates, precisionBlocked: true };
   const middleHV = { x: ingress.x, y: egress.y };
   const middleVH = { x: egress.x, y: ingress.y };
   for (const raw of [
@@ -418,7 +438,7 @@ function candidateRoutes(sourceAnchor, targetAnchor, sourceSide, targetSide, wit
       candidates.push(points);
     }
   }
-  return candidates;
+  return { candidates, precisionBlocked: false };
 }
 
 function collapsePoints(points) {
@@ -516,16 +536,18 @@ export function routeOrthogonalEdge(input) {
 
   const pairs = preferredAnchorPairs(source, target);
   let best = null;
+  let precisionBlocked = false;
   for (const withOffsets of [false, true]) {
     for (const pair of pairs) {
-      const candidates = candidateRoutes(
+      const result = candidateRoutes(
         pair.sourceAnchor,
         pair.targetAnchor,
         pair.sourceSide,
         pair.targetSide,
         withOffsets,
       );
-      for (const rawPoints of candidates) {
+      precisionBlocked ||= result.precisionBlocked;
+      for (const rawPoints of result.candidates) {
         const points = collapsePoints(rawPoints);
         if (points.length < 2) continue;
         const bendCount = points.length - 2;
@@ -551,6 +573,13 @@ export function routeOrthogonalEdge(input) {
   }
 
   if (!best) {
+    if (precisionBlocked) {
+      fail(
+        "E_ROUTER_NONFINITE",
+        "$",
+        "no representable egress or ingress distance exists at the coordinate magnitude",
+      );
+    }
     fail(
       "E_ROUTER_UNSUPPORTED",
       "$",
@@ -598,9 +627,32 @@ function validateRouteSegment(segment, path) {
   };
 }
 
+function stageBounds(stage) {
+  const right = stage.x + stage.w;
+  const bottom = stage.y + stage.h;
+  if (!Number.isFinite(right)) {
+    fail("E_ROUTER_NONFINITE", "$context.stage.w", "stage horizontal extent must be finite");
+  }
+  if (!Number.isFinite(bottom)) {
+    fail("E_ROUTER_NONFINITE", "$context.stage.h", "stage vertical extent must be finite");
+  }
+  return {
+    left: toThousandths(stage.x, "$context.stage.x"),
+    top: toThousandths(stage.y, "$context.stage.y"),
+    right: toThousandths(right, "$context.stage.w"),
+    bottom: toThousandths(bottom, "$context.stage.h"),
+  };
+}
+
 function withinStage(x, y, stage, path) {
-  if (!stage) return;
-  if (x < stage.x || x > stage.x + stage.w || y < stage.y || y > stage.y + stage.h) {
+  const xUnits = toThousandths(x, `${path}.x`);
+  const yUnits = toThousandths(y, `${path}.y`);
+  if (
+    xUnits < stage.left ||
+    xUnits > stage.right ||
+    yUnits < stage.top ||
+    yUnits > stage.bottom
+  ) {
     fail("E_ROUTER_BOUNDS", path, "route geometry falls outside the stage bounds");
   }
 }
@@ -745,12 +797,13 @@ export function validateOrthogonalRoute(route, context = {}) {
     };
     if (stageRect.w <= 0) fail("E_ROUTER_BOUNDS", "$context.stage.w", "width must be positive");
     if (stageRect.h <= 0) fail("E_ROUTER_BOUNDS", "$context.stage.h", "height must be positive");
+    const bounds = stageBounds(stageRect);
     points.forEach((point, index) => {
-      withinStage(point.x, point.y, stageRect, `$.points[${index}]`);
+      withinStage(point.x, point.y, bounds, `$.points[${index}]`);
     });
     segments.forEach((segment, index) => {
-      withinStage(segment.x1, segment.y1, stageRect, `$.segments[${index}]`);
-      withinStage(segment.x2, segment.y2, stageRect, `$.segments[${index}]`);
+      withinStage(segment.x1, segment.y1, bounds, `$.segments[${index}]`);
+      withinStage(segment.x2, segment.y2, bounds, `$.segments[${index}]`);
     });
   }
 
