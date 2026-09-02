@@ -17,6 +17,8 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
+import { compileReadoutPlan } from "./powerpoint-layout.mjs";
+
 const skillRoot = fileURLToPath(new URL("..", import.meta.url));
 const scripts = join(skillRoot, "scripts");
 const worker = join(scripts, "render-powerpoint-worker.ps1");
@@ -182,7 +184,7 @@ for (const [name, pattern] of [
   ["overflow hard gate", /Assert-TextFits/],
   ["rendered-height overflow measurement", /BoundHeight/],
   ["rendered maxLines measurement", /\$range2\.Lines\(\)/],
-  ["rendered lines release", /rendered text lines/],
+  ["rendered lines release", /nested rendered text range/],
   ["1600x900 export", /1600,\s*900/],
   ["dynamic three-column contact sheet", /Min\(3,\s*\$Images\.Count\)/],
   ["managed image disposal", /\$image\.Dispose\(\)/],
@@ -203,7 +205,10 @@ for (const [name, pattern] of [
   ["failpoint bundle publish", /Invoke-TestFailpoint -Stage 'publish-bundle'/],
   ["failpoint environment guard", /FDE_POWERPOINT_TEST_FAILPOINTS/],
   ["internal staging evidence", /status = 'WORKER_PASS'[\s\S]*stagingEvidence = \$true/],
-  ["unsupported later primitive rejection", /nativeChart requires a later layer/],
+  [
+    "unsupported primitive rejection",
+    /supports text, shape, line, table, nativeChart, and workflow line connectors/,
+  ],
 ]) {
   if (!pattern.test(workerSource)) failures.push(`worker omits ${name}`);
 }
@@ -554,15 +559,22 @@ if (hasWindowsPowerShell) {
       failures.push(`path rejection left staging directories: ${staged.join(",")}`);
     }
 
+    const collisionPlanSource = JSON.parse(await readFile(examplePlan, "utf8"));
+    const collisionPlan = {
+      ...collisionPlanSource,
+      slides: ["cover", "decision", "profile", "evidence"].map((family) =>
+        structuredClone(
+          collisionPlanSource.slides.find((slide) => slide.family === family),
+        ),
+      ),
+    };
     const collisionSpec = Buffer.from(
-      JSON.stringify({
-        schemaVersion: "fde-drawing-spec/1.0",
-        units: "points",
-        stage: { width: 960, height: 540 },
-        selectedSlideIds: ["collision"],
-        selectedSlideFamilies: ["cover"],
-        slides: [{ id: "collision", family: "cover", primitives: [] }],
-      }),
+      JSON.stringify(
+        compileReadoutPlan(collisionPlan, {
+          sourcePlanSha256: sha256(JSON.stringify(collisionPlan)),
+          mode: "full",
+        }),
+      ),
       "utf8",
     );
     const collisionSpecPath = join(pathTemp, "collision-spec.json");
@@ -1351,7 +1363,7 @@ if (failures.length === 0) {
 
     if (failures.length === 0 && !nativeBaselineOnlyRequested) {
       const originalSpec = JSON.parse(await readFile(specPath, "utf8"));
-      for (const unsupported of ["nativeChart", "connector"]) {
+      for (const unsupported of ["connector"]) {
         const rejected = structuredClone(originalSpec);
         rejected.slides[0].primitives[0].kind = unsupported;
         const rejectedPath = join(temp, `unsupported-${unsupported}.json`);

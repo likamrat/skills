@@ -20,6 +20,8 @@ param(
         'line',
         'table',
         'connector',
+        'native-chart',
+        'chart-reopen',
         'activation',
         'hwnd',
         'process-acquired',
@@ -30,7 +32,9 @@ param(
         'export',
         'publish-bundle'
     )]
-    [string]$FailAfter
+    [string]$FailAfter,
+
+    [switch]$ValidateSpecOnly
 )
 
 Set-StrictMode -Version Latest
@@ -395,6 +399,2206 @@ function Invoke-TestFailpoint {
     throw "Test failpoint after $Stage."
 }
 
+function Assert-WorkerExactProperties {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string[]]$Expected,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if ($null -eq $Value -or $null -eq $Value.PSObject) {
+        throw "$Path must be an object."
+    }
+    $actual = @($Value.PSObject.Properties.Name)
+    if ($actual.Count -ne $Expected.Count) {
+        throw "$Path has an invalid property count."
+    }
+    $expectedSet = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::Ordinal
+    )
+    for ($index = 0; $index -lt $Expected.Count; $index++) {
+        [void]$expectedSet.Add($Expected[$index])
+    }
+    for ($index = 0; $index -lt $actual.Count; $index++) {
+        if (-not $expectedSet.Contains([string]$actual[$index])) {
+            throw "$Path has unsupported property '$($actual[$index])'."
+        }
+    }
+}
+
+function Get-WorkerPublicDrawingSpecJson {
+    param([Parameter(Mandatory = $true)][string]$SpecJson)
+
+    $validatorPath = Join-Path $PSScriptRoot 'validate-powerpoint-drawing-spec.mjs'
+    if (-not (Test-Path -LiteralPath $validatorPath -PathType Leaf)) {
+        throw "Public drawing-spec validator is missing: $validatorPath."
+    }
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = 'node'
+    $startInfo.Arguments = '"' + $validatorPath.Replace('"', '\"') + '"'
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $validatorProcess = [Diagnostics.Process]::new()
+    $validatorProcess.StartInfo = $startInfo
+    $started = $false
+    try {
+        $started = $validatorProcess.Start()
+        if (-not $started) {
+            throw 'Could not start the public drawing-spec validator.'
+        }
+        $stdoutTask = $validatorProcess.StandardOutput.ReadToEndAsync()
+        $stderrTask = $validatorProcess.StandardError.ReadToEndAsync()
+        $inputBytes = [Text.UTF8Encoding]::new($false, $true).GetBytes($SpecJson)
+        $validatorProcess.StandardInput.BaseStream.Write(
+            $inputBytes,
+            0,
+            $inputBytes.Length
+        )
+        $validatorProcess.StandardInput.BaseStream.Close()
+        $validatorProcess.WaitForExit()
+        $stdout = $stdoutTask.Result
+        $stderr = $stderrTask.Result
+        if ($validatorProcess.ExitCode -ne 0) {
+            throw "Public drawing-spec validation failed: $($stderr.Trim())"
+        }
+        if ([string]::IsNullOrWhiteSpace($stdout)) {
+            throw 'Public drawing-spec validator emitted no validated snapshot.'
+        }
+        if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+            throw "Public drawing-spec validator emitted unexpected diagnostics: $($stderr.Trim())"
+        }
+        return $stdout
+    }
+    finally {
+        if ($started -and -not $validatorProcess.HasExited) {
+            $validatorProcess.Kill()
+            $validatorProcess.WaitForExit()
+        }
+        $validatorProcess.Dispose()
+    }
+}
+
+function Restore-WorkerEncodedStrings {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [AllowEmptyCollection()]
+        $Value
+    )
+
+    $prefix = '__FDE_UTF16LE_B64__'
+    if ($Value -is [string]) {
+        if (-not $Value.StartsWith($prefix, [StringComparison]::Ordinal)) {
+            throw 'Validated drawing-spec string is missing its transport encoding.'
+        }
+        $encoded = $Value.Substring($prefix.Length)
+        try {
+            $bytes = [Convert]::FromBase64String($encoded)
+            if ($bytes.Length % 2 -ne 0) {
+                throw 'UTF-16LE transport has an odd byte count.'
+            }
+            $characters = New-Object char[] ($bytes.Length / 2)
+            for ($index = 0; $index -lt $characters.Length; $index++) {
+                $characters[$index] = [char](
+                    [int]$bytes[$index * 2] -bor
+                    ([int]$bytes[$index * 2 + 1] -shl 8)
+                )
+            }
+            return ($characters -join '')
+        }
+        catch {
+            throw 'Validated drawing-spec string transport is invalid.'
+        }
+    }
+    if ($Value -is [Array]) {
+        for ($index = 0; $index -lt $Value.Count; $index++) {
+            $Value[$index] = Restore-WorkerEncodedStrings -Value $Value[$index]
+        }
+        return ,$Value
+    }
+    if ($null -ne $Value -and $Value -is [pscustomobject]) {
+        foreach ($property in $Value.PSObject.Properties) {
+            $property.Value = Restore-WorkerEncodedStrings -Value $property.Value
+        }
+    }
+    return $Value
+}
+
+function Get-WorkerFiniteNumber {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if ($null -eq $Value) {
+        throw "$Path must be a finite number."
+    }
+    $numericTypeCodes = @(
+        [TypeCode]::SByte,
+        [TypeCode]::Byte,
+        [TypeCode]::Int16,
+        [TypeCode]::UInt16,
+        [TypeCode]::Int32,
+        [TypeCode]::UInt32,
+        [TypeCode]::Int64,
+        [TypeCode]::UInt64,
+        [TypeCode]::Single,
+        [TypeCode]::Double,
+        [TypeCode]::Decimal
+    )
+    if ([Type]::GetTypeCode($Value.GetType()) -notin $numericTypeCodes) {
+        throw "$Path must be a finite number."
+    }
+    $number = [double]$Value
+    if ([double]::IsNaN($number) -or [double]::IsInfinity($number)) {
+        throw "$Path must be a finite number."
+    }
+    return $number
+}
+
+function Get-WorkerSafeInteger {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if (
+        $null -ne $Value -and
+        [Type]::GetTypeCode($Value.GetType()) -eq [TypeCode]::Decimal
+    ) {
+        $decimal = [decimal]$Value
+        if (
+            $decimal -ne [decimal]::Truncate($decimal) -or
+            $decimal -lt -9007199254740991 -or
+            $decimal -gt 9007199254740991
+        ) {
+            throw "$Path must be a safe integer."
+        }
+        return [double]$decimal
+    }
+    $number = Get-WorkerFiniteNumber -Value $Value -Path $Path
+    if (
+        $number -ne [math]::Truncate($number) -or
+        [math]::Abs($number) -gt 9007199254740991
+    ) {
+        throw "$Path must be a safe integer."
+    }
+    return $number
+}
+
+function Get-WorkerFiniteSingleNumber {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $number = Get-WorkerFiniteNumber -Value $Value -Path $Path
+    $single = [single]$number
+    if (
+        [single]::IsNaN($single) -or
+        [single]::IsInfinity($single) -or
+        ($number -ne 0 -and $single -eq 0)
+    ) {
+        throw "$Path must remain finite when passed to PowerPoint."
+    }
+    return $number
+}
+
+function Test-WorkerGeometryClose {
+    param(
+        [Parameter(Mandatory = $true)][double]$Left,
+        [Parameter(Mandatory = $true)][double]$Right
+    )
+
+    return [math]::Abs($Left - $Right) -le 0.001
+}
+
+function Test-WorkerNumberClose {
+    param(
+        [Parameter(Mandatory = $true)][double]$Left,
+        [Parameter(Mandatory = $true)][double]$Right
+    )
+
+    if ($Left -eq $Right) {
+        return $true
+    }
+    $scale = [math]::Max(
+        [double]::Epsilon,
+        [math]::Max([math]::Abs($Left), [math]::Abs($Right))
+    )
+    return [math]::Abs($Left - $Right) -le $scale * 1e-12
+}
+
+function Get-WorkerRoundedCoordinate {
+    param([Parameter(Mandatory = $true)][double]$Value)
+
+    return [math]::Round($Value, 3, [MidpointRounding]::AwayFromZero)
+}
+
+function Assert-WorkerChartText {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if ($Value -isnot [string] -or [string]::IsNullOrWhiteSpace($Value)) {
+        throw "$Path must be nonblank chart text."
+    }
+    if ($Value -match '[\x00-\x1f\x7f-\x9f]') {
+        throw "$Path contains a control character."
+    }
+}
+
+function Convert-WorkerScientificToFixed {
+    param([Parameter(Mandatory = $true)][string]$Text)
+
+    if ($Text -notmatch '^(?<sign>-?)(?<mantissa>\d+(?:\.\d+)?)[Ee](?<exponent>[+-]?\d+)$') {
+        return $Text
+    }
+    $sign = $Matches.sign
+    $mantissa = $Matches.mantissa
+    $exponent = [int]$Matches.exponent
+    $decimalIndex = $mantissa.IndexOf('.')
+    if ($decimalIndex -lt 0) {
+        $decimalIndex = $mantissa.Length
+    }
+    $digits = $mantissa.Replace('.', '')
+    $decimalPosition = $decimalIndex + $exponent
+    if ($decimalPosition -le 0) {
+        return "$sign" + '0.' + ('0' * (-$decimalPosition)) + $digits
+    }
+    if ($decimalPosition -ge $digits.Length) {
+        return "$sign" + $digits + ('0' * ($decimalPosition - $digits.Length))
+    }
+    return "$sign" +
+        $digits.Substring(0, $decimalPosition) +
+        '.' +
+        $digits.Substring($decimalPosition)
+}
+
+function Get-WorkerCanonicalNumberLabel {
+    param([Parameter(Mandatory = $true)][double]$Value)
+
+    if ($Value -eq 0) {
+        return '0'
+    }
+    $roundTrip = $null
+    for ($precision = 1; $precision -le 17; $precision++) {
+        $candidate = $Value.ToString(
+            "G$precision",
+            [Globalization.CultureInfo]::InvariantCulture
+        )
+        $parsed = 0.0
+        $matched = [double]::TryParse(
+            $candidate,
+            [Globalization.NumberStyles]::Float,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [ref]$parsed
+        )
+        if ($matched -and $parsed -eq $Value) {
+            $roundTrip = $candidate
+            break
+        }
+    }
+    if ($null -eq $roundTrip) {
+        throw "Could not find a round-trip numeric label for '$Value'."
+    }
+    $absolute = [math]::Abs($Value)
+    if ($absolute -ge 1e21 -or $absolute -lt 1e-6) {
+        if ($roundTrip -notmatch '^(?<mantissa>[^Ee]+)[Ee](?<exponent>[+-]?\d+)$') {
+            throw "Could not canonicalize numeric label '$roundTrip'."
+        }
+        $exponent = [int]$Matches.exponent
+        $sign = if ($exponent -ge 0) { '+' } else { '-' }
+        return "$($Matches.mantissa)e$sign$([math]::Abs($exponent))"
+    }
+    return Convert-WorkerScientificToFixed -Text $roundTrip
+}
+
+function Test-WorkerNumericLabelMatches {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)]$Value
+    )
+
+    [void](Get-WorkerFiniteNumber -Value $Value -Path 'numeric label value')
+    $parsed = 0.0
+    $matched = [double]::TryParse(
+        $Label,
+        [Globalization.NumberStyles]::Float,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [ref]$parsed
+    )
+    if (
+        -not $matched -or
+        [double]::IsNaN($parsed) -or
+        [double]::IsInfinity($parsed)
+    ) {
+        return $false
+    }
+    # The public Node validator already enforces the label's exact ECMAScript spelling and value.
+    return $true
+}
+
+function Register-WorkerShapeName {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]
+        [Collections.Generic.HashSet[string]]$Names
+    )
+
+    if (
+        $Value -isnot [string] -or
+        $Value.Length -gt 120 -or
+        $Value -cnotmatch '^fde-[a-z0-9]+(?:-[a-z0-9]+)*$'
+    ) {
+        throw "$Path must be an fde-* ASCII lowercase kebab-case name of at most 120 characters."
+    }
+    if (-not $Names.Add($Value)) {
+        throw "$Path duplicates nested shape name '$Value'."
+    }
+}
+
+function Assert-WorkerColorRole {
+    param(
+        [Parameter(Mandatory = $true)]$Theme,
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if (
+        $Value -isnot [string] -or
+        $Value -cnotin @('ink', 'system', 'decision', 'risk', 'paper', 'muted', 'line') -or
+        $null -eq $Theme.colors.PSObject.Properties[$Value]
+    ) {
+        throw "$Path has unknown theme color role '$Value'."
+    }
+    [void](Convert-HexColor -Hex ([string]$Theme.colors.PSObject.Properties[$Value].Value))
+}
+
+function Assert-WorkerBox {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $x = Get-WorkerFiniteSingleNumber -Value $Value.x -Path "$Path.x"
+    $y = Get-WorkerFiniteSingleNumber -Value $Value.y -Path "$Path.y"
+    $w = Get-WorkerFiniteSingleNumber -Value $Value.w -Path "$Path.w"
+    $h = Get-WorkerFiniteSingleNumber -Value $Value.h -Path "$Path.h"
+    $singleX = [single]$x
+    $singleY = [single]$y
+    $singleW = [single]$w
+    $singleH = [single]$h
+    if (
+        $x -lt 0 -or
+        $y -lt 0 -or
+        $w -le 0 -or
+        $h -le 0 -or
+        $x + $w -gt 960 -or
+        $y + $h -gt 540 -or
+        $singleW -le 0 -or
+        $singleH -le 0 -or
+        $singleX + $singleW -gt 960 -or
+        $singleY + $singleH -gt 540
+    ) {
+        throw "$Path is outside the 960x540 stage."
+    }
+}
+
+function Test-WorkerBoxWithin {
+    param(
+        [Parameter(Mandatory = $true)]$Inner,
+        [Parameter(Mandatory = $true)]$Outer
+    )
+
+    return (
+        [double]$Inner.x -ge [double]$Outer.x - 0.001 -and
+        [double]$Inner.y -ge [double]$Outer.y - 0.001 -and
+        [double]$Inner.x + [double]$Inner.w -le [double]$Outer.x + [double]$Outer.w + 0.001 -and
+        [double]$Inner.y + [double]$Inner.h -le [double]$Outer.y + [double]$Outer.h + 0.001
+    )
+}
+
+function Assert-WorkerChartLabel {
+    param(
+        [Parameter(Mandatory = $true)]$Label,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$Theme,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]
+        [Collections.Generic.HashSet[string]]$Names,
+        $Container
+    )
+
+    Assert-WorkerExactProperties `
+        -Value $Label `
+        -Expected @(
+            'name',
+            'text',
+            'x',
+            'y',
+            'w',
+            'h',
+            'fontSize',
+            'bold',
+            'colorRole',
+            'horizontalAlign',
+            'verticalAlign',
+            'rotation'
+        ) `
+        -Path $Path
+    Register-WorkerShapeName -Value $Label.name -Path "$Path.name" -Names $Names
+    Assert-WorkerChartText -Value $Label.text -Path "$Path.text"
+    Assert-WorkerBox -Value $Label -Path $Path
+    if ($null -ne $Container -and -not (Test-WorkerBoxWithin -Inner $Label -Outer $Container)) {
+        throw "$Path must remain inside its chart region."
+    }
+    $fontSize = Get-WorkerFiniteNumber -Value $Label.fontSize -Path "$Path.fontSize"
+    $rotation = Get-WorkerFiniteNumber -Value $Label.rotation -Path "$Path.rotation"
+    if ($fontSize -ne 8 -or $Label.bold -isnot [bool]) {
+        throw "$Path must use 8-point text and a boolean bold value."
+    }
+    Assert-WorkerColorRole -Theme $Theme -Value $Label.colorRole -Path "$Path.colorRole"
+    if (
+        $Label.horizontalAlign -isnot [string] -or
+        $Label.horizontalAlign -cnotin @('left', 'center', 'right')
+    ) {
+        throw "$Path has invalid horizontal alignment."
+    }
+    if (
+        $Label.verticalAlign -isnot [string] -or
+        $Label.verticalAlign -cnotin @('top', 'middle', 'bottom')
+    ) {
+        throw "$Path has invalid vertical alignment."
+    }
+    if ($rotation -ne 0) {
+        throw "$Path chart labels cannot be rotated."
+    }
+}
+
+function Assert-WorkerChartLine {
+    param(
+        [Parameter(Mandatory = $true)]$LineSpec,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$Theme,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]
+        [Collections.Generic.HashSet[string]]$Names,
+        [Parameter(Mandatory = $true)]$Container
+    )
+
+    Assert-WorkerExactProperties `
+        -Value $LineSpec `
+        -Expected @(
+            'name',
+            'x1',
+            'y1',
+            'x2',
+            'y2',
+            'colorRole',
+            'width',
+            'dash',
+            'transparency'
+        ) `
+        -Path $Path
+    Register-WorkerShapeName -Value $LineSpec.name -Path "$Path.name" -Names $Names
+    foreach ($key in @('x1', 'y1', 'x2', 'y2')) {
+        [void](Get-WorkerFiniteSingleNumber -Value $LineSpec.$key -Path "$Path.$key")
+    }
+    [void](Get-WorkerFiniteSingleNumber -Value $LineSpec.width -Path "$Path.width")
+    [void](Get-WorkerFiniteNumber -Value $LineSpec.transparency -Path "$Path.transparency")
+    if (
+        [double]$LineSpec.width -le 0 -or
+        [double]$LineSpec.transparency -lt 0 -or
+        [double]$LineSpec.transparency -gt 1 -or
+        (
+            [double]$LineSpec.x1 -eq [double]$LineSpec.x2 -and
+            [double]$LineSpec.y1 -eq [double]$LineSpec.y2
+        ) -or
+        (
+            [single]$LineSpec.x1 -eq [single]$LineSpec.x2 -and
+            [single]$LineSpec.y1 -eq [single]$LineSpec.y2
+        )
+    ) {
+        throw "$Path has invalid line geometry or style."
+    }
+    $left = [math]::Min([double]$LineSpec.x1, [double]$LineSpec.x2)
+    $top = [math]::Min([double]$LineSpec.y1, [double]$LineSpec.y2)
+    $right = [math]::Max([double]$LineSpec.x1, [double]$LineSpec.x2)
+    $bottom = [math]::Max([double]$LineSpec.y1, [double]$LineSpec.y2)
+    if (
+        $left -lt [double]$Container.x - 0.001 -or
+        $top -lt [double]$Container.y - 0.001 -or
+        $right -gt [double]$Container.x + [double]$Container.w + 0.001 -or
+        $bottom -gt [double]$Container.y + [double]$Container.h + 0.001
+    ) {
+        throw "$Path must remain inside its chart region."
+    }
+    Assert-WorkerColorRole -Theme $Theme -Value $LineSpec.colorRole -Path "$Path.colorRole"
+    if (
+        $LineSpec.dash -isnot [string] -or
+        $LineSpec.dash -cnotin @('solid', 'dash', 'dot', 'dashDot')
+    ) {
+        throw "$Path has invalid dash style."
+    }
+}
+
+function Assert-WorkerNonemptyString {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if ($Value -isnot [string] -or [string]::IsNullOrWhiteSpace($Value)) {
+        throw "$Path must be a nonempty string."
+    }
+}
+
+function Assert-WorkerJsonArray {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [switch]$Nonempty
+    )
+
+    if ($Value -isnot [Array] -or ($Nonempty -and $Value.Count -lt 1)) {
+        $qualifier = if ($Nonempty) { 'a nonempty JSON array' } else { 'a JSON array' }
+        throw "$Path must be $qualifier."
+    }
+}
+
+function Assert-WorkerStringArray {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [switch]$Nonempty
+    )
+
+    Assert-WorkerJsonArray -Value $Value -Path $Path -Nonempty:$Nonempty
+    for ($index = 0; $index -lt $Value.Count; $index++) {
+        if ($Value[$index] -isnot [string] -or $Value[$index].Length -lt 1) {
+            throw "$Path[$index] must be a nonempty string."
+        }
+    }
+}
+
+function Assert-WorkerTextPrimitive {
+    param(
+        [Parameter(Mandatory = $true)]$Primitive,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$Theme
+    )
+
+    Assert-WorkerExactProperties `
+        -Value $Primitive `
+        -Expected @(
+            'kind',
+            'name',
+            'role',
+            'z',
+            'x',
+            'y',
+            'w',
+            'h',
+            'text',
+            'fontSize',
+            'bold',
+            'italic',
+            'colorRole',
+            'horizontalAlign',
+            'verticalAlign',
+            'rotation',
+            'marginLeft',
+            'marginRight',
+            'marginTop',
+            'marginBottom',
+            'wordWrap',
+            'autoFit',
+            'maxLines'
+        ) `
+        -Path $Path
+    if ($Primitive.kind -isnot [string] -or $Primitive.kind -cne 'text') {
+        throw "$Path.kind must be exactly 'text'."
+    }
+    Assert-WorkerBox -Value $Primitive -Path $Path
+    Assert-WorkerChartText -Value $Primitive.text -Path "$Path.text"
+    $fontSize = Get-WorkerFiniteNumber -Value $Primitive.fontSize -Path "$Path.fontSize"
+    if ($fontSize -notin @(8, 11, 28, 34)) {
+        throw "$Path.fontSize is unsupported."
+    }
+    foreach ($key in @('bold', 'italic', 'wordWrap')) {
+        if ($Primitive.$key -isnot [bool]) {
+            throw "$Path.$key must be a boolean."
+        }
+    }
+    Assert-WorkerColorRole -Theme $Theme -Value $Primitive.colorRole -Path "$Path.colorRole"
+    if (
+        $Primitive.horizontalAlign -isnot [string] -or
+        $Primitive.horizontalAlign -cnotin @('left', 'center', 'right')
+    ) {
+        throw "$Path.horizontalAlign is invalid."
+    }
+    if (
+        $Primitive.verticalAlign -isnot [string] -or
+        $Primitive.verticalAlign -cnotin @('top', 'middle', 'bottom')
+    ) {
+        throw "$Path.verticalAlign is invalid."
+    }
+    $rotation = Get-WorkerFiniteNumber -Value $Primitive.rotation -Path "$Path.rotation"
+    if ($rotation -notin @(0, 270)) {
+        throw "$Path.rotation is invalid."
+    }
+    foreach ($key in @('marginLeft', 'marginRight', 'marginTop', 'marginBottom')) {
+        $margin = Get-WorkerFiniteSingleNumber -Value $Primitive.$key -Path "$Path.$key"
+        if ($margin -lt 0) {
+            throw "$Path.$key must be nonnegative."
+        }
+    }
+    $maxLines = Get-WorkerSafeInteger -Value $Primitive.maxLines -Path "$Path.maxLines"
+    if (
+        -not $Primitive.wordWrap -or
+        $Primitive.autoFit -isnot [string] -or
+        $Primitive.autoFit -cne 'none' -or
+        $maxLines -lt 1
+    ) {
+        throw "$Path has an invalid text wrapping contract."
+    }
+}
+
+function Assert-WorkerShapePrimitive {
+    param(
+        [Parameter(Mandatory = $true)]$Primitive,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$Theme
+    )
+
+    if (
+        $Primitive.kind -isnot [string] -or
+        $Primitive.kind -cne 'shape' -or
+        $Primitive.role -isnot [string]
+    ) {
+        throw "$Path must use exact string kind 'shape' and a string role."
+    }
+    $workflowNode = $Primitive.role.StartsWith(
+        'workflow-node-',
+        [StringComparison]::Ordinal
+    )
+    $expected = @(
+        'kind',
+        'name',
+        'role',
+        'z',
+        'shapeType',
+        'x',
+        'y',
+        'w',
+        'h',
+        'fillVisible',
+        'fillColorRole',
+        'fillTransparency',
+        'lineVisible',
+        'lineColorRole',
+        'lineTransparency',
+        'lineWidth',
+        'lineDash'
+    )
+    if ($workflowNode) {
+        $expected += 'nodeId'
+    }
+    Assert-WorkerExactProperties -Value $Primitive -Expected $expected -Path $Path
+    Assert-WorkerBox -Value $Primitive -Path $Path
+    if (
+        $Primitive.shapeType -isnot [string] -or
+        $Primitive.shapeType -cnotin @('rect', 'roundRect', 'ellipse', 'diamond')
+    ) {
+        throw "$Path.shapeType is invalid."
+    }
+    foreach ($key in @('fillVisible', 'lineVisible')) {
+        if ($Primitive.$key -isnot [bool]) {
+            throw "$Path.$key must be a boolean."
+        }
+    }
+    Assert-WorkerColorRole `
+        -Theme $Theme `
+        -Value $Primitive.fillColorRole `
+        -Path "$Path.fillColorRole"
+    Assert-WorkerColorRole `
+        -Theme $Theme `
+        -Value $Primitive.lineColorRole `
+        -Path "$Path.lineColorRole"
+    foreach ($key in @('fillTransparency', 'lineTransparency')) {
+        $transparency = Get-WorkerFiniteNumber -Value $Primitive.$key -Path "$Path.$key"
+        if ($transparency -lt 0 -or $transparency -gt 1) {
+            throw "$Path.$key must be between zero and one."
+        }
+    }
+    $lineWidth = Get-WorkerFiniteSingleNumber `
+        -Value $Primitive.lineWidth `
+        -Path "$Path.lineWidth"
+    if ($lineWidth -le 0) {
+        throw "$Path.lineWidth must be positive."
+    }
+    if (
+        $Primitive.lineDash -isnot [string] -or
+        $Primitive.lineDash -cnotin @('solid', 'dash', 'dot', 'dashDot')
+    ) {
+        throw "$Path.lineDash is invalid."
+    }
+    if ($workflowNode) {
+        Assert-WorkerNonemptyString -Value $Primitive.nodeId -Path "$Path.nodeId"
+        if ($Primitive.role -cnotin @(
+            'workflow-node-source',
+            'workflow-node-actor',
+            'workflow-node-system',
+            'workflow-node-decision'
+        )) {
+            throw "$Path.role is not a supported workflow node role."
+        }
+        $workflowRole = $Primitive.role.Substring('workflow-node-'.Length)
+        $expectedFillRole = switch -CaseSensitive ($workflowRole) {
+            'source' { 'paper' }
+            'actor' { 'system' }
+            'system' { 'ink' }
+            'decision' { 'decision' }
+        }
+        $expectedFillTransparency = switch -CaseSensitive ($workflowRole) {
+            'source' { 0.0 }
+            'actor' { 0.9 }
+            'system' { 0.94 }
+            'decision' { 0.9 }
+        }
+        $expectedLineRole = if ($workflowRole -ceq 'decision') {
+            'decision'
+        }
+        else {
+            'system'
+        }
+        $expectedLineWidth = if ($workflowRole -ceq 'decision') { 1.5 } else { 1.0 }
+        if (
+            $Primitive.shapeType -cne 'roundRect' -or
+            -not $Primitive.fillVisible -or
+            -not $Primitive.lineVisible -or
+            $Primitive.fillColorRole -cne $expectedFillRole -or
+            $Primitive.fillTransparency -ne $expectedFillTransparency -or
+            $Primitive.lineColorRole -cne $expectedLineRole -or
+            $Primitive.lineTransparency -ne 0 -or
+            $Primitive.lineWidth -ne $expectedLineWidth -or
+            $Primitive.lineDash -cne 'solid'
+        ) {
+            throw "$Path style does not match its workflow node role."
+        }
+    }
+}
+
+function Assert-WorkerLinePrimitive {
+    param(
+        [Parameter(Mandatory = $true)]$Primitive,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$Theme
+    )
+
+    if (
+        $Primitive.kind -isnot [string] -or
+        $Primitive.kind -cne 'line' -or
+        $Primitive.role -isnot [string]
+    ) {
+        throw "$Path must use exact string kind 'line' and a string role."
+    }
+    $workflowEdge = $Primitive.role.StartsWith(
+        'workflow-edge-',
+        [StringComparison]::Ordinal
+    )
+    $expected = @(
+        'kind',
+        'name',
+        'role',
+        'z',
+        'x1',
+        'y1',
+        'x2',
+        'y2',
+        'colorRole',
+        'transparency',
+        'width',
+        'dash',
+        'arrowStart',
+        'arrowEnd'
+    )
+    if ($workflowEdge) {
+        $expected += @('sourceNodeId', 'targetNodeId', 'edgeIndex', 'segmentIndex')
+    }
+    Assert-WorkerExactProperties -Value $Primitive -Expected $expected -Path $Path
+    $coordinates = @{}
+    foreach ($key in @('x1', 'y1', 'x2', 'y2')) {
+        $coordinates[$key] = Get-WorkerFiniteSingleNumber `
+            -Value $Primitive.$key `
+            -Path "$Path.$key"
+    }
+    $width = Get-WorkerFiniteSingleNumber -Value $Primitive.width -Path "$Path.width"
+    $transparency = Get-WorkerFiniteNumber `
+        -Value $Primitive.transparency `
+        -Path "$Path.transparency"
+    if (
+        $coordinates.x1 -lt 0 -or
+        $coordinates.x1 -gt 960 -or
+        $coordinates.x2 -lt 0 -or
+        $coordinates.x2 -gt 960 -or
+        $coordinates.y1 -lt 0 -or
+        $coordinates.y1 -gt 540 -or
+        $coordinates.y2 -lt 0 -or
+        $coordinates.y2 -gt 540 -or
+        ($coordinates.x1 -eq $coordinates.x2 -and $coordinates.y1 -eq $coordinates.y2) -or
+        (
+            [single]$coordinates.x1 -eq [single]$coordinates.x2 -and
+            [single]$coordinates.y1 -eq [single]$coordinates.y2
+        ) -or
+        $width -le 0
+    ) {
+        throw "$Path must be a nonzero in-bounds line with positive width."
+    }
+    if ($transparency -lt 0 -or $transparency -gt 1) {
+        throw "$Path.transparency must be between zero and one."
+    }
+    Assert-WorkerColorRole -Theme $Theme -Value $Primitive.colorRole -Path "$Path.colorRole"
+    if (
+        $Primitive.dash -isnot [string] -or
+        $Primitive.dash -cnotin @('solid', 'dash', 'dot', 'dashDot')
+    ) {
+        throw "$Path.dash is invalid."
+    }
+    if (
+        $Primitive.arrowStart -isnot [string] -or
+        $Primitive.arrowStart -cne 'none' -or
+        $Primitive.arrowEnd -isnot [string] -or
+        $Primitive.arrowEnd -cnotin @('none', 'open')
+    ) {
+        throw "$Path arrow style is invalid."
+    }
+    if ($workflowEdge) {
+        Assert-WorkerNonemptyString `
+            -Value $Primitive.sourceNodeId `
+            -Path "$Path.sourceNodeId"
+        Assert-WorkerNonemptyString `
+            -Value $Primitive.targetNodeId `
+            -Path "$Path.targetNodeId"
+        $edgeIndex = Get-WorkerSafeInteger `
+            -Value $Primitive.edgeIndex `
+            -Path "$Path.edgeIndex"
+        $segmentIndex = Get-WorkerSafeInteger `
+            -Value $Primitive.segmentIndex `
+            -Path "$Path.segmentIndex"
+        if ($Primitive.role -cnotmatch '^workflow-edge-(system|decision)-(\d{2})$') {
+            throw "$Path.role is not a supported workflow edge role."
+        }
+        $edgeKind = $Matches[1]
+        $roleEdgeIndex = $Matches[2]
+        if (
+            $edgeIndex -lt 1 -or
+            $segmentIndex -lt 1 -or
+            $edgeIndex.ToString('00', [Globalization.CultureInfo]::InvariantCulture) -cne $roleEdgeIndex -or
+            ($coordinates.x1 -eq $coordinates.x2) -eq
+                ($coordinates.y1 -eq $coordinates.y2) -or
+            $coordinates.x1 -lt 48 -or
+            $coordinates.x1 -gt 912 -or
+            $coordinates.x2 -lt 48 -or
+            $coordinates.x2 -gt 912 -or
+            $coordinates.y1 -lt 116 -or
+            $coordinates.y1 -gt 478 -or
+            $coordinates.y2 -lt 116 -or
+            $coordinates.y2 -gt 478
+        ) {
+            throw "$Path has invalid workflow edge metadata or orthogonal geometry."
+        }
+        $expectedWidth = if ($edgeKind -ceq 'decision') { 1.5 } else { 1.0 }
+        if (
+            $Primitive.colorRole -cne $edgeKind -or
+            $transparency -ne 0 -or
+            $width -ne $expectedWidth -or
+            $Primitive.dash -cne 'solid' -or
+            $Primitive.arrowStart -cne 'none'
+        ) {
+            throw "$Path style does not match its workflow edge role."
+        }
+    }
+}
+
+function Test-WorkerWorkflowAnchorMatches {
+    param(
+        [Parameter(Mandatory = $true)][double]$X,
+        [Parameter(Mandatory = $true)][double]$Y,
+        [Parameter(Mandatory = $true)]$Box
+    )
+
+    return (
+        ($X -eq [double]$Box.x -and $Y -eq [double]$Box.y + [double]$Box.h / 2) -or
+        ($X -eq [double]$Box.x + [double]$Box.w -and $Y -eq [double]$Box.y + [double]$Box.h / 2) -or
+        ($X -eq [double]$Box.x + [double]$Box.w / 2 -and $Y -eq [double]$Box.y) -or
+        ($X -eq [double]$Box.x + [double]$Box.w / 2 -and $Y -eq [double]$Box.y + [double]$Box.h)
+    )
+}
+
+function Test-WorkerWorkflowSegmentCrossesBox {
+    param(
+        [Parameter(Mandatory = $true)]$Line,
+        [Parameter(Mandatory = $true)]$Box
+    )
+
+    if ([double]$Line.y1 -eq [double]$Line.y2) {
+        return (
+            [double]$Line.y1 -gt [double]$Box.y -and
+            [double]$Line.y1 -lt [double]$Box.y + [double]$Box.h -and
+            [math]::Max(
+                [math]::Min([double]$Line.x1, [double]$Line.x2),
+                [double]$Box.x
+            ) -lt [math]::Min(
+                [math]::Max([double]$Line.x1, [double]$Line.x2),
+                [double]$Box.x + [double]$Box.w
+            )
+        )
+    }
+    return (
+        [double]$Line.x1 -gt [double]$Box.x -and
+        [double]$Line.x1 -lt [double]$Box.x + [double]$Box.w -and
+        [math]::Max(
+            [math]::Min([double]$Line.y1, [double]$Line.y2),
+            [double]$Box.y
+        ) -lt [math]::Min(
+            [math]::Max([double]$Line.y1, [double]$Line.y2),
+            [double]$Box.y + [double]$Box.h
+        )
+    )
+}
+
+function Assert-WorkerWorkflowSlideContract {
+    param(
+        [Parameter(Mandatory = $true)]$Slide,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $nodeIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $nodeById = [Collections.Generic.Dictionary[string, object]]::new(
+        [StringComparer]::Ordinal
+    )
+    $nodeZ = [Collections.Generic.List[double]]::new()
+    $edgeZ = [Collections.Generic.List[double]]::new()
+    $edgeGroups = [Collections.Generic.Dictionary[string, object]]::new(
+        [StringComparer]::Ordinal
+    )
+    for ($primitiveIndex = 0; $primitiveIndex -lt $Slide.primitives.Count; $primitiveIndex++) {
+        $primitive = $Slide.primitives[$primitiveIndex]
+        $primitivePath = "$Path.primitives[$primitiveIndex]"
+        if (
+            $primitive.kind -ceq 'shape' -and
+            $primitive.role.StartsWith('workflow-node-', [StringComparison]::Ordinal)
+        ) {
+            if (-not $nodeIds.Add($primitive.nodeId)) {
+                throw "$primitivePath.nodeId duplicates workflow node '$($primitive.nodeId)'."
+            }
+            $nodeById.Add($primitive.nodeId, $primitive)
+            $nodeZ.Add((Get-WorkerSafeInteger -Value $primitive.z -Path "$primitivePath.z"))
+        }
+        elseif (
+            $primitive.kind -ceq 'line' -and
+            $primitive.role.StartsWith('workflow-edge-', [StringComparison]::Ordinal)
+        ) {
+            if (-not $edgeGroups.ContainsKey($primitive.role)) {
+                $edgeGroups.Add(
+                    $primitive.role,
+                    [Collections.Generic.List[object]]::new()
+                )
+            }
+            $edgeGroups[$primitive.role].Add($primitive)
+            $edgeZ.Add((Get-WorkerSafeInteger -Value $primitive.z -Path "$primitivePath.z"))
+        }
+    }
+    if ($nodeIds.Count -lt 3 -or $nodeIds.Count -gt 8) {
+        throw "$Path must contain 3-8 unique workflow nodes."
+    }
+    if ($edgeGroups.Count -lt 2 -or $edgeGroups.Count -gt 10) {
+        throw "$Path must contain 2-10 workflow edge groups."
+    }
+
+    $groupRecords = [Collections.Generic.List[object]]::new()
+    foreach ($pair in $edgeGroups.GetEnumerator()) {
+        $groupRecords.Add([pscustomobject]@{
+                role = $pair.Key
+                edgeIndex = $pair.Value[0].edgeIndex
+                segments = $pair.Value
+            })
+    }
+    $orderedGroups = @($groupRecords | Sort-Object -Property edgeIndex)
+    $hasDecisionEdge = $false
+    for ($groupIndex = 0; $groupIndex -lt $orderedGroups.Count; $groupIndex++) {
+        $group = $orderedGroups[$groupIndex]
+        $segments = $group.segments
+        if ($group.edgeIndex -ne $groupIndex + 1) {
+            throw "$Path workflow edge indexes must be contiguous from one."
+        }
+        if ($group.role.StartsWith('workflow-edge-decision-', [StringComparison]::Ordinal)) {
+            $hasDecisionEdge = $true
+        }
+        $sourceNodeId = $segments[0].sourceNodeId
+        $targetNodeId = $segments[0].targetNodeId
+        if (
+            -not $nodeIds.Contains($sourceNodeId) -or
+            -not $nodeIds.Contains($targetNodeId)
+        ) {
+            throw "$Path workflow edge '$($group.role)' references an unknown node."
+        }
+        for ($segmentIndex = 0; $segmentIndex -lt $segments.Count; $segmentIndex++) {
+            $segment = $segments[$segmentIndex]
+            $expectedArrowEnd = if ($segmentIndex -eq $segments.Count - 1) {
+                'open'
+            }
+            else {
+                'none'
+            }
+            if (
+                $segment.segmentIndex -ne $segmentIndex + 1 -or
+                $segment.sourceNodeId -cne $sourceNodeId -or
+                $segment.targetNodeId -cne $targetNodeId -or
+                $segment.arrowEnd -cne $expectedArrowEnd
+            ) {
+                throw "$Path workflow edge '$($group.role)' has inconsistent segment metadata or arrowheads."
+            }
+            if (
+                $segmentIndex -gt 0 -and
+                (
+                    $segments[$segmentIndex - 1].x2 -ne $segment.x1 -or
+                    $segments[$segmentIndex - 1].y2 -ne $segment.y1
+                )
+            ) {
+                throw "$Path workflow edge '$($group.role)' segments do not share exact anchors."
+            }
+            foreach ($node in $nodeById.Values) {
+                if (Test-WorkerWorkflowSegmentCrossesBox -Line $segment -Box $node) {
+                    throw "$Path workflow edge '$($group.role)' crosses a node interior."
+                }
+            }
+        }
+        $firstSegment = $segments[0]
+        $lastSegment = $segments[$segments.Count - 1]
+        if (
+            -not (Test-WorkerWorkflowAnchorMatches `
+                    -X ([double]$firstSegment.x1) `
+                    -Y ([double]$firstSegment.y1) `
+                    -Box $nodeById[$sourceNodeId]) -or
+            -not (Test-WorkerWorkflowAnchorMatches `
+                    -X ([double]$lastSegment.x2) `
+                    -Y ([double]$lastSegment.y2) `
+                    -Box $nodeById[$targetNodeId])
+        ) {
+            throw "$Path workflow edge '$($group.role)' endpoints do not match their declared nodes."
+        }
+    }
+    if (-not $hasDecisionEdge) {
+        throw "$Path must contain a decision workflow edge."
+    }
+    $maximumEdgeZ = ($edgeZ | Measure-Object -Maximum).Maximum
+    $minimumNodeZ = ($nodeZ | Measure-Object -Minimum).Minimum
+    if ($maximumEdgeZ -ge $minimumNodeZ) {
+        throw "$Path workflow edges must remain behind workflow nodes."
+    }
+}
+
+function Assert-WorkerDrawingSpecMetadata {
+    param([Parameter(Mandatory = $true)]$SpecObject)
+
+    Assert-WorkerExactProperties `
+        -Value $SpecObject `
+        -Expected @(
+            'schemaVersion',
+            'units',
+            'stage',
+            'source',
+            'theme',
+            'selectedSlideIds',
+            'selectedSlideFamilies',
+            'slides'
+        ) `
+        -Path '$'
+    if (
+        $SpecObject.schemaVersion -isnot [string] -or
+        $SpecObject.schemaVersion -cne 'fde-drawing-spec/1.0' -or
+        $SpecObject.units -isnot [string] -or
+        $SpecObject.units -cne 'points'
+    ) {
+        throw 'Drawing spec must use fde-drawing-spec/1.0 point units.'
+    }
+    Assert-WorkerExactProperties `
+        -Value $SpecObject.stage `
+        -Expected @('width', 'height') `
+        -Path '$.stage'
+    $stageWidth = Get-WorkerSafeInteger `
+        -Value $SpecObject.stage.width `
+        -Path '$.stage.width'
+    $stageHeight = Get-WorkerSafeInteger `
+        -Value $SpecObject.stage.height `
+        -Path '$.stage.height'
+    if ($stageWidth -ne 960 -or $stageHeight -ne 540) {
+        throw 'Drawing spec stage must be exactly 960x540.'
+    }
+
+    Assert-WorkerExactProperties `
+        -Value $SpecObject.source `
+        -Expected @('planId', 'planVersion', 'planSha256') `
+        -Path '$.source'
+    Assert-WorkerNonemptyString -Value $SpecObject.source.planId -Path '$.source.planId'
+    if (
+        $SpecObject.source.planVersion -isnot [string] -or
+        $SpecObject.source.planVersion -cne '1.0' -or
+        $SpecObject.source.planSha256 -isnot [string] -or
+        $SpecObject.source.planSha256 -cnotmatch '^[a-f0-9]{64}$'
+    ) {
+        throw '$.source has an invalid plan version or SHA-256.'
+    }
+
+    Assert-WorkerExactProperties `
+        -Value $SpecObject.theme `
+        -Expected @('fontFamily', 'colors', 'requiredFooter', 'unbranded') `
+        -Path '$.theme'
+    if (
+        $SpecObject.theme.fontFamily -isnot [string] -or
+        $SpecObject.theme.fontFamily.Length -lt 1 -or
+        $SpecObject.theme.fontFamily.Trim() -cne $SpecObject.theme.fontFamily -or
+        $SpecObject.theme.fontFamily -match '[\x00-\x1f\x7f-\x9f]'
+    ) {
+        throw '$.theme.fontFamily must be nonblank, unpadded, and control-free.'
+    }
+    Assert-WorkerNonemptyString `
+        -Value $SpecObject.theme.requiredFooter `
+        -Path '$.theme.requiredFooter'
+    if ($SpecObject.theme.unbranded -isnot [bool]) {
+        throw '$.theme.unbranded must be a boolean.'
+    }
+    $colorRoles = @('ink', 'system', 'decision', 'risk', 'paper', 'muted', 'line')
+    Assert-WorkerExactProperties `
+        -Value $SpecObject.theme.colors `
+        -Expected $colorRoles `
+        -Path '$.theme.colors'
+    foreach ($role in $colorRoles) {
+        $color = $SpecObject.theme.colors.PSObject.Properties[$role].Value
+        if ($color -isnot [string] -or $color -cnotmatch '^#[0-9A-F]{6}$') {
+            throw "$.theme.colors.$role must be an uppercase #RRGGBB string."
+        }
+    }
+    Assert-WorkerStringArray `
+        -Value $SpecObject.selectedSlideIds `
+        -Path '$.selectedSlideIds' `
+        -Nonempty
+    Assert-WorkerStringArray `
+        -Value $SpecObject.selectedSlideFamilies `
+        -Path '$.selectedSlideFamilies' `
+        -Nonempty
+    Assert-WorkerJsonArray -Value $SpecObject.slides -Path '$.slides' -Nonempty
+    if (
+        $SpecObject.selectedSlideIds.Count -ne $SpecObject.slides.Count -or
+        $SpecObject.selectedSlideFamilies.Count -ne $SpecObject.slides.Count
+    ) {
+        throw 'Drawing spec selected-slide metadata must match its nonempty slides array.'
+    }
+}
+
+function Assert-WorkerSlideMetadata {
+    param(
+        [Parameter(Mandatory = $true)]$Slide,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    Assert-WorkerExactProperties `
+        -Value $Slide `
+        -Expected @(
+            'sourceIndex',
+            'id',
+            'family',
+            'title',
+            'customerSafe',
+            'backgroundColorRole',
+            'notesText',
+            'evidenceIds',
+            'judgmentIds',
+            'primitives'
+        ) `
+        -Path $Path
+    $sourceIndex = Get-WorkerSafeInteger `
+        -Value $Slide.sourceIndex `
+        -Path "$Path.sourceIndex"
+    if ($sourceIndex -lt 1) {
+        throw "$Path.sourceIndex must be a positive safe integer."
+    }
+    Assert-WorkerNonemptyString -Value $Slide.id -Path "$Path.id"
+    Assert-WorkerNonemptyString -Value $Slide.title -Path "$Path.title"
+    if (
+        $Slide.family -isnot [string] -or
+        $Slide.family -cnotin @(
+            'cover',
+            'decision',
+            'profile',
+            'metrics',
+            'findings',
+            'responsibility',
+            'risks',
+            'timeline',
+            'chart',
+            'table',
+            'workflow',
+            'evaluation',
+            'evidence'
+        )
+    ) {
+        throw "$Path.family is unsupported."
+    }
+    if ($Slide.customerSafe -isnot [bool]) {
+        throw "$Path.customerSafe must be a boolean."
+    }
+    if (
+        $Slide.backgroundColorRole -isnot [string] -or
+        $Slide.backgroundColorRole -cnotin @(
+            'ink',
+            'system',
+            'decision',
+            'risk',
+            'paper',
+            'muted',
+            'line'
+        )
+    ) {
+        throw "$Path.backgroundColorRole is invalid."
+    }
+    Assert-WorkerStringArray -Value $Slide.evidenceIds -Path "$Path.evidenceIds"
+    Assert-WorkerStringArray -Value $Slide.judgmentIds -Path "$Path.judgmentIds"
+    if (
+        $Slide.notesText -isnot [string] -or
+        [string]::IsNullOrWhiteSpace($Slide.notesText) -or
+        $Slide.notesText -match '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]'
+    ) {
+        throw "$Path.notesText must be nonblank, control-safe text."
+    }
+    $notesSuffix = "`r`nEvidence: $($Slide.evidenceIds -join ', ')`r`nHuman context: $($Slide.judgmentIds -join ', ')"
+    if (-not $Slide.notesText.EndsWith($notesSuffix, [StringComparison]::Ordinal)) {
+        throw "$Path.notesText evidence does not match the slide IDs."
+    }
+    Assert-WorkerJsonArray -Value $Slide.primitives -Path "$Path.primitives" -Nonempty
+}
+
+function Get-WorkerChartY {
+    param(
+        [Parameter(Mandatory = $true)][double]$Value,
+        [Parameter(Mandatory = $true)]$Axis,
+        [Parameter(Mandatory = $true)]$Plot
+    )
+
+    $minimum = [double]$Axis.min
+    $maximum = [double]$Axis.max
+    $range = $maximum - $minimum
+    if ([double]::IsInfinity($range)) {
+        $scale = [math]::Max([math]::Abs($minimum), [math]::Abs($maximum))
+        $ratio = (
+            $maximum / $scale - $Value / $scale
+        ) / (
+            $maximum / $scale - $minimum / $scale
+        )
+    }
+    else {
+        $ratio = ($maximum - $Value) / $range
+    }
+    return Get-WorkerRoundedCoordinate -Value ([double]$Plot.y + $ratio * [double]$Plot.h)
+}
+
+function Get-WorkerCleanNumber {
+    param([Parameter(Mandatory = $true)][double]$Value)
+
+    $text = $Value.ToString('G12', [Globalization.CultureInfo]::InvariantCulture)
+    $cleaned = [double]::Parse(
+        $text,
+        [Globalization.NumberStyles]::Float,
+        [Globalization.CultureInfo]::InvariantCulture
+    )
+    if ($cleaned -eq 0) {
+        return 0.0
+    }
+    return $cleaned
+}
+
+function Get-WorkerNextNiceStep {
+    param([Parameter(Mandatory = $true)][double]$Step)
+
+    $power = [math]::Pow(10, [math]::Floor([math]::Log10($Step)))
+    $mantissa = Get-WorkerCleanNumber -Value ($Step / $power)
+    if ($mantissa -lt 2) {
+        return 2 * $power
+    }
+    if ($mantissa -lt 5) {
+        return 5 * $power
+    }
+    return 10 * $power
+}
+
+function Get-WorkerNiceBounds {
+    param(
+        [Parameter(Mandatory = $true)][double]$DomainMin,
+        [Parameter(Mandatory = $true)][double]$DomainMax,
+        [Parameter(Mandatory = $true)][double]$Step
+    )
+
+    $minimum = [math]::Floor($DomainMin / $Step) * $Step
+    $maximum = [math]::Ceiling($DomainMax / $Step) * $Step
+    if (-not [double]::IsInfinity($minimum) -and $minimum -gt $DomainMin) {
+        $extended = $minimum - $Step
+        $minimum = if ([double]::IsInfinity($extended)) { $DomainMin } else { $extended }
+    }
+    if (-not [double]::IsInfinity($maximum) -and $maximum -lt $DomainMax) {
+        $extended = $maximum + $Step
+        $maximum = if ([double]::IsInfinity($extended)) { $DomainMax } else { $extended }
+    }
+    return [pscustomobject]@{
+        min = $minimum
+        max = $maximum
+    }
+}
+
+function Get-WorkerNiceAxis {
+    param([Parameter(Mandatory = $true)][double[]]$Values)
+
+    $domainMin = 0.0
+    $domainMax = 0.0
+    for ($index = 0; $index -lt $Values.Count; $index++) {
+        $domainMin = [math]::Min($domainMin, $Values[$index])
+        $domainMax = [math]::Max($domainMax, $Values[$index])
+    }
+    $adjustedMax = if ($domainMin -eq $domainMax) {
+        if ($domainMin -eq 0) { 1.0 } else { $domainMin + 1.0 }
+    }
+    else {
+        $domainMax
+    }
+    $rough = ($adjustedMax - $domainMin) / 4
+    if ($rough -eq 0) {
+        $step = [double]::Epsilon
+        $minimum = [math]::Floor($domainMin / $step) * $step
+        $maximum = [math]::Ceiling($adjustedMax / $step) * $step
+        $count = [math]::Round(($maximum - $minimum) / $step)
+        $ticks = [Collections.Generic.List[double]]::new()
+        for ($index = 0; $index -le $count; $index++) {
+            $ticks.Add((Get-WorkerCleanNumber -Value ($minimum + $index * $step)))
+        }
+        return [pscustomobject]@{
+            min = $minimum
+            max = $maximum
+            step = $step
+            ticks = $ticks.ToArray()
+        }
+    }
+
+    $power = [math]::Pow(10, [math]::Floor([math]::Log10($rough)))
+    $mantissa = $rough / $power
+    $niceMantissa = if ($mantissa -le 1) {
+        1
+    }
+    elseif ($mantissa -le 2) {
+        2
+    }
+    elseif ($mantissa -le 5) {
+        5
+    }
+    else {
+        10
+    }
+    $step = $niceMantissa * $power
+    $bounds = Get-WorkerNiceBounds -DomainMin $domainMin -DomainMax $adjustedMax -Step $step
+    $minimum = [double]$bounds.min
+    $maximum = [double]$bounds.max
+    while ([math]::Round(($maximum - $minimum) / $step) + 1 -gt 6) {
+        $step = Get-WorkerNextNiceStep -Step $step
+        $bounds = Get-WorkerNiceBounds -DomainMin $domainMin -DomainMax $adjustedMax -Step $step
+        $minimum = [double]$bounds.min
+        $maximum = [double]$bounds.max
+    }
+    if (
+        [double]::IsInfinity($minimum) -or
+        [double]::IsInfinity($maximum) -or
+        [double]::IsInfinity($step) -or
+        [double]::IsNaN($minimum) -or
+        [double]::IsNaN($maximum) -or
+        [double]::IsNaN($step)
+    ) {
+        $step = [math]::Max([math]::Abs($domainMin), [math]::Abs($adjustedMax))
+        $mixed = $domainMin -lt 0 -and $adjustedMax -gt 0
+        $minimum = if ($mixed) { -$step } else { $domainMin }
+        $maximum = if ($mixed) { $step } else { $adjustedMax }
+        $ticks = [Collections.Generic.List[double]]::new()
+        foreach ($candidate in @($minimum, 0.0, $maximum)) {
+            if (-not $ticks.Contains([double]$candidate)) {
+                $ticks.Add([double]$candidate)
+            }
+        }
+        $tickArray = @($ticks.ToArray() | Sort-Object)
+        return [pscustomobject]@{
+            min = $minimum
+            max = $maximum
+            step = $step
+            ticks = $tickArray
+        }
+    }
+
+    $minimum = Get-WorkerCleanNumber -Value $minimum
+    $maximum = Get-WorkerCleanNumber -Value $maximum
+    $step = Get-WorkerCleanNumber -Value $step
+    $count = [math]::Round(($maximum - $minimum) / $step)
+    $ticks = [Collections.Generic.List[double]]::new()
+    for ($index = 0; $index -le $count; $index++) {
+        $ticks.Add((Get-WorkerCleanNumber -Value ($minimum + $index * $step)))
+    }
+    return [pscustomobject]@{
+        min = $minimum
+        max = $maximum
+        step = $step
+        ticks = $ticks.ToArray()
+    }
+}
+
+function Get-NativeChartBoundsShapeName {
+    param([Parameter(Mandatory = $true)][string]$ChartName)
+
+    if ($ChartName.EndsWith('-native-chart', [StringComparison]::Ordinal)) {
+        return $ChartName.Substring(0, $ChartName.Length - 13) + '-chart-bounds'
+    }
+    $digest = Get-TextSha256 -Text $ChartName
+    return "fde-chart-bounds-$($digest.Substring(0, 16))"
+}
+
+function Assert-NativeChartSpec {
+    param(
+        [Parameter(Mandatory = $true)]$Primitive,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$Theme,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]
+        [Collections.Generic.HashSet[string]]$Names,
+        [Parameter(Mandatory = $true)][string]$SlideFamily,
+        [Parameter(Mandatory = $true)][string[]]$SlideEvidenceIds
+    )
+
+    Assert-WorkerExactProperties `
+        -Value $Primitive `
+        -Expected @(
+            'kind',
+            'name',
+            'role',
+            'z',
+            'chartType',
+            'x',
+            'y',
+            'w',
+            'h',
+            'unit',
+            'insightEvidenceIds',
+            'unitLabel',
+            'plot',
+            'axis',
+            'categories',
+            'legend',
+            'dataGrid',
+            'series'
+        ) `
+        -Path $Path
+    if (
+        $SlideFamily -cne 'chart' -or
+        $Primitive.role -isnot [string] -or
+        $Primitive.role -cne 'native-chart' -or
+        $Primitive.kind -isnot [string] -or
+        $Primitive.kind -cne 'nativeChart'
+    ) {
+        throw "$Path is not a chart-family nativeChart primitive."
+    }
+    Assert-WorkerBox -Value $Primitive -Path $Path
+    if (
+        [double]$Primitive.x -ne 48 -or
+        [double]$Primitive.y -ne 120 -or
+        [double]$Primitive.w -ne 864 -or
+        [double]$Primitive.h -ne 318
+    ) {
+        throw "$Path must use the exact 48,120,864,318 chart bounds."
+    }
+    if (
+        $Primitive.chartType -isnot [string] -or
+        $Primitive.chartType -cnotin @('bar', 'line')
+    ) {
+        throw "$Path.chartType must be bar or line."
+    }
+    Assert-WorkerChartText -Value $Primitive.unit -Path "$Path.unit"
+
+    $declaredEvidence = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::Ordinal
+    )
+    for ($index = 0; $index -lt $SlideEvidenceIds.Count; $index++) {
+        [void]$declaredEvidence.Add($SlideEvidenceIds[$index])
+    }
+    Assert-WorkerJsonArray `
+        -Value $Primitive.insightEvidenceIds `
+        -Path "$Path.insightEvidenceIds" `
+        -Nonempty
+    $insightEvidenceIds = $Primitive.insightEvidenceIds
+    $seenEvidence = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::Ordinal
+    )
+    for ($index = 0; $index -lt $insightEvidenceIds.Count; $index++) {
+        $evidenceId = $insightEvidenceIds[$index]
+        Assert-WorkerChartText -Value $evidenceId -Path "$Path.insightEvidenceIds[$index]"
+        if (-not $seenEvidence.Add([string]$evidenceId)) {
+            throw "$Path.insightEvidenceIds contains a duplicate."
+        }
+        if (-not $declaredEvidence.Contains([string]$evidenceId)) {
+            throw "$Path.insightEvidenceIds[$index] is not declared by the slide."
+        }
+    }
+
+    $chartBounds = [pscustomobject]@{
+        x = [double]$Primitive.x
+        y = [double]$Primitive.y
+        w = [double]$Primitive.w
+        h = [double]$Primitive.h
+    }
+    Assert-WorkerChartLabel `
+        -Label $Primitive.unitLabel `
+        -Path "$Path.unitLabel" `
+        -Theme $Theme `
+        -Names $Names `
+        -Container $chartBounds
+    if (
+        [string]$Primitive.unitLabel.text -cne [string]$Primitive.unit -or
+        [double]$Primitive.unitLabel.x -ne 48 -or
+        [double]$Primitive.unitLabel.y -ne 142 -or
+        [double]$Primitive.unitLabel.w -ne 864 -or
+        [double]$Primitive.unitLabel.h -ne 14
+    ) {
+        throw "$Path.unitLabel does not match the exact unit-label contract."
+    }
+
+    Assert-WorkerExactProperties `
+        -Value $Primitive.plot `
+        -Expected @('x', 'y', 'w', 'h') `
+        -Path "$Path.plot"
+    Assert-WorkerBox -Value $Primitive.plot -Path "$Path.plot"
+    if (
+        [double]$Primitive.plot.x -ne 112 -or
+        [double]$Primitive.plot.y -ne 160 -or
+        [double]$Primitive.plot.w -ne 800 -or
+        [double]$Primitive.plot.h -ne 180 -or
+        -not (Test-WorkerBoxWithin -Inner $Primitive.plot -Outer $chartBounds)
+    ) {
+        throw "$Path.plot does not match the exact plot contract."
+    }
+
+    Assert-WorkerJsonArray `
+        -Value $Primitive.categories `
+        -Path "$Path.categories" `
+        -Nonempty
+    $categories = $Primitive.categories
+    if ($categories.Count -lt 2 -or $categories.Count -gt 12) {
+        throw "$Path.categories must contain 2-12 entries."
+    }
+    $categoryWidth = [double]$Primitive.plot.w / $categories.Count
+    for ($categoryIndex = 0; $categoryIndex -lt $categories.Count; $categoryIndex++) {
+        $category = $categories[$categoryIndex]
+        $categoryPath = "$Path.categories[$categoryIndex]"
+        Assert-WorkerExactProperties `
+            -Value $category `
+            -Expected @('index', 'label', 'labelBox') `
+            -Path $categoryPath
+        $categorySpecIndex = Get-WorkerSafeInteger `
+            -Value $category.index `
+            -Path "$categoryPath.index"
+        if ($categorySpecIndex -ne $categoryIndex) {
+            throw "$categoryPath.index must be contiguous."
+        }
+        Assert-WorkerChartText -Value $category.label -Path "$categoryPath.label"
+        Assert-WorkerChartLabel `
+            -Label $category.labelBox `
+            -Path "$categoryPath.labelBox" `
+            -Theme $Theme `
+            -Names $Names `
+            -Container $chartBounds
+        if (
+            [string]$category.labelBox.text -cne [string]$category.label -or
+            -not (Test-WorkerGeometryClose -Left ([double]$category.labelBox.x) -Right ([double]$Primitive.plot.x + $categoryIndex * $categoryWidth)) -or
+            [double]$category.labelBox.y -ne 344 -or
+            -not (Test-WorkerGeometryClose -Left ([double]$category.labelBox.w) -Right $categoryWidth) -or
+            [double]$category.labelBox.h -ne 28
+        ) {
+            throw "$categoryPath.labelBox has invalid category-label geometry."
+        }
+    }
+
+    Assert-WorkerJsonArray `
+        -Value $Primitive.series `
+        -Path "$Path.series" `
+        -Nonempty
+    $seriesItems = $Primitive.series
+    if ($seriesItems.Count -lt 1 -or $seriesItems.Count -gt 4) {
+        throw "$Path.series must contain 1-4 entries."
+    }
+    $expectedColorRoles = @('system', 'decision', 'ink', 'muted')
+    $expectedDashes = @('solid', 'dash', 'dot', 'dashDot')
+    $allValues = [Collections.Generic.List[double]]::new()
+    for ($seriesIndex = 0; $seriesIndex -lt $seriesItems.Count; $seriesIndex++) {
+        $series = $seriesItems[$seriesIndex]
+        $seriesPath = "$Path.series[$seriesIndex]"
+        $expectedKeys = if ($Primitive.chartType -ceq 'bar') {
+            @('index', 'name', 'evidenceIds', 'colorRole', 'dash', 'bars')
+        }
+        else {
+            @('index', 'name', 'evidenceIds', 'colorRole', 'dash', 'segments', 'markers')
+        }
+        Assert-WorkerExactProperties -Value $series -Expected $expectedKeys -Path $seriesPath
+        $seriesSpecIndex = Get-WorkerSafeInteger `
+            -Value $series.index `
+            -Path "$seriesPath.index"
+        if (
+            $seriesSpecIndex -ne $seriesIndex -or
+            $series.colorRole -isnot [string] -or
+            $series.colorRole -cne $expectedColorRoles[$seriesIndex] -or
+            $series.dash -isnot [string] -or
+            $series.dash -cne $expectedDashes[$seriesIndex]
+        ) {
+            throw "$seriesPath index or stable style is invalid."
+        }
+        Assert-WorkerChartText -Value $series.name -Path "$seriesPath.name"
+        Assert-WorkerColorRole -Theme $Theme -Value $series.colorRole -Path "$seriesPath.colorRole"
+        Assert-WorkerJsonArray `
+            -Value $series.evidenceIds `
+            -Path "$seriesPath.evidenceIds" `
+            -Nonempty
+        $seriesEvidenceIds = $series.evidenceIds
+        $seenSeriesEvidence = [Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::Ordinal
+        )
+        for ($evidenceIndex = 0; $evidenceIndex -lt $seriesEvidenceIds.Count; $evidenceIndex++) {
+            $evidenceId = $seriesEvidenceIds[$evidenceIndex]
+            Assert-WorkerChartText -Value $evidenceId -Path "$seriesPath.evidenceIds[$evidenceIndex]"
+            if (
+                -not $seenSeriesEvidence.Add([string]$evidenceId) -or
+                -not $declaredEvidence.Contains([string]$evidenceId)
+            ) {
+                throw "$seriesPath.evidenceIds is duplicate or undeclared."
+            }
+        }
+        $marks = if ($Primitive.chartType -ceq 'bar') {
+            Assert-WorkerJsonArray `
+                -Value $series.bars `
+                -Path "$seriesPath.bars" `
+                -Nonempty
+            $series.bars
+        }
+        else {
+            Assert-WorkerJsonArray `
+                -Value $series.markers `
+                -Path "$seriesPath.markers" `
+                -Nonempty
+            $series.markers
+        }
+        if ($marks.Count -ne $categories.Count) {
+            throw "$seriesPath mark count must match categories."
+        }
+        for ($categoryIndex = 0; $categoryIndex -lt $marks.Count; $categoryIndex++) {
+            $mark = $marks[$categoryIndex]
+            $value = Get-WorkerFiniteNumber -Value $mark.value -Path "$seriesPath.mark[$categoryIndex].value"
+            $markCategoryIndex = Get-WorkerSafeInteger `
+                -Value $mark.categoryIndex `
+                -Path "$seriesPath.mark[$categoryIndex].categoryIndex"
+            if ($markCategoryIndex -ne $categoryIndex) {
+                throw "$seriesPath mark indexes must be contiguous."
+            }
+            $allValues.Add($value)
+        }
+    }
+
+    Assert-WorkerExactProperties `
+        -Value $Primitive.axis `
+        -Expected @('min', 'max', 'step', 'zeroY', 'baseline', 'ticks') `
+        -Path "$Path.axis"
+    foreach ($key in @('min', 'max', 'step', 'zeroY')) {
+        [void](Get-WorkerFiniteNumber -Value $Primitive.axis.$key -Path "$Path.axis.$key")
+    }
+    if (
+        [double]$Primitive.axis.min -gt 0 -or
+        [double]$Primitive.axis.max -lt 0 -or
+        [double]$Primitive.axis.min -ge [double]$Primitive.axis.max -or
+        [double]$Primitive.axis.step -le 0
+    ) {
+        throw "$Path.axis must be a finite zero-inclusive increasing domain."
+    }
+    for ($index = 0; $index -lt $allValues.Count; $index++) {
+        if (
+            $allValues[$index] -lt [double]$Primitive.axis.min -or
+            $allValues[$index] -gt [double]$Primitive.axis.max
+        ) {
+            throw "$Path.axis does not contain chart value $index."
+        }
+    }
+    $expectedAxis = Get-WorkerNiceAxis -Values $allValues.ToArray()
+    if (
+        [double]$Primitive.axis.min -ne [double]$expectedAxis.min -or
+        [double]$Primitive.axis.max -ne [double]$expectedAxis.max -or
+        [double]$Primitive.axis.step -ne [double]$expectedAxis.step
+    ) {
+        throw "$Path.axis is not the deterministic nice axis derived from chart data."
+    }
+    $expectedZeroY = Get-WorkerChartY -Value 0 -Axis $Primitive.axis -Plot $Primitive.plot
+    if (-not (Test-WorkerGeometryClose -Left ([double]$Primitive.axis.zeroY) -Right $expectedZeroY)) {
+        throw "$Path.axis.zeroY does not represent zero."
+    }
+    Assert-WorkerChartLine `
+        -LineSpec $Primitive.axis.baseline `
+        -Path "$Path.axis.baseline" `
+        -Theme $Theme `
+        -Names $Names `
+        -Container $Primitive.plot
+    if (
+        [double]$Primitive.axis.baseline.x1 -ne [double]$Primitive.plot.x -or
+        [double]$Primitive.axis.baseline.x2 -ne [double]$Primitive.plot.x + [double]$Primitive.plot.w -or
+        -not (Test-WorkerGeometryClose -Left ([double]$Primitive.axis.baseline.y1) -Right ([double]$Primitive.axis.zeroY)) -or
+        -not (Test-WorkerGeometryClose -Left ([double]$Primitive.axis.baseline.y2) -Right ([double]$Primitive.axis.zeroY)) -or
+        $Primitive.axis.baseline.colorRole -cne 'ink' -or
+        [double]$Primitive.axis.baseline.width -ne 1 -or
+        $Primitive.axis.baseline.dash -cne 'solid' -or
+        [double]$Primitive.axis.baseline.transparency -ne 0
+    ) {
+        throw "$Path.axis.baseline does not match the zero baseline."
+    }
+
+    Assert-WorkerJsonArray `
+        -Value $Primitive.axis.ticks `
+        -Path "$Path.axis.ticks" `
+        -Nonempty
+    $ticks = $Primitive.axis.ticks
+    if ($ticks.Count -lt 2 -or $ticks.Count -gt 6) {
+        throw "$Path.axis.ticks must contain 2-6 entries."
+    }
+    for ($tickIndex = 0; $tickIndex -lt $ticks.Count; $tickIndex++) {
+        $tick = $ticks[$tickIndex]
+        $tickPath = "$Path.axis.ticks[$tickIndex]"
+        Assert-WorkerExactProperties `
+            -Value $tick `
+            -Expected @('value', 'label', 'gridLine', 'labelBox') `
+            -Path $tickPath
+        $tickValue = Get-WorkerFiniteNumber -Value $tick.value -Path "$tickPath.value"
+        Assert-WorkerChartText -Value $tick.label -Path "$tickPath.label"
+        if (-not (Test-WorkerNumericLabelMatches -Label ([string]$tick.label) -Value $tick.value)) {
+            $canonicalLabel = Get-WorkerCanonicalNumberLabel -Value $tickValue
+            throw "$tickPath.label is not the canonical numeric label for $tickValue; expected '$canonicalLabel', found '$($tick.label)'."
+        }
+        if (
+            ($tickIndex -eq 0 -and $tickValue -ne [double]$Primitive.axis.max) -or
+            ($tickIndex -eq $ticks.Count - 1 -and $tickValue -ne [double]$Primitive.axis.min)
+        ) {
+            throw "$tickPath must span the declared axis domain: found $tickValue in range $($Primitive.axis.min)..$($Primitive.axis.max)."
+        }
+        if ($tickIndex -gt 0) {
+            $previousValue = [double]$ticks[$tickIndex - 1].value
+            $normalizedDifference = (
+                $previousValue / [double]$Primitive.axis.step
+            ) - (
+                $tickValue / [double]$Primitive.axis.step
+            )
+            if (-not (Test-WorkerNumberClose -Left $normalizedDifference -Right 1)) {
+                throw "$tickPath does not follow the declared axis step."
+            }
+        }
+        Assert-WorkerChartLine `
+            -LineSpec $tick.gridLine `
+            -Path "$tickPath.gridLine" `
+            -Theme $Theme `
+            -Names $Names `
+            -Container $Primitive.plot
+        Assert-WorkerChartLabel `
+            -Label $tick.labelBox `
+            -Path "$tickPath.labelBox" `
+            -Theme $Theme `
+            -Names $Names `
+            -Container $chartBounds
+        $expectedY = Get-WorkerChartY -Value $tickValue -Axis $Primitive.axis -Plot $Primitive.plot
+        $expectedLabelY = Get-WorkerRoundedCoordinate -Value (
+            [math]::Max(
+                [double]$Primitive.plot.y,
+                [math]::Min(
+                    [double]$Primitive.plot.y + [double]$Primitive.plot.h - 12,
+                    $expectedY - 6
+                )
+            )
+        )
+        if (
+            [string]$tick.labelBox.text -cne [string]$tick.label -or
+            [double]$tick.gridLine.x1 -ne [double]$Primitive.plot.x -or
+            [double]$tick.gridLine.x2 -ne [double]$Primitive.plot.x + [double]$Primitive.plot.w -or
+            -not (Test-WorkerGeometryClose -Left ([double]$tick.gridLine.y1) -Right $expectedY) -or
+            -not (Test-WorkerGeometryClose -Left ([double]$tick.gridLine.y2) -Right $expectedY) -or
+            $tick.gridLine.colorRole -cne 'line' -or
+            [double]$tick.gridLine.width -ne 0.75 -or
+            $tick.gridLine.dash -cne 'solid' -or
+            [double]$tick.gridLine.transparency -ne 0.35 -or
+            [double]$tick.labelBox.x -ne 48 -or
+            -not (Test-WorkerGeometryClose -Left ([double]$tick.labelBox.y) -Right $expectedLabelY) -or
+            [double]$tick.labelBox.w -ne 56 -or
+            [double]$tick.labelBox.h -ne 12
+        ) {
+            throw "$tickPath has inconsistent grid or label geometry."
+        }
+    }
+
+    Assert-WorkerJsonArray `
+        -Value $Primitive.legend `
+        -Path "$Path.legend" `
+        -Nonempty
+    $legend = $Primitive.legend
+    if ($legend.Count -ne $seriesItems.Count) {
+        throw "$Path.legend must match series."
+    }
+    $legendWidth = [double]$Primitive.w / $seriesItems.Count
+    for ($legendIndex = 0; $legendIndex -lt $legend.Count; $legendIndex++) {
+        $entry = $legend[$legendIndex]
+        $entryPath = "$Path.legend[$legendIndex]"
+        Assert-WorkerExactProperties `
+            -Value $entry `
+            -Expected @('seriesIndex', 'colorRole', 'swatchName', 'swatch', 'labelBox') `
+            -Path $entryPath
+        Register-WorkerShapeName -Value $entry.swatchName -Path "$entryPath.swatchName" -Names $Names
+        Assert-WorkerExactProperties `
+            -Value $entry.swatch `
+            -Expected @('x', 'y', 'w', 'h') `
+            -Path "$entryPath.swatch"
+        Assert-WorkerBox -Value $entry.swatch -Path "$entryPath.swatch"
+        Assert-WorkerChartLabel `
+            -Label $entry.labelBox `
+            -Path "$entryPath.labelBox" `
+            -Theme $Theme `
+            -Names $Names `
+            -Container $chartBounds
+        $entrySeriesIndex = Get-WorkerSafeInteger `
+            -Value $entry.seriesIndex `
+            -Path "$entryPath.seriesIndex"
+        Assert-WorkerColorRole `
+            -Theme $Theme `
+            -Value $entry.colorRole `
+            -Path "$entryPath.colorRole"
+        if (
+            $entrySeriesIndex -ne $legendIndex -or
+            $entry.colorRole -cne $seriesItems[$legendIndex].colorRole -or
+            -not (Test-WorkerBoxWithin -Inner $entry.swatch -Outer $chartBounds) -or
+            -not (Test-WorkerGeometryClose -Left ([double]$entry.swatch.x) -Right (48 + $legendIndex * $legendWidth + 8)) -or
+            [double]$entry.swatch.y -ne 128 -or
+            [double]$entry.swatch.w -ne 16 -or
+            [double]$entry.swatch.h -ne 4 -or
+            [string]$entry.labelBox.text -cne [string]$seriesItems[$legendIndex].name -or
+            -not (Test-WorkerGeometryClose -Left ([double]$entry.labelBox.x) -Right (48 + $legendIndex * $legendWidth + 30)) -or
+            [double]$entry.labelBox.y -ne 120 -or
+            -not (Test-WorkerGeometryClose -Left ([double]$entry.labelBox.w) -Right ($legendWidth - 38)) -or
+            [double]$entry.labelBox.h -ne 20
+        ) {
+            throw "$entryPath does not match its series or fixed geometry."
+        }
+    }
+
+    Assert-WorkerExactProperties `
+        -Value $Primitive.dataGrid `
+        -Expected @('x', 'y', 'w', 'h', 'seriesLabelWidth', 'rowHeight', 'rows') `
+        -Path "$Path.dataGrid"
+    Assert-WorkerBox -Value $Primitive.dataGrid -Path "$Path.dataGrid"
+    $dataGridSeriesLabelWidth = Get-WorkerFiniteNumber `
+        -Value $Primitive.dataGrid.seriesLabelWidth `
+        -Path "$Path.dataGrid.seriesLabelWidth"
+    $dataGridRowHeight = Get-WorkerFiniteNumber `
+        -Value $Primitive.dataGrid.rowHeight `
+        -Path "$Path.dataGrid.rowHeight"
+    $expectedRowHeight = Get-WorkerRoundedCoordinate -Value (60 / $seriesItems.Count)
+    Assert-WorkerJsonArray `
+        -Value $Primitive.dataGrid.rows `
+        -Path "$Path.dataGrid.rows" `
+        -Nonempty
+    $rows = $Primitive.dataGrid.rows
+    if (
+        [double]$Primitive.dataGrid.x -ne 48 -or
+        [double]$Primitive.dataGrid.y -ne 376 -or
+        [double]$Primitive.dataGrid.w -ne 864 -or
+        [double]$Primitive.dataGrid.h -ne 60 -or
+        $dataGridSeriesLabelWidth -ne 64 -or
+        -not (Test-WorkerGeometryClose -Left $dataGridRowHeight -Right $expectedRowHeight) -or
+        $rows.Count -ne $seriesItems.Count -or
+        -not (Test-WorkerBoxWithin -Inner $Primitive.dataGrid -Outer $chartBounds)
+    ) {
+        throw "$Path.dataGrid does not match the fixed data-grid contract."
+    }
+    $expectedValueWidth = 800 / $categories.Count
+    for ($rowIndex = 0; $rowIndex -lt $rows.Count; $rowIndex++) {
+        $row = $rows[$rowIndex]
+        $rowPath = "$Path.dataGrid.rows[$rowIndex]"
+        Assert-WorkerExactProperties `
+            -Value $row `
+            -Expected @('seriesIndex', 'labelBox', 'values') `
+            -Path $rowPath
+        Assert-WorkerJsonArray `
+            -Value $row.values `
+            -Path "$rowPath.values" `
+            -Nonempty
+        $values = $row.values
+        $rowSeriesIndex = Get-WorkerSafeInteger `
+            -Value $row.seriesIndex `
+            -Path "$rowPath.seriesIndex"
+        if ($rowSeriesIndex -ne $rowIndex -or $values.Count -ne $categories.Count) {
+            throw "$rowPath dimensions are invalid."
+        }
+        Assert-WorkerChartLabel `
+            -Label $row.labelBox `
+            -Path "$rowPath.labelBox" `
+            -Theme $Theme `
+            -Names $Names `
+            -Container $Primitive.dataGrid
+        $expectedRowY = Get-WorkerRoundedCoordinate -Value (376 + $rowIndex * (60 / $seriesItems.Count))
+        if (
+            [string]$row.labelBox.text -cne [string]$seriesItems[$rowIndex].name -or
+            [double]$row.labelBox.x -ne 48 -or
+            -not (Test-WorkerGeometryClose -Left ([double]$row.labelBox.y) -Right $expectedRowY) -or
+            [double]$row.labelBox.w -ne 64 -or
+            -not (Test-WorkerGeometryClose -Left ([double]$row.labelBox.h) -Right (60 / $seriesItems.Count))
+        ) {
+            throw "$rowPath.labelBox has invalid geometry or source text."
+        }
+        for ($valueIndex = 0; $valueIndex -lt $values.Count; $valueIndex++) {
+            $cell = $values[$valueIndex]
+            $cellPath = "$rowPath.values[$valueIndex]"
+            Assert-WorkerExactProperties `
+                -Value $cell `
+                -Expected @('categoryIndex', 'value', 'labelBox') `
+                -Path $cellPath
+            $value = Get-WorkerFiniteNumber -Value $cell.value -Path "$cellPath.value"
+            $cellCategoryIndex = Get-WorkerSafeInteger `
+                -Value $cell.categoryIndex `
+                -Path "$cellPath.categoryIndex"
+            if (
+                $cellCategoryIndex -ne $valueIndex -or
+                $value -ne $allValues[$rowIndex * $categories.Count + $valueIndex]
+            ) {
+                throw "$cellPath does not match its chart mark."
+            }
+            Assert-WorkerChartLabel `
+                -Label $cell.labelBox `
+                -Path "$cellPath.labelBox" `
+                -Theme $Theme `
+                -Names $Names `
+                -Container $Primitive.dataGrid
+            if (
+                -not (Test-WorkerGeometryClose -Left ([double]$cell.labelBox.x) -Right (112 + $valueIndex * $expectedValueWidth)) -or
+                -not (Test-WorkerGeometryClose -Left ([double]$cell.labelBox.y) -Right $expectedRowY) -or
+                -not (Test-WorkerGeometryClose -Left ([double]$cell.labelBox.w) -Right $expectedValueWidth) -or
+                -not (Test-WorkerGeometryClose -Left ([double]$cell.labelBox.h) -Right (60 / $seriesItems.Count))
+            ) {
+                throw "$cellPath.labelBox has invalid data-label geometry."
+            }
+            if (-not (Test-WorkerNumericLabelMatches -Label ([string]$cell.labelBox.text) -Value $cell.value)) {
+                throw "$cellPath.labelBox text does not preserve its numeric source value."
+            }
+        }
+    }
+
+    $groupWidth = [double]$Primitive.plot.w / $categories.Count
+    $usableWidth = $groupWidth * 0.84
+    $barGap = [math]::Max(1.0, $groupWidth * 0.02)
+    $barWidth = ($usableWidth - $barGap * ($seriesItems.Count - 1)) / $seriesItems.Count
+    $barBoxes = [Collections.Generic.List[object]]::new()
+    for ($seriesIndex = 0; $seriesIndex -lt $seriesItems.Count; $seriesIndex++) {
+        $series = $seriesItems[$seriesIndex]
+        $seriesPath = "$Path.series[$seriesIndex]"
+        if ($Primitive.chartType -ceq 'bar') {
+            Assert-WorkerJsonArray `
+                -Value $series.bars `
+                -Path "$seriesPath.bars" `
+                -Nonempty
+            $bars = $series.bars
+            for ($categoryIndex = 0; $categoryIndex -lt $bars.Count; $categoryIndex++) {
+                $bar = $bars[$categoryIndex]
+                $barPath = "$seriesPath.bars[$categoryIndex]"
+                Assert-WorkerExactProperties `
+                    -Value $bar `
+                    -Expected @(
+                        'kind',
+                        'name',
+                        'categoryIndex',
+                        'value',
+                        'x',
+                        'y',
+                        'w',
+                        'h',
+                        'fillTransparency'
+                    ) `
+                    -Path $barPath
+                Register-WorkerShapeName -Value $bar.name -Path "$barPath.name" -Names $Names
+                Assert-WorkerBox -Value $bar -Path $barPath
+                $barFillTransparency = Get-WorkerFiniteNumber `
+                    -Value $bar.fillTransparency `
+                    -Path "$barPath.fillTransparency"
+                $value = [double]$bar.value
+                $groupX = [double]$Primitive.plot.x + $categoryIndex * $groupWidth + ($groupWidth - $usableWidth) / 2
+                $expectedX = Get-WorkerRoundedCoordinate -Value ($groupX + $seriesIndex * ($barWidth + $barGap))
+                $valueY = Get-WorkerChartY -Value $value -Axis $Primitive.axis -Plot $Primitive.plot
+                $height = Get-WorkerRoundedCoordinate -Value ([math]::Abs($valueY - [double]$Primitive.axis.zeroY))
+                $visibleHeight = if ($value -eq 0) { 1.0 } else { [math]::Max(1.0, $height) }
+                $expectedY = if ($value -eq 0) {
+                    Get-WorkerRoundedCoordinate -Value (
+                        [math]::Max(
+                            [double]$Primitive.plot.y,
+                            [math]::Min(
+                                [double]$Primitive.plot.y + [double]$Primitive.plot.h - 1,
+                                [double]$Primitive.axis.zeroY - 0.5
+                            )
+                        )
+                    )
+                }
+                elseif ($value -gt 0) {
+                    Get-WorkerRoundedCoordinate -Value (
+                        [math]::Max(
+                            [double]$Primitive.plot.y,
+                            [double]$Primitive.axis.zeroY - $visibleHeight
+                        )
+                    )
+                }
+                else {
+                    Get-WorkerRoundedCoordinate -Value (
+                        [math]::Min(
+                            [double]$Primitive.axis.zeroY,
+                            [double]$Primitive.plot.y + [double]$Primitive.plot.h - $visibleHeight
+                        )
+                    )
+                }
+                $expectedKind = if ($value -eq 0) { 'line' } else { 'rect' }
+                if (
+                    $bar.kind -isnot [string] -or
+                    $bar.kind -cne $expectedKind -or
+                    -not (Test-WorkerGeometryClose -Left ([double]$bar.x) -Right $expectedX) -or
+                    -not (Test-WorkerGeometryClose -Left ([double]$bar.y) -Right $expectedY) -or
+                    -not (Test-WorkerGeometryClose -Left ([double]$bar.w) -Right $barWidth) -or
+                    -not (Test-WorkerGeometryClose -Left ([double]$bar.h) -Right $visibleHeight) -or
+                    $barFillTransparency -ne 0 -or
+                    -not (Test-WorkerBoxWithin -Inner $bar -Outer $Primitive.plot)
+                ) {
+                    throw "$barPath has invalid bar geometry: expected $expectedKind at $expectedX,$expectedY,$barWidth,$visibleHeight; found $($bar.kind) at $($bar.x),$($bar.y),$($bar.w),$($bar.h)."
+                }
+                $barBoxes.Add($bar)
+            }
+        }
+        else {
+            Assert-WorkerJsonArray `
+                -Value $series.markers `
+                -Path "$seriesPath.markers" `
+                -Nonempty
+            Assert-WorkerJsonArray `
+                -Value $series.segments `
+                -Path "$seriesPath.segments" `
+                -Nonempty
+            $markers = $series.markers
+            $segments = $series.segments
+            if ($segments.Count -ne $categories.Count - 1) {
+                throw "$seriesPath.segments must join adjacent categories."
+            }
+            for ($categoryIndex = 0; $categoryIndex -lt $markers.Count; $categoryIndex++) {
+                $marker = $markers[$categoryIndex]
+                $markerPath = "$seriesPath.markers[$categoryIndex]"
+                Assert-WorkerExactProperties `
+                    -Value $marker `
+                    -Expected @('name', 'categoryIndex', 'value', 'cx', 'cy', 'diameter') `
+                    -Path $markerPath
+                Register-WorkerShapeName -Value $marker.name -Path "$markerPath.name" -Names $Names
+                foreach ($key in @('value', 'cx', 'cy', 'diameter')) {
+                    [void](Get-WorkerFiniteNumber -Value $marker.$key -Path "$markerPath.$key")
+                }
+                $markerCategoryIndex = Get-WorkerSafeInteger `
+                    -Value $marker.categoryIndex `
+                    -Path "$markerPath.categoryIndex"
+                $expectedX = Get-WorkerRoundedCoordinate -Value (
+                    [double]$Primitive.plot.x + ($categoryIndex + 0.5) * $groupWidth
+                )
+                $expectedY = Get-WorkerChartY `
+                    -Value ([double]$marker.value) `
+                    -Axis $Primitive.axis `
+                    -Plot $Primitive.plot
+                if (
+                    $markerCategoryIndex -ne $categoryIndex -or
+                    [double]$marker.diameter -ne 6 -or
+                    -not (Test-WorkerGeometryClose -Left ([double]$marker.cx) -Right $expectedX) -or
+                    -not (Test-WorkerGeometryClose -Left ([double]$marker.cy) -Right $expectedY) -or
+                    [double]$marker.cx -lt [double]$Primitive.plot.x -or
+                    [double]$marker.cx -gt [double]$Primitive.plot.x + [double]$Primitive.plot.w -or
+                    [double]$marker.cy -lt [double]$Primitive.plot.y -or
+                    [double]$marker.cy -gt [double]$Primitive.plot.y + [double]$Primitive.plot.h
+                ) {
+                    throw "$markerPath has invalid marker geometry."
+                }
+            }
+            for ($segmentIndex = 0; $segmentIndex -lt $segments.Count; $segmentIndex++) {
+                $segment = $segments[$segmentIndex]
+                $segmentPath = "$seriesPath.segments[$segmentIndex]"
+                Assert-WorkerExactProperties `
+                    -Value $segment `
+                    -Expected @(
+                        'name',
+                        'fromCategoryIndex',
+                        'toCategoryIndex',
+                        'x1',
+                        'y1',
+                        'x2',
+                        'y2'
+                    ) `
+                    -Path $segmentPath
+                Register-WorkerShapeName -Value $segment.name -Path "$segmentPath.name" -Names $Names
+                foreach ($key in @('x1', 'y1', 'x2', 'y2')) {
+                    [void](Get-WorkerFiniteNumber -Value $segment.$key -Path "$segmentPath.$key")
+                }
+                $fromCategoryIndex = Get-WorkerSafeInteger `
+                    -Value $segment.fromCategoryIndex `
+                    -Path "$segmentPath.fromCategoryIndex"
+                $toCategoryIndex = Get-WorkerSafeInteger `
+                    -Value $segment.toCategoryIndex `
+                    -Path "$segmentPath.toCategoryIndex"
+                $leftMarker = $markers[$segmentIndex]
+                $rightMarker = $markers[$segmentIndex + 1]
+                if (
+                    $fromCategoryIndex -ne $segmentIndex -or
+                    $toCategoryIndex -ne $segmentIndex + 1 -or
+                    -not (Test-WorkerGeometryClose -Left ([double]$segment.x1) -Right ([double]$leftMarker.cx)) -or
+                    -not (Test-WorkerGeometryClose -Left ([double]$segment.y1) -Right ([double]$leftMarker.cy)) -or
+                    -not (Test-WorkerGeometryClose -Left ([double]$segment.x2) -Right ([double]$rightMarker.cx)) -or
+                    -not (Test-WorkerGeometryClose -Left ([double]$segment.y2) -Right ([double]$rightMarker.cy)) -or
+                    (
+                        [double]$segment.x1 -eq [double]$segment.x2 -and
+                        [double]$segment.y1 -eq [double]$segment.y2
+                    )
+                ) {
+                    throw "$segmentPath has invalid segment geometry."
+                }
+            }
+        }
+    }
+    for ($leftIndex = 0; $leftIndex -lt $barBoxes.Count; $leftIndex++) {
+        for ($rightIndex = $leftIndex + 1; $rightIndex -lt $barBoxes.Count; $rightIndex++) {
+            $leftBar = $barBoxes[$leftIndex]
+            $rightBar = $barBoxes[$rightIndex]
+            $overlap = (
+                [double]$leftBar.x -lt [double]$rightBar.x + [double]$rightBar.w - 0.0005 -and
+                [double]$rightBar.x -lt [double]$leftBar.x + [double]$leftBar.w - 0.0005 -and
+                [double]$leftBar.y -lt [double]$rightBar.y + [double]$rightBar.h - 0.0005 -and
+                [double]$rightBar.y -lt [double]$leftBar.y + [double]$leftBar.h - 0.0005
+            )
+            if ($overlap) {
+                throw "$Path contains overlapping bars."
+            }
+        }
+    }
+
+    $boundsName = Get-NativeChartBoundsShapeName -ChartName ([string]$Primitive.name)
+    Register-WorkerShapeName -Value $boundsName -Path "$Path.derivedBoundsName" -Names $Names
+}
+
 function Add-TextPrimitive {
     param(
         [Parameter(Mandatory = $true)]$Shapes,
@@ -548,12 +2752,722 @@ function Add-LinePrimitive {
         $line.Weight = [single]$Primitive.width
         $line.DashStyle = Get-DashStyle -Dash ([string]$Primitive.dash)
         $line.BeginArrowheadStyle = if ($Primitive.arrowStart -eq 'open') { 3 } else { 1 }
-        $line.EndArrowheadStyle = if ($Primitive.arrowEnd -ceq 'open') { 3 } else { 1 }
+        $line.EndArrowheadStyle = if ($Primitive.arrowEnd -eq 'open') { 3 } else { 1 }
     }
     finally {
         Release-ComRef -Reference ([ref]$lineColor) -Label 'line color'
         Release-ComRef -Reference ([ref]$line) -Label 'line format'
         Release-ComRef -Reference ([ref]$shape) -Label 'line shape'
+    }
+}
+
+function New-ChartTextLeaf {
+    param([Parameter(Mandatory = $true)]$Label)
+
+    $maxLines = [math]::Max(1, [math]::Floor([double]$Label.h / 8))
+    return [pscustomobject][ordered]@{
+        kind = 'text'
+        name = [string]$Label.name
+        x = [double]$Label.x
+        y = [double]$Label.y
+        w = [double]$Label.w
+        h = [double]$Label.h
+        text = [string]$Label.text
+        fontSize = [double]$Label.fontSize
+        bold = [bool]$Label.bold
+        italic = $false
+        colorRole = [string]$Label.colorRole
+        horizontalAlign = [string]$Label.horizontalAlign
+        verticalAlign = [string]$Label.verticalAlign
+        rotation = [double]$Label.rotation
+        marginLeft = 0
+        marginRight = 0
+        marginTop = 0
+        marginBottom = 0
+        wordWrap = $true
+        autoFit = 'none'
+        maxLines = $maxLines
+    }
+}
+
+function New-ChartShapeLeaf {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$ShapeType,
+        [Parameter(Mandatory = $true)][double]$X,
+        [Parameter(Mandatory = $true)][double]$Y,
+        [Parameter(Mandatory = $true)][double]$W,
+        [Parameter(Mandatory = $true)][double]$H,
+        [Parameter(Mandatory = $true)][bool]$FillVisible,
+        [Parameter(Mandatory = $true)][string]$FillColorRole,
+        [Parameter(Mandatory = $true)][double]$FillTransparency,
+        [Parameter(Mandatory = $true)][bool]$LineVisible,
+        [Parameter(Mandatory = $true)][string]$LineColorRole,
+        [Parameter(Mandatory = $true)][double]$LineTransparency,
+        [Parameter(Mandatory = $true)][double]$LineWidth,
+        [Parameter(Mandatory = $true)][string]$LineDash
+    )
+
+    return [pscustomobject][ordered]@{
+        kind = 'shape'
+        name = $Name
+        shapeType = $ShapeType
+        x = $X
+        y = $Y
+        w = $W
+        h = $H
+        fillVisible = $FillVisible
+        fillColorRole = $FillColorRole
+        fillTransparency = $FillTransparency
+        lineVisible = $LineVisible
+        lineColorRole = $LineColorRole
+        lineTransparency = $LineTransparency
+        lineWidth = $LineWidth
+        lineDash = $LineDash
+    }
+}
+
+function New-ChartLineLeaf {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][double]$X1,
+        [Parameter(Mandatory = $true)][double]$Y1,
+        [Parameter(Mandatory = $true)][double]$X2,
+        [Parameter(Mandatory = $true)][double]$Y2,
+        [Parameter(Mandatory = $true)][string]$ColorRole,
+        [Parameter(Mandatory = $true)][double]$Width,
+        [Parameter(Mandatory = $true)][string]$Dash,
+        [Parameter(Mandatory = $true)][double]$Transparency
+    )
+
+    return [pscustomobject][ordered]@{
+        kind = 'line'
+        name = $Name
+        x1 = $X1
+        y1 = $Y1
+        x2 = $X2
+        y2 = $Y2
+        colorRole = $ColorRole
+        width = $Width
+        dash = $Dash
+        transparency = $Transparency
+        arrowStart = 'none'
+        arrowEnd = 'none'
+    }
+}
+
+function Convert-NamedChartLineToLeaf {
+    param([Parameter(Mandatory = $true)]$LineSpec)
+
+    return New-ChartLineLeaf `
+        -Name ([string]$LineSpec.name) `
+        -X1 ([double]$LineSpec.x1) `
+        -Y1 ([double]$LineSpec.y1) `
+        -X2 ([double]$LineSpec.x2) `
+        -Y2 ([double]$LineSpec.y2) `
+        -ColorRole ([string]$LineSpec.colorRole) `
+        -Width ([double]$LineSpec.width) `
+        -Dash ([string]$LineSpec.dash) `
+        -Transparency ([double]$LineSpec.transparency)
+}
+
+function Get-NativeChartLeafSpecs {
+    param([Parameter(Mandatory = $true)]$Primitive)
+
+    $leaves = [Collections.Generic.List[object]]::new()
+    $leaves.Add((New-ChartShapeLeaf `
+        -Name (Get-NativeChartBoundsShapeName -ChartName ([string]$Primitive.name)) `
+        -ShapeType 'rect' `
+        -X ([double]$Primitive.x) `
+        -Y ([double]$Primitive.y) `
+        -W ([double]$Primitive.w) `
+        -H ([double]$Primitive.h) `
+        -FillVisible $false `
+        -FillColorRole 'background' `
+        -FillTransparency 0 `
+        -LineVisible $false `
+        -LineColorRole 'line' `
+        -LineTransparency 0 `
+        -LineWidth 0.75 `
+        -LineDash 'solid'))
+
+    $ticks = @($Primitive.axis.ticks)
+    for ($tickIndex = 0; $tickIndex -lt $ticks.Count; $tickIndex++) {
+        $leaves.Add((Convert-NamedChartLineToLeaf -LineSpec $ticks[$tickIndex].gridLine))
+    }
+
+    $seriesItems = @($Primitive.series)
+    if ([string]$Primitive.chartType -eq 'bar') {
+        for ($seriesIndex = 0; $seriesIndex -lt $seriesItems.Count; $seriesIndex++) {
+            $series = $seriesItems[$seriesIndex]
+            $bars = @($series.bars)
+            for ($barIndex = 0; $barIndex -lt $bars.Count; $barIndex++) {
+                $bar = $bars[$barIndex]
+                if ([string]$bar.kind -eq 'line') {
+                    $leaves.Add((New-ChartLineLeaf `
+                        -Name ([string]$bar.name) `
+                        -X1 ([double]$bar.x) `
+                        -Y1 ([double]$bar.y + [double]$bar.h / 2) `
+                        -X2 ([double]$bar.x + [double]$bar.w) `
+                        -Y2 ([double]$bar.y + [double]$bar.h / 2) `
+                        -ColorRole ([string]$series.colorRole) `
+                        -Width 1 `
+                        -Dash 'solid' `
+                        -Transparency 0))
+                }
+                else {
+                    $leaves.Add((New-ChartShapeLeaf `
+                        -Name ([string]$bar.name) `
+                        -ShapeType 'rect' `
+                        -X ([double]$bar.x) `
+                        -Y ([double]$bar.y) `
+                        -W ([double]$bar.w) `
+                        -H ([double]$bar.h) `
+                        -FillVisible $true `
+                        -FillColorRole ([string]$series.colorRole) `
+                        -FillTransparency ([double]$bar.fillTransparency) `
+                        -LineVisible $false `
+                        -LineColorRole ([string]$series.colorRole) `
+                        -LineTransparency 0 `
+                        -LineWidth 0.75 `
+                        -LineDash 'solid'))
+                }
+            }
+        }
+    }
+    else {
+        for ($seriesIndex = 0; $seriesIndex -lt $seriesItems.Count; $seriesIndex++) {
+            $series = $seriesItems[$seriesIndex]
+            $segments = @($series.segments)
+            for ($segmentIndex = 0; $segmentIndex -lt $segments.Count; $segmentIndex++) {
+                $segment = $segments[$segmentIndex]
+                $leaves.Add((New-ChartLineLeaf `
+                    -Name ([string]$segment.name) `
+                    -X1 ([double]$segment.x1) `
+                    -Y1 ([double]$segment.y1) `
+                    -X2 ([double]$segment.x2) `
+                    -Y2 ([double]$segment.y2) `
+                    -ColorRole ([string]$series.colorRole) `
+                    -Width 2 `
+                    -Dash ([string]$series.dash) `
+                    -Transparency 0))
+            }
+        }
+    }
+
+    $leaves.Add((Convert-NamedChartLineToLeaf -LineSpec $Primitive.axis.baseline))
+
+    if ([string]$Primitive.chartType -eq 'line') {
+        for ($seriesIndex = 0; $seriesIndex -lt $seriesItems.Count; $seriesIndex++) {
+            $series = $seriesItems[$seriesIndex]
+            $markers = @($series.markers)
+            for ($markerIndex = 0; $markerIndex -lt $markers.Count; $markerIndex++) {
+                $marker = $markers[$markerIndex]
+                $diameter = [double]$marker.diameter
+                $leaves.Add((New-ChartShapeLeaf `
+                    -Name ([string]$marker.name) `
+                    -ShapeType 'ellipse' `
+                    -X ([double]$marker.cx - $diameter / 2) `
+                    -Y ([double]$marker.cy - $diameter / 2) `
+                    -W $diameter `
+                    -H $diameter `
+                    -FillVisible $true `
+                    -FillColorRole ([string]$series.colorRole) `
+                    -FillTransparency 0 `
+                    -LineVisible $true `
+                    -LineColorRole ([string]$series.colorRole) `
+                    -LineTransparency 0 `
+                    -LineWidth 0.75 `
+                    -LineDash 'solid'))
+            }
+        }
+    }
+
+    $legend = @($Primitive.legend)
+    for ($legendIndex = 0; $legendIndex -lt $legend.Count; $legendIndex++) {
+        $entry = $legend[$legendIndex]
+        $series = $seriesItems[$legendIndex]
+        if ([string]$Primitive.chartType -eq 'bar') {
+            $leaves.Add((New-ChartShapeLeaf `
+                -Name ([string]$entry.swatchName) `
+                -ShapeType 'rect' `
+                -X ([double]$entry.swatch.x) `
+                -Y ([double]$entry.swatch.y) `
+                -W ([double]$entry.swatch.w) `
+                -H ([double]$entry.swatch.h) `
+                -FillVisible $true `
+                -FillColorRole ([string]$entry.colorRole) `
+                -FillTransparency 0 `
+                -LineVisible $false `
+                -LineColorRole ([string]$entry.colorRole) `
+                -LineTransparency 0 `
+                -LineWidth 0.75 `
+                -LineDash 'solid'))
+        }
+        else {
+            $swatchY = [double]$entry.swatch.y + [double]$entry.swatch.h / 2
+            $leaves.Add((New-ChartLineLeaf `
+                -Name ([string]$entry.swatchName) `
+                -X1 ([double]$entry.swatch.x) `
+                -Y1 $swatchY `
+                -X2 ([double]$entry.swatch.x + [double]$entry.swatch.w) `
+                -Y2 $swatchY `
+                -ColorRole ([string]$entry.colorRole) `
+                -Width 2 `
+                -Dash ([string]$series.dash) `
+                -Transparency 0))
+        }
+    }
+
+    $leaves.Add((New-ChartTextLeaf -Label $Primitive.unitLabel))
+    for ($tickIndex = 0; $tickIndex -lt $ticks.Count; $tickIndex++) {
+        $leaves.Add((New-ChartTextLeaf -Label $ticks[$tickIndex].labelBox))
+    }
+    $categories = @($Primitive.categories)
+    for ($categoryIndex = 0; $categoryIndex -lt $categories.Count; $categoryIndex++) {
+        $leaves.Add((New-ChartTextLeaf -Label $categories[$categoryIndex].labelBox))
+    }
+    for ($legendIndex = 0; $legendIndex -lt $legend.Count; $legendIndex++) {
+        $leaves.Add((New-ChartTextLeaf -Label $legend[$legendIndex].labelBox))
+    }
+    $rows = @($Primitive.dataGrid.rows)
+    for ($rowIndex = 0; $rowIndex -lt $rows.Count; $rowIndex++) {
+        $row = $rows[$rowIndex]
+        $leaves.Add((New-ChartTextLeaf -Label $row.labelBox))
+        $values = @($row.values)
+        for ($valueIndex = 0; $valueIndex -lt $values.Count; $valueIndex++) {
+            $leaves.Add((New-ChartTextLeaf -Label $values[$valueIndex].labelBox))
+        }
+    }
+
+    return $leaves.ToArray()
+}
+
+function Add-NativeChartPrimitive {
+    param(
+        [Parameter(Mandatory = $true)]$Shapes,
+        [Parameter(Mandatory = $true)]$Primitive,
+        [Parameter(Mandatory = $true)]$Theme
+    )
+
+    $leafSpecs = @(Get-NativeChartLeafSpecs -Primitive $Primitive)
+    $childNames = [Collections.Generic.List[string]]::new()
+    $shapeRange = $null
+    $groupShape = $null
+    try {
+        for ($leafIndex = 0; $leafIndex -lt $leafSpecs.Count; $leafIndex++) {
+            $leaf = $leafSpecs[$leafIndex]
+            switch ([string]$leaf.kind) {
+                'text' {
+                    Add-TextPrimitive -Shapes $Shapes -Primitive $leaf -Theme $Theme
+                }
+                'shape' {
+                    Add-ShapePrimitive -Shapes $Shapes -Primitive $leaf -Theme $Theme
+                }
+                'line' {
+                    Add-LinePrimitive -Shapes $Shapes -Primitive $leaf -Theme $Theme
+                }
+                default {
+                    throw "Unsupported native chart leaf kind '$($leaf.kind)'."
+                }
+            }
+            $childNames.Add([string]$leaf.name)
+        }
+        $shapeRange = $Shapes.Range([object[]]$childNames.ToArray())
+        $groupShape = $shapeRange.Group()
+        $groupShape.Name = [string]$Primitive.name
+    }
+    finally {
+        Release-ComRef -Reference ([ref]$groupShape) -Label 'native chart group shape'
+        Release-ComRef -Reference ([ref]$shapeRange) -Label 'native chart shape range'
+    }
+}
+
+function Format-WorkerRecordNumber {
+    param([Parameter(Mandatory = $true)][double]$Value)
+
+    $rounded = [math]::Round($Value, 3, [MidpointRounding]::AwayFromZero)
+    return $rounded.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Assert-WorkerActualNear {
+    param(
+        [Parameter(Mandatory = $true)][double]$Actual,
+        [Parameter(Mandatory = $true)][double]$Expected,
+        [Parameter(Mandatory = $true)][string]$Message
+    )
+
+    if ([math]::Abs($Actual - $Expected) -gt 0.02) {
+        throw "$Message Expected $Expected, found $Actual."
+    }
+}
+
+function Assert-LeafShape {
+    param(
+        [Parameter(Mandatory = $true)]$Shape,
+        [Parameter(Mandatory = $true)]$Expected,
+        [Parameter(Mandatory = $true)]$Theme,
+        [Parameter(Mandatory = $true)][int]$ExpectedZ,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $shapeFill = $null
+    $fillColor = $null
+    $shapeLine = $null
+    $lineColor = $null
+    $legacyFrame = $null
+    $frame2 = $null
+    $range2 = $null
+    $font2 = $null
+    $fontFill = $null
+    $fontColor = $null
+    $paragraph = $null
+    $renderedLines = $null
+    try {
+        if (-not [string]::Equals([string]$Shape.Name, [string]$Expected.name, [StringComparison]::Ordinal)) {
+            throw "$Path name does not match '$($Expected.name)'."
+        }
+        if ([string]$Expected.kind -eq 'line') {
+            if ([int]$Shape.Type -ne 9) {
+                throw "$Path is not a native line shape."
+            }
+            $expectedLeft = [math]::Min([double]$Expected.x1, [double]$Expected.x2)
+            $expectedTop = [math]::Min([double]$Expected.y1, [double]$Expected.y2)
+            $expectedWidth = [math]::Abs([double]$Expected.x2 - [double]$Expected.x1)
+            $expectedHeight = [math]::Abs([double]$Expected.y2 - [double]$Expected.y1)
+            Assert-WorkerActualNear -Actual ([double]$Shape.Left) -Expected $expectedLeft -Message "$Path left differs."
+            Assert-WorkerActualNear -Actual ([double]$Shape.Top) -Expected $expectedTop -Message "$Path top differs."
+            Assert-WorkerActualNear -Actual ([double]$Shape.Width) -Expected $expectedWidth -Message "$Path width differs."
+            Assert-WorkerActualNear -Actual ([double]$Shape.Height) -Expected $expectedHeight -Message "$Path height differs."
+            $expectedHorizontalFlip = if ([double]$Expected.x2 -lt [double]$Expected.x1) { -1 } else { 0 }
+            $expectedVerticalFlip = if ([double]$Expected.y2 -lt [double]$Expected.y1) { -1 } else { 0 }
+            if (
+                [int]$Shape.HorizontalFlip -ne $expectedHorizontalFlip -or
+                [int]$Shape.VerticalFlip -ne $expectedVerticalFlip
+            ) {
+                throw "$Path line orientation differs from the drawing spec."
+            }
+
+            $shapeLine = $Shape.Line
+            $lineColor = $shapeLine.ForeColor
+            $expectedColor = Get-RoleColor -Theme $Theme -Role ([string]$Expected.colorRole)
+            $expectedBeginArrowhead = if ($Expected.arrowStart -ceq 'open') { 3 } else { 1 }
+            $expectedEndArrowhead = if ($Expected.arrowEnd -ceq 'open') { 3 } else { 1 }
+            if (
+                [int]$shapeLine.Visible -ne -1 -or
+                [int]$lineColor.RGB -ne $expectedColor -or
+                [math]::Abs([double]$shapeLine.Transparency - [double]$Expected.transparency) -gt 0.001 -or
+                [math]::Abs([double]$shapeLine.Weight - [double]$Expected.width) -gt 0.001 -or
+                [int]$shapeLine.DashStyle -ne (Get-DashStyle -Dash ([string]$Expected.dash)) -or
+                [int]$shapeLine.BeginArrowheadStyle -ne $expectedBeginArrowhead -or
+                [int]$shapeLine.EndArrowheadStyle -ne $expectedEndArrowhead
+            ) {
+                throw "$Path line style differs from the drawing spec."
+            }
+            return [pscustomobject][ordered]@{
+                name = [string]$Shape.Name
+                geometry = @(
+                    Format-WorkerRecordNumber -Value ([double]$Shape.Left)
+                    Format-WorkerRecordNumber -Value ([double]$Shape.Top)
+                    Format-WorkerRecordNumber -Value ([double]$Shape.Width)
+                    Format-WorkerRecordNumber -Value ([double]$Shape.Height)
+                    [string][int]$Shape.HorizontalFlip
+                    [string][int]$Shape.VerticalFlip
+                ) -join ','
+                content = ''
+                style = "$([int]$lineColor.RGB),$(Format-WorkerRecordNumber -Value ([double]$shapeLine.Transparency)),$(Format-WorkerRecordNumber -Value ([double]$shapeLine.Weight)),$([int]$shapeLine.DashStyle)"
+            }
+        }
+
+        if ([string]$Expected.kind -eq 'shape') {
+            if ([int]$Shape.Type -ne 1) {
+                throw "$Path is not a native auto shape."
+            }
+            Assert-WorkerActualNear -Actual ([double]$Shape.Left) -Expected ([double]$Expected.x) -Message "$Path left differs."
+            Assert-WorkerActualNear -Actual ([double]$Shape.Top) -Expected ([double]$Expected.y) -Message "$Path top differs."
+            Assert-WorkerActualNear -Actual ([double]$Shape.Width) -Expected ([double]$Expected.w) -Message "$Path width differs."
+            Assert-WorkerActualNear -Actual ([double]$Shape.Height) -Expected ([double]$Expected.h) -Message "$Path height differs."
+            if ([int]$Shape.AutoShapeType -ne (Get-ShapeType -ShapeType ([string]$Expected.shapeType))) {
+                throw "$Path auto-shape type differs from the drawing spec."
+            }
+
+            $shapeFill = $Shape.Fill
+            if ($Expected.fillVisible) {
+                $fillColor = $shapeFill.ForeColor
+                if (
+                    [int]$shapeFill.Visible -ne -1 -or
+                    [int]$fillColor.RGB -ne (Get-RoleColor -Theme $Theme -Role ([string]$Expected.fillColorRole)) -or
+                    [math]::Abs([double]$shapeFill.Transparency - [double]$Expected.fillTransparency) -gt 0.001
+                ) {
+                    throw "$Path fill style differs from the drawing spec."
+                }
+            }
+            elseif ([int]$shapeFill.Visible -ne 0) {
+                throw "$Path fill must be invisible."
+            }
+
+            $shapeLine = $Shape.Line
+            if ($Expected.lineVisible) {
+                $lineColor = $shapeLine.ForeColor
+                if (
+                    [int]$shapeLine.Visible -ne -1 -or
+                    [int]$lineColor.RGB -ne (Get-RoleColor -Theme $Theme -Role ([string]$Expected.lineColorRole)) -or
+                    [math]::Abs([double]$shapeLine.Transparency - [double]$Expected.lineTransparency) -gt 0.001 -or
+                    [math]::Abs([double]$shapeLine.Weight - [double]$Expected.lineWidth) -gt 0.001 -or
+                    [int]$shapeLine.DashStyle -ne (Get-DashStyle -Dash ([string]$Expected.lineDash))
+                ) {
+                    throw "$Path outline style differs from the drawing spec."
+                }
+            }
+            elseif ([int]$shapeLine.Visible -ne 0) {
+                throw "$Path outline must be invisible."
+            }
+
+            $fillStyle = if ($Expected.fillVisible) {
+                "$([int]$fillColor.RGB),$(Format-WorkerRecordNumber -Value ([double]$shapeFill.Transparency))"
+            }
+            else {
+                'none'
+            }
+            $lineStyle = if ($Expected.lineVisible) {
+                "$([int]$lineColor.RGB),$(Format-WorkerRecordNumber -Value ([double]$shapeLine.Transparency)),$(Format-WorkerRecordNumber -Value ([double]$shapeLine.Weight)),$([int]$shapeLine.DashStyle)"
+            }
+            else {
+                'none'
+            }
+            return [pscustomobject][ordered]@{
+                name = [string]$Shape.Name
+                geometry = @(
+                    Format-WorkerRecordNumber -Value ([double]$Shape.Left)
+                    Format-WorkerRecordNumber -Value ([double]$Shape.Top)
+                    Format-WorkerRecordNumber -Value ([double]$Shape.Width)
+                    Format-WorkerRecordNumber -Value ([double]$Shape.Height)
+                ) -join ','
+                content = ''
+                style = "$fillStyle|$lineStyle"
+            }
+        }
+
+        if ([string]$Expected.kind -ne 'text' -or [int]$Shape.Type -ne 17) {
+            throw "$Path is not a native text box."
+        }
+        Assert-WorkerActualNear -Actual ([double]$Shape.Left) -Expected ([double]$Expected.x) -Message "$Path left differs."
+        Assert-WorkerActualNear -Actual ([double]$Shape.Top) -Expected ([double]$Expected.y) -Message "$Path top differs."
+        Assert-WorkerActualNear -Actual ([double]$Shape.Width) -Expected ([double]$Expected.w) -Message "$Path width differs."
+        Assert-WorkerActualNear -Actual ([double]$Shape.Height) -Expected ([double]$Expected.h) -Message "$Path height differs."
+        Assert-WorkerActualNear -Actual ([double]$Shape.Rotation) -Expected ([double]$Expected.rotation) -Message "$Path rotation differs."
+
+        $shapeFill = $Shape.Fill
+        $shapeLine = $Shape.Line
+        if ([int]$shapeFill.Visible -ne 0 -or [int]$shapeLine.Visible -ne 0) {
+            throw "$Path text box fill and line must be invisible."
+        }
+        $legacyFrame = $Shape.TextFrame
+        if ([int]$legacyFrame.AutoSize -ne 0) {
+            throw "$Path legacy text auto-size must be disabled."
+        }
+        $frame2 = $Shape.TextFrame2
+        $expectedWordWrap = if ($Expected.wordWrap) { -1 } else { 0 }
+        if (
+            [int]$frame2.AutoSize -ne 0 -or
+            [int]$frame2.WordWrap -ne $expectedWordWrap -or
+            [int]$frame2.VerticalAnchor -ne (Get-VerticalAlignment -Alignment ([string]$Expected.verticalAlign)) -or
+            [math]::Abs([double]$frame2.MarginLeft - [double]$Expected.marginLeft) -gt 0.001 -or
+            [math]::Abs([double]$frame2.MarginRight - [double]$Expected.marginRight) -gt 0.001 -or
+            [math]::Abs([double]$frame2.MarginTop - [double]$Expected.marginTop) -gt 0.001 -or
+            [math]::Abs([double]$frame2.MarginBottom - [double]$Expected.marginBottom) -gt 0.001
+        ) {
+            throw "$Path text-frame style differs from the drawing spec."
+        }
+        $range2 = $frame2.TextRange
+        if (-not [string]::Equals([string]$range2.Text, [string]$Expected.text, [StringComparison]::Ordinal)) {
+            throw "$Path text content differs from the drawing spec."
+        }
+        $font2 = $range2.Font
+        $fontFill = $font2.Fill
+        $fontColor = $fontFill.ForeColor
+        $paragraph = $range2.ParagraphFormat
+        $expectedBold = if ($Expected.bold) { -1 } else { 0 }
+        $expectedItalic = if ($Expected.italic) { -1 } else { 0 }
+        if (
+            -not [string]::Equals([string]$font2.Name, [string]$Theme.fontFamily, [StringComparison]::Ordinal) -or
+            [math]::Abs([double]$font2.Size - [double]$Expected.fontSize) -gt 0.001 -or
+            [int]$font2.Bold -ne $expectedBold -or
+            [int]$font2.Italic -ne $expectedItalic -or
+            [int]$fontColor.RGB -ne (Get-RoleColor -Theme $Theme -Role ([string]$Expected.colorRole)) -or
+            [int]$paragraph.Alignment -ne (Get-HorizontalAlignment -Alignment ([string]$Expected.horizontalAlign))
+        ) {
+            throw "$Path text style differs from the drawing spec."
+        }
+
+        $availableHeight = [double]$Shape.Height -
+            [double]$frame2.MarginTop -
+            [double]$frame2.MarginBottom +
+            2
+        $availableWidth = [double]$Shape.Width -
+            [double]$frame2.MarginLeft -
+            [double]$frame2.MarginRight +
+            2
+        if ([double]$range2.BoundHeight -gt $availableHeight) {
+            throw "Text overflow in $($Shape.Name)."
+        }
+        if ([int]$frame2.WordWrap -eq 0 -and [double]$range2.BoundWidth -gt $availableWidth) {
+            throw "Text width overflow in $($Shape.Name)."
+        }
+        $renderedLines = $range2.Lines()
+        if ([int]$renderedLines.Count -gt [double]$Expected.maxLines) {
+            throw "Text in $($Shape.Name) renders as $($renderedLines.Count) lines, exceeding maxLines $($Expected.maxLines)."
+        }
+
+        return [pscustomobject][ordered]@{
+            name = [string]$Shape.Name
+            geometry = @(
+                Format-WorkerRecordNumber -Value ([double]$Shape.Left)
+                Format-WorkerRecordNumber -Value ([double]$Shape.Top)
+                Format-WorkerRecordNumber -Value ([double]$Shape.Width)
+                Format-WorkerRecordNumber -Value ([double]$Shape.Height)
+            ) -join ','
+            content = [string]$range2.Text
+            style = "$([string]$font2.Name),$(Format-WorkerRecordNumber -Value ([double]$font2.Size)),$([int]$font2.Bold),$([int]$font2.Italic),$([int]$fontColor.RGB),$([int]$paragraph.Alignment),$([int]$frame2.VerticalAnchor)"
+        }
+    }
+    finally {
+        Release-ComRef -Reference ([ref]$renderedLines) -Label 'nested rendered text range'
+        Release-ComRef -Reference ([ref]$paragraph) -Label 'nested paragraph format'
+        Release-ComRef -Reference ([ref]$fontColor) -Label 'nested font color'
+        Release-ComRef -Reference ([ref]$fontFill) -Label 'nested font fill'
+        Release-ComRef -Reference ([ref]$font2) -Label 'nested font'
+        Release-ComRef -Reference ([ref]$range2) -Label 'nested text range'
+        Release-ComRef -Reference ([ref]$frame2) -Label 'nested text frame 2'
+        Release-ComRef -Reference ([ref]$legacyFrame) -Label 'nested legacy text frame'
+        Release-ComRef -Reference ([ref]$lineColor) -Label 'nested line color'
+        Release-ComRef -Reference ([ref]$shapeLine) -Label 'nested line'
+        Release-ComRef -Reference ([ref]$fillColor) -Label 'nested fill color'
+        Release-ComRef -Reference ([ref]$shapeFill) -Label 'nested fill'
+    }
+}
+
+function Assert-SlideShapeTree {
+    param(
+        [Parameter(Mandatory = $true)]$Shapes,
+        [Parameter(Mandatory = $true)]$SlideSpec,
+        [Parameter(Mandatory = $true)]$Theme,
+        [Parameter(Mandatory = $true)][int]$SlideIndex
+    )
+
+    $records = [Collections.Generic.List[object]]::new()
+    $chartRecords = [Collections.Generic.List[object]]::new()
+    $primitiveCount = @($SlideSpec.primitives).Count
+    if ([int]$Shapes.Count -ne $primitiveCount) {
+        throw "Final top-level shape count does not match the spec on slide $SlideIndex."
+    }
+    for ($primitiveIndex = 0; $primitiveIndex -lt $primitiveCount; $primitiveIndex++) {
+        $primitive = $SlideSpec.primitives[$primitiveIndex]
+        $shape = $null
+        $groupItems = $null
+        try {
+            $shape = $Shapes.Item($primitiveIndex + 1)
+            if ([string]$primitive.kind -eq 'nativeChart') {
+                if (
+                    [int]$shape.Type -ne 6 -or
+                    -not [string]::Equals([string]$shape.Name, [string]$primitive.name, [StringComparison]::Ordinal)
+                ) {
+                    throw "Native chart group identity differs on slide $SlideIndex."
+                }
+                Assert-WorkerActualNear -Actual ([double]$shape.Left) -Expected ([double]$primitive.x) -Message 'Native chart left differs.'
+                Assert-WorkerActualNear -Actual ([double]$shape.Top) -Expected ([double]$primitive.y) -Message 'Native chart top differs.'
+                Assert-WorkerActualNear -Actual ([double]$shape.Width) -Expected ([double]$primitive.w) -Message 'Native chart width differs.'
+                Assert-WorkerActualNear -Actual ([double]$shape.Height) -Expected ([double]$primitive.h) -Message 'Native chart height differs.'
+                $groupRecord = [pscustomobject][ordered]@{
+                    name = [string]$shape.Name
+                    geometry = @(
+                        Format-WorkerRecordNumber -Value ([double]$shape.Left)
+                        Format-WorkerRecordNumber -Value ([double]$shape.Top)
+                        Format-WorkerRecordNumber -Value ([double]$shape.Width)
+                        Format-WorkerRecordNumber -Value ([double]$shape.Height)
+                    ) -join ','
+                    content = ''
+                    style = 'group'
+                }
+                $records.Add($groupRecord)
+                $chartRecords.Add($groupRecord)
+
+                $leafSpecs = @(Get-NativeChartLeafSpecs -Primitive $primitive)
+                $groupItems = $shape.GroupItems
+                if ([int]$groupItems.Count -ne $leafSpecs.Count) {
+                    throw "Native chart nested shape count differs on slide $SlideIndex."
+                }
+                for ($leafIndex = 0; $leafIndex -lt $leafSpecs.Count; $leafIndex++) {
+                    $nestedShape = $null
+                    try {
+                        $nestedShape = $groupItems.Item($leafIndex + 1)
+                        if (-not [string]::Equals(
+                            [string]$nestedShape.Name,
+                            [string]$leafSpecs[$leafIndex].name,
+                            [StringComparison]::Ordinal
+                        )) {
+                            throw "slide $SlideIndex chart leaf $($leafIndex + 1) name or z-order does not match the drawing spec."
+                        }
+                        $record = Assert-LeafShape `
+                            -Shape $nestedShape `
+                            -Expected $leafSpecs[$leafIndex] `
+                            -Theme $Theme `
+                            -ExpectedZ 0 `
+                            -Path "slide $SlideIndex chart leaf $($leafIndex + 1)"
+                        $records.Add($record)
+                        $chartRecords.Add($record)
+                    }
+                    finally {
+                        Release-ComRef -Reference ([ref]$nestedShape) -Label 'nested chart shape'
+                    }
+                }
+            }
+            elseif ([string]$primitive.kind -eq 'table') {
+                if (
+                    [int]$shape.HasTable -ne -1 -or
+                    -not [string]::Equals(
+                        [string]$shape.Name,
+                        [string]$primitive.name,
+                        [StringComparison]::Ordinal
+                    )
+                ) {
+                    throw "Native table identity differs on slide $SlideIndex."
+                }
+                Assert-WorkerActualNear -Actual ([double]$shape.Left) -Expected ([double]$primitive.x) -Message 'Native table left differs.'
+                Assert-WorkerActualNear -Actual ([double]$shape.Top) -Expected ([double]$primitive.y) -Message 'Native table top differs.'
+                Assert-WorkerActualNear -Actual ([double]$shape.Width) -Expected ([double]$primitive.w) -Message 'Native table width differs.'
+                Assert-WorkerActualNear -Actual ([double]$shape.Height) -Expected ([double]$primitive.h) -Message 'Native table height differs.'
+                $records.Add([pscustomobject][ordered]@{
+                    name = [string]$shape.Name
+                    geometry = @(
+                        Format-WorkerRecordNumber -Value ([double]$shape.Left)
+                        Format-WorkerRecordNumber -Value ([double]$shape.Top)
+                        Format-WorkerRecordNumber -Value ([double]$shape.Width)
+                        Format-WorkerRecordNumber -Value ([double]$shape.Height)
+                    ) -join ','
+                    content = ''
+                    style = 'table'
+                })
+            }
+            else {
+                $record = Assert-LeafShape `
+                    -Shape $shape `
+                    -Expected $primitive `
+                    -Theme $Theme `
+                    -ExpectedZ 0 `
+                    -Path "slide $SlideIndex primitive $($primitiveIndex + 1)"
+                $records.Add($record)
+            }
+        }
+        finally {
+            Release-ComRef -Reference ([ref]$groupItems) -Label 'nested chart shapes'
+            Release-ComRef -Reference ([ref]$shape) -Label 'shape-tree shape'
+        }
+    }
+
+    return [pscustomobject][ordered]@{
+        recursiveRecords = $records.ToArray()
+        nativeChartRecords = $chartRecords.ToArray()
     }
 }
 
@@ -1957,94 +4871,17 @@ function Remove-SeedShapes {
 
 function Assert-TextFits {
     param(
-        [Parameter(Mandatory = $true)]$Slide,
-        [Parameter(Mandatory = $true)]$SlideSpec
+        [Parameter(Mandatory = $true)]$Shapes,
+        [Parameter(Mandatory = $true)]$SlideSpec,
+        [Parameter(Mandatory = $true)]$Theme,
+        [Parameter(Mandatory = $true)][int]$SlideIndex
     )
 
-    $shapes = $null
-    $shape = $null
-    $frame2 = $null
-    $range2 = $null
-    $lines = $null
-    try {
-        $shapes = $Slide.Shapes
-        $shapeCount = $shapes.Count
-        for ($index = 1; $index -le $shapeCount; $index++) {
-            $shape = $shapes.Item($index)
-            try {
-                if ($shape.HasTextFrame -ne -1) {
-                    continue
-                }
-                $frame2 = $shape.TextFrame2
-                try {
-                    if ($frame2.HasText -ne -1) {
-                        continue
-                    }
-                    if ($frame2.AutoSize -ne 0) {
-                        throw "Text shrink or auto-size is enabled in $($shape.Name)."
-                    }
-                    $range2 = $frame2.TextRange
-                    try {
-                        $availableHeight = [single]$shape.Height -
-                            [single]$frame2.MarginTop -
-                            [single]$frame2.MarginBottom +
-                            2
-                        $availableWidth = [single]$shape.Width -
-                            [single]$frame2.MarginLeft -
-                            [single]$frame2.MarginRight +
-                            2
-                        if ([single]$range2.BoundHeight -gt $availableHeight) {
-                            throw "Text overflow in $($shape.Name) on slide $($Slide.SlideIndex)."
-                        }
-                        if ($frame2.WordWrap -eq 0 -and [single]$range2.BoundWidth -gt $availableWidth) {
-                            throw "Text width overflow in $($shape.Name) on slide $($Slide.SlideIndex)."
-                        }
-
-                        $primitive = $null
-                        for ($primitiveIndex = 0; $primitiveIndex -lt $SlideSpec.primitives.Count; $primitiveIndex++) {
-                            if ([string]$SlideSpec.primitives[$primitiveIndex].name -eq [string]$shape.Name) {
-                                $primitive = $SlideSpec.primitives[$primitiveIndex]
-                                break
-                            }
-                        }
-                        if ($null -eq $primitive -or [string]$primitive.kind -ne 'text') {
-                            throw "Text shape $($shape.Name) has no matching text primitive."
-                        }
-                        $lines = $range2.Lines()
-                        try {
-                            $renderedLineCount = [int]$lines.Count
-                            if ($renderedLineCount -gt [int]$primitive.maxLines) {
-                                throw "Text in $($shape.Name) renders as $renderedLineCount lines, exceeding maxLines $($primitive.maxLines)."
-                            }
-                        }
-                        finally {
-                            Release-ComRef -Reference ([ref]$lines) -Label 'rendered text lines'
-                        }
-                    }
-                    finally {
-                        Release-ComRef -Reference ([ref]$lines) -Label 'rendered text lines'
-                        Release-ComRef -Reference ([ref]$range2) -Label 'overflow text range'
-                    }
-                }
-                finally {
-                    Release-ComRef -Reference ([ref]$frame2) -Label 'overflow text frame'
-                }
-            }
-            finally {
-                Release-ComRef -Reference ([ref]$lines) -Label 'rendered text lines'
-                Release-ComRef -Reference ([ref]$range2) -Label 'overflow text range'
-                Release-ComRef -Reference ([ref]$frame2) -Label 'overflow text frame'
-                Release-ComRef -Reference ([ref]$shape) -Label 'overflow shape'
-            }
-        }
-    }
-    finally {
-        Release-ComRef -Reference ([ref]$lines) -Label 'rendered text lines'
-        Release-ComRef -Reference ([ref]$range2) -Label 'overflow text range'
-        Release-ComRef -Reference ([ref]$frame2) -Label 'overflow text frame'
-        Release-ComRef -Reference ([ref]$shape) -Label 'overflow shape'
-        Release-ComRef -Reference ([ref]$shapes) -Label 'overflow shapes'
-    }
+    return Assert-SlideShapeTree `
+        -Shapes $Shapes `
+        -SlideSpec $SlideSpec `
+        -Theme $Theme `
+        -SlideIndex $SlideIndex
 }
 
 function Get-ShapeNames {
@@ -2088,6 +4925,145 @@ function Assert-ExactShapeNames {
             throw "Final shape names do not match the spec on slide $SlideIndex."
         }
     }
+}
+
+function Invoke-NativeChartTestMutation {
+        param(
+            [Parameter(Mandatory = $true)]$Shapes,
+            [Parameter(Mandatory = $true)]$SlideSpec,
+            [Parameter(Mandatory = $true)][string]$Mode
+        )
+
+        if ([string]::IsNullOrWhiteSpace($Mode) -or $script:nativeChartMutationApplied) {
+            return
+        }
+        $chartIndex = -1
+        for ($primitiveIndex = 0; $primitiveIndex -lt $SlideSpec.primitives.Count; $primitiveIndex++) {
+            if ([string]$SlideSpec.primitives[$primitiveIndex].kind -eq 'nativeChart') {
+                $chartIndex = $primitiveIndex
+                break
+            }
+        }
+        if ($chartIndex -lt 0) {
+            return
+        }
+
+        $groupShape = $null
+        $groupItems = $null
+        $firstShape = $null
+        $secondShape = $null
+        $targetShape = $null
+        $legacyFrame = $null
+        $frame2 = $null
+        $range2 = $null
+        $fill = $null
+        $line = $null
+        $color = $null
+        try {
+            $groupShape = $Shapes.Item($chartIndex + 1)
+            $leafSpecs = @(Get-NativeChartLeafSpecs -Primitive $SlideSpec.primitives[$chartIndex])
+            switch ($Mode) {
+                'geometry' {
+                    $groupShape.Left = [single]([double]$groupShape.Left + 1)
+                }
+                'content' {
+                    $targetIndex = -1
+                    for ($leafIndex = 0; $leafIndex -lt $leafSpecs.Count; $leafIndex++) {
+                        if ([string]$leafSpecs[$leafIndex].kind -eq 'text') {
+                            $targetIndex = $leafIndex
+                            break
+                        }
+                    }
+                    if ($targetIndex -lt 0) {
+                        throw 'Native chart mutation could not find a text leaf.'
+                    }
+                    $groupItems = $groupShape.GroupItems
+                    $targetShape = $groupItems.Item($targetIndex + 1)
+                    $legacyFrame = $targetShape.TextFrame
+                    $frame2 = $targetShape.TextFrame2
+                    $range2 = $frame2.TextRange
+                    $range2.Text = "$($range2.Text)-mutated"
+                }
+                'style' {
+                    $targetIndex = -1
+                    for ($leafIndex = 0; $leafIndex -lt $leafSpecs.Count; $leafIndex++) {
+                        $leaf = $leafSpecs[$leafIndex]
+                        if (
+                            [string]$leaf.kind -eq 'line' -or
+                            ([string]$leaf.kind -eq 'shape' -and $leaf.fillVisible)
+                        ) {
+                            $targetIndex = $leafIndex
+                            break
+                        }
+                    }
+                    if ($targetIndex -lt 0) {
+                        throw 'Native chart mutation could not find a styled leaf.'
+                    }
+                    $groupItems = $groupShape.GroupItems
+                    $targetShape = $groupItems.Item($targetIndex + 1)
+                    if ([string]$leafSpecs[$targetIndex].kind -eq 'line') {
+                        $line = $targetShape.Line
+                        $color = $line.ForeColor
+                    }
+                    else {
+                        $fill = $targetShape.Fill
+                        $color = $fill.ForeColor
+                    }
+                    $color.RGB = 0
+                }
+                'nested-name' {
+                    $groupItems = $groupShape.GroupItems
+                    if ([int]$groupItems.Count -lt 2) {
+                        throw 'Native chart mutation requires two nested shapes.'
+                    }
+                    $firstShape = $groupItems.Item(1)
+                    $secondShape = $groupItems.Item(2)
+                    $secondShape.Name = [string]$firstShape.Name
+                }
+                'z-order' {
+                    $groupItems = $groupShape.GroupItems
+                    $firstShape = $groupItems.Item(1)
+                    $firstShape.ZOrder(0)
+                }
+                'line-orientation' {
+                    $targetIndex = -1
+                    for ($leafIndex = 0; $leafIndex -lt $leafSpecs.Count; $leafIndex++) {
+                        $leaf = $leafSpecs[$leafIndex]
+                        if (
+                            [string]$leaf.kind -eq 'line' -and
+                            [double]$leaf.x1 -ne [double]$leaf.x2 -and
+                            [double]$leaf.y1 -ne [double]$leaf.y2
+                        ) {
+                            $targetIndex = $leafIndex
+                            break
+                        }
+                    }
+                    if ($targetIndex -lt 0) {
+                        return
+                    }
+                    $groupItems = $groupShape.GroupItems
+                    $targetShape = $groupItems.Item($targetIndex + 1)
+                    $targetShape.Flip(1)
+                }
+                default {
+                    throw "Unsupported native chart mutation mode '$Mode'."
+                }
+            }
+            $script:nativeChartMutationApplied = $true
+        }
+        finally {
+            Release-ComRef -Reference ([ref]$color) -Label 'chart mutation color'
+            Release-ComRef -Reference ([ref]$line) -Label 'chart mutation line'
+            Release-ComRef -Reference ([ref]$fill) -Label 'chart mutation fill'
+            Release-ComRef -Reference ([ref]$range2) -Label 'chart mutation text range'
+            Release-ComRef -Reference ([ref]$frame2) -Label 'chart mutation text frame 2'
+            Release-ComRef -Reference ([ref]$legacyFrame) -Label 'chart mutation legacy text frame'
+            Release-ComRef -Reference ([ref]$targetShape) -Label 'chart mutation target shape'
+            Release-ComRef -Reference ([ref]$secondShape) -Label 'chart mutation second shape'
+            Release-ComRef -Reference ([ref]$firstShape) -Label 'chart mutation first shape'
+            Release-ComRef -Reference ([ref]$groupItems) -Label 'chart mutation nested shapes'
+            Release-ComRef -Reference ([ref]$groupShape) -Label 'chart mutation group shape'
+        }
 }
 
 function New-ContactSheet {
@@ -2251,6 +5227,8 @@ $slideReports = [System.Collections.Generic.List[object]]::new()
 $tableMutationApplied = $false
 $connectorSpecReport = $null
 $connectorSlideReportById = @{}
+$shapeTreeReceipts = [System.Collections.Generic.List[object]]::new()
+$script:nativeChartMutationApplied = $false
 
 try {
     $rawPaths = [ordered]@{
@@ -2292,13 +5270,19 @@ try {
 
     $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
     $specJson = $strictUtf8.GetString($specBytes)
-    $specObject = $specJson | ConvertFrom-Json
+    $validatedSpecJson = Get-WorkerPublicDrawingSpecJson -SpecJson $specJson
+    $specObject = $validatedSpecJson | ConvertFrom-Json
+    $specObject = Restore-WorkerEncodedStrings -Value $specObject
+    Assert-WorkerDrawingSpecMetadata -SpecObject $specObject
     $skeletonBytes = [IO.File]::ReadAllBytes($skeletonPath)
     $stagedSkeletonSha256 = Get-BytesSha256 -Bytes $skeletonBytes
-    if ([string]$specObject.schemaVersion -ne 'fde-drawing-spec/1.0' -or [string]$specObject.units -ne 'points') {
-        throw 'Drawing spec must use fde-drawing-spec/1.0 point units.'
-    }
-    if ([int]$specObject.stage.width -ne 960 -or [int]$specObject.stage.height -ne 540) {
+    $stageWidth = Get-WorkerSafeInteger `
+        -Value $specObject.stage.width `
+        -Path '$.stage.width'
+    $stageHeight = Get-WorkerSafeInteger `
+        -Value $specObject.stage.height `
+        -Path '$.stage.height'
+    if ($stageWidth -ne 960 -or $stageHeight -ne 540) {
         throw 'Drawing spec stage must be exactly 960x540.'
     }
     $slidesSpec = @($specObject.slides)
@@ -2311,25 +5295,90 @@ try {
     ) {
         throw 'Drawing spec selected-slide metadata must match its nonempty slides array.'
     }
+    $allShapeNames = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase
+    )
     for ($slideIndex = 0; $slideIndex -lt $slidesSpec.Count; $slideIndex++) {
+        $slideSpec = $slidesSpec[$slideIndex]
+        $slidePath = "$.slides[$slideIndex]"
+        Assert-WorkerSlideMetadata -Slide $slideSpec -Path $slidePath
         if (
-            [string]$slidesSpec[$slideIndex].id -ne [string]$selectedSlideIds[$slideIndex] -or
-            [string]$slidesSpec[$slideIndex].family -ne [string]$selectedSlideFamilies[$slideIndex]
+            $slideSpec.id -cne $selectedSlideIds[$slideIndex] -or
+            $slideSpec.family -cne $selectedSlideFamilies[$slideIndex]
         ) {
             throw "Drawing spec selected-slide metadata does not match slide $($slideIndex + 1)."
         }
-        $primitives = @($slidesSpec[$slideIndex].primitives)
+        $primitives = @($slideSpec.primitives)
+        $chartCount = 0
         for ($primitiveIndex = 0; $primitiveIndex -lt $primitives.Count; $primitiveIndex++) {
-            $kind = [string]$primitives[$primitiveIndex].kind
-            if ($kind -notin @('text', 'shape', 'line', 'table')) {
-                throw "Unsupported primitive kind '$kind'. The PowerPoint worker supports text, shape, line, table, and workflow line connectors; nativeChart requires a later layer."
+            $primitive = $primitives[$primitiveIndex]
+            $primitivePath = "$slidePath.primitives[$primitiveIndex]"
+            Assert-WorkerNonemptyString `
+                -Value $primitive.kind `
+                -Path "$primitivePath.kind"
+            Assert-WorkerNonemptyString `
+                -Value $primitive.role `
+                -Path "$primitivePath.role"
+            $kind = $primitive.kind
+            if ($specObject.theme.unbranded -and $primitive.role -ceq 'wordmark') {
+                throw "$primitivePath.role cannot emit a wordmark in an unbranded spec."
             }
-            if ($kind -eq 'table') {
-                Assert-TablePrimitiveSpec `
-                    -Primitive $primitives[$primitiveIndex] `
-                    -SlideSpec $slidesSpec[$slideIndex] `
+            $primitiveZ = Get-WorkerSafeInteger `
+                -Value $primitive.z `
+                -Path "$primitivePath.z"
+            if ($primitiveZ -ne $primitiveIndex + 1) {
+                throw "Drawing spec primitive z-order is not contiguous at slide $($slideIndex + 1), primitive $($primitiveIndex + 1)."
+            }
+            Register-WorkerShapeName `
+                -Value $primitive.name `
+                -Path "$primitivePath.name" `
+                -Names $allShapeNames
+            if ($kind -ceq 'nativeChart') {
+                $chartCount++
+                Assert-NativeChartSpec `
+                    -Primitive $primitive `
+                    -Path $primitivePath `
+                    -Theme $specObject.theme `
+                    -Names $allShapeNames `
+                    -SlideFamily $slideSpec.family `
+                    -SlideEvidenceIds @($slideSpec.evidenceIds)
+            }
+            elseif ($kind -ceq 'text') {
+                Assert-WorkerTextPrimitive `
+                    -Primitive $primitive `
+                    -Path $primitivePath `
                     -Theme $specObject.theme
             }
+            elseif ($kind -ceq 'shape') {
+                Assert-WorkerShapePrimitive `
+                    -Primitive $primitive `
+                    -Path $primitivePath `
+                    -Theme $specObject.theme
+            }
+            elseif ($kind -ceq 'line') {
+                Assert-WorkerLinePrimitive `
+                    -Primitive $primitive `
+                    -Path $primitivePath `
+                    -Theme $specObject.theme
+            }
+            elseif ($kind -ceq 'table') {
+                Assert-TablePrimitiveSpec `
+                    -Primitive $primitive `
+                    -SlideSpec $slideSpec `
+                    -Theme $specObject.theme
+            }
+            else {
+                throw "Unsupported primitive kind '$kind'. The PowerPoint worker supports text, shape, line, table, nativeChart, and workflow line connectors."
+            }
+        }
+        if ($slideSpec.family -ceq 'workflow') {
+            Assert-WorkerWorkflowSlideContract -Slide $slideSpec -Path $slidePath
+        }
+        if (
+            ($slideSpec.family -ceq 'chart' -and $chartCount -ne 1) -or
+            ($slideSpec.family -cne 'chart' -and $chartCount -ne 0)
+        ) {
+            throw "Drawing spec chart primitive count is invalid on slide $($slideIndex + 1)."
         }
     }
     $connectorSpecReport = Get-WorkflowConnectorSpecReport -SpecObject $specObject
@@ -2347,6 +5396,40 @@ try {
         $env:FDE_POWERPOINT_TEST_FAILPOINTS -ne '1'
     ) {
         throw 'Connector mutation hooks require FDE_POWERPOINT_TEST_FAILPOINTS=1.'
+    }
+    $nativeChartMutationMode = [string]$env:FDE_POWERPOINT_TEST_MUTATE_NATIVE_CHART_AFTER_REOPEN
+    if (-not [string]::IsNullOrWhiteSpace($nativeChartMutationMode)) {
+        if ($env:FDE_POWERPOINT_TEST_FAILPOINTS -ne '1') {
+            throw 'Native chart mutations require FDE_POWERPOINT_TEST_FAILPOINTS=1.'
+        }
+        if ($nativeChartMutationMode -notin @('geometry', 'content', 'style', 'nested-name', 'z-order', 'line-orientation')) {
+            throw "Unsupported native chart mutation mode '$nativeChartMutationMode'."
+        }
+    }
+    if ($ValidateSpecOnly) {
+        $validationChartCount = 0
+        $validationChartLeafCount = 0
+        for ($slideIndex = 0; $slideIndex -lt $slidesSpec.Count; $slideIndex++) {
+            $primitives = @($slidesSpec[$slideIndex].primitives)
+            for ($primitiveIndex = 0; $primitiveIndex -lt $primitives.Count; $primitiveIndex++) {
+                if ([string]$primitives[$primitiveIndex].kind -eq 'nativeChart') {
+                    $validationChartCount++
+                    $validationChartLeafCount += @(
+                        Get-NativeChartLeafSpecs -Primitive $primitives[$primitiveIndex]
+                    ).Count
+                }
+            }
+        }
+        $validationObject = [ordered]@{
+            status = 'SPEC_VALID'
+            specSha256 = $actualSpecSha256
+            slideCount = $slidesSpec.Count
+            nativeChartCount = $validationChartCount
+            nativeChartLeafCount = $validationChartLeafCount
+        }
+        [Console]::Out.WriteLine(($validationObject | ConvertTo-Json -Compress))
+        [Console]::Out.Flush()
+        [Environment]::Exit(0)
     }
 
     $stagingDirectory = Join-Path $outputParent ".$([IO.Path]::GetFileName($outputPath)).$token.worker-stage"
@@ -2520,14 +5603,22 @@ try {
                                 Add-TablePrimitive -Shapes $shapes -Primitive $primitive -Theme $specObject.theme
                                 Invoke-TestFailpoint -Stage 'table'
                             }
+                            'nativeChart' {
+                                Add-NativeChartPrimitive -Shapes $shapes -Primitive $primitive -Theme $specObject.theme
+                                Invoke-TestFailpoint -Stage 'native-chart'
+                            }
                         }
                     }
                     catch {
                         throw "Slide $slideIndex primitive $($primitive.name) ($($primitive.kind)) failed: $($_.Exception.Message)"
                     }
                 }
-                Assert-TextFits -Slide $slide -SlideSpec $slideSpec
                 Assert-NativeTables -Slide $slide -SlideSpec $slideSpec -Theme $specObject.theme
+                [void](Assert-TextFits `
+                    -Shapes $shapes `
+                    -SlideSpec $slideSpec `
+                    -Theme $specObject.theme `
+                    -SlideIndex $slideIndex)
                 Invoke-TestFailpoint -Stage 'overflow'
             }
             finally {
@@ -2581,6 +5672,7 @@ try {
         }
         for ($slideIndex = 1; $slideIndex -le $reopenedSlides.Count; $slideIndex++) {
             $slide = $null
+            $verificationShapes = $null
             try {
                 $slide = $reopenedSlides.Item($slideIndex)
                 $slideSpec = $slidesSpec[$slideIndex - 1]
@@ -2613,10 +5705,26 @@ try {
                 if ($verifiedConnectorCount -ne [int]$connectorSlideReport.segmentCount) {
                     throw "Reopened connector count changed on slide $slideIndex."
                 }
-                Assert-TextFits -Slide $slide -SlideSpec $slideSpec
                 Assert-NativeTables -Slide $slide -SlideSpec $slideSpec -Theme $specObject.theme
+                $verificationShapes = $slide.Shapes
+                if (-not [string]::IsNullOrWhiteSpace($nativeChartMutationMode)) {
+                    Invoke-NativeChartTestMutation `
+                        -Shapes $verificationShapes `
+                        -SlideSpec $slideSpec `
+                        -Mode $nativeChartMutationMode
+                }
+                $shapeTreeReceipt = Assert-TextFits `
+                    -Shapes $verificationShapes `
+                    -SlideSpec $slideSpec `
+                    -Theme $specObject.theme `
+                    -SlideIndex $slideIndex
+                $shapeTreeReceipts.Add($shapeTreeReceipt)
+                if (@($slideSpec.primitives).Where({ [string]$_.kind -eq 'nativeChart' }).Count -gt 0) {
+                    Invoke-TestFailpoint -Stage 'chart-reopen'
+                }
             }
             finally {
+                Release-ComRef -Reference ([ref]$verificationShapes) -Label 'reopen verification shapes'
                 Release-ComRef -Reference ([ref]$slide) -Label 'reopen verification slide'
             }
         }
@@ -2632,6 +5740,7 @@ try {
                 $slide.Export($renderFile, 'PNG', 1600, 900)
                 Assert-PngDimensions -Path $renderFile
                 $shapeNames = @(Get-ShapeNames -Slide $slide)
+                $shapeTreeReceipt = $shapeTreeReceipts[$slideIndex - 1]
                 $primitiveJson = $slideSpec.primitives | ConvertTo-Json -Depth 30 -Compress
                 $nativeTableCount = 0
                 $nativeTableCellCount = 0
@@ -2663,6 +5772,8 @@ try {
                     connectorRouteMetadataSha256 = [string]$connectorSlideReport.routeMetadataSha256
                     connectorPointSequenceSha256 = [string]$connectorSlideReport.pointSequenceSha256
                     connectorCostStatus = [string]$connectorSlideReport.costStatus
+                    recursiveRecords = @($shapeTreeReceipt.recursiveRecords)
+                    nativeChartRecords = @($shapeTreeReceipt.nativeChartRecords)
                     render = $renderName
                     renderSha256 = Get-Sha256 -Path $renderFile
                     notesSha256 = Get-TextSha256 -Text $nativeNotes[$slideIndex - 1]
@@ -2850,10 +5961,68 @@ try {
     $finalPresentationPath = Join-Path $outputPath 'readout.pptx'
     $finalRenderPath = Join-Path $outputPath 'native-render'
     $finalReportPath = Join-Path $outputPath 'worker-report.json'
+    $recursiveShapeCount = 0
+    $nativeChartShapeCount = 0
+    $recursiveShapeHashLines = [Collections.Generic.List[string]]::new()
+    $finalSlideReports = [Collections.Generic.List[object]]::new()
+    for ($slideIndex = 0; $slideIndex -lt $slideReports.Count; $slideIndex++) {
+        $draft = $slideReports[$slideIndex]
+        $recursiveRecords = @($draft.recursiveRecords)
+        $nativeChartRecords = @($draft.nativeChartRecords)
+        $nameLines = @($recursiveRecords | ForEach-Object { [string]$_.name })
+        $geometryLines = @($recursiveRecords | ForEach-Object { "$($_.name)|$($_.geometry)" })
+        $contentLines = @($recursiveRecords | ForEach-Object { "$($_.name)|$($_.content)" })
+        $styleLines = @($recursiveRecords | ForEach-Object { "$($_.name)|$($_.style)" })
+        $chartNameLines = @($nativeChartRecords | ForEach-Object { [string]$_.name })
+        $recursiveNamesSha256 = Get-TextSha256 -Text ($nameLines -join "`n")
+        $recursiveGeometrySha256 = Get-TextSha256 -Text ($geometryLines -join "`n")
+        $recursiveContentSha256 = Get-TextSha256 -Text ($contentLines -join "`n")
+        $recursiveStyleSha256 = Get-TextSha256 -Text ($styleLines -join "`n")
+        $nativeChartNamesSha256 = Get-TextSha256 -Text ($chartNameLines -join "`n")
+        $recursiveShapeCount += $recursiveRecords.Count
+        $nativeChartShapeCount += $nativeChartRecords.Count
+        $recursiveShapeHashLines.Add(
+            "$($draft.id)|$recursiveNamesSha256|$recursiveGeometrySha256|$recursiveContentSha256|$recursiveStyleSha256"
+        )
+        $finalSlideReports.Add([pscustomobject][ordered]@{
+            index = $draft.index
+            id = $draft.id
+            family = $draft.family
+            backgroundColorRole = $draft.backgroundColorRole
+            primitiveCount = $draft.primitiveCount
+            primitiveSha256 = $draft.primitiveSha256
+            shapeCount = $draft.shapeCount
+            shapeNamesSha256 = $draft.shapeNamesSha256
+            recursiveShapeCount = $recursiveRecords.Count
+            recursiveShapeNamesSha256 = $recursiveNamesSha256
+            recursiveShapeGeometrySha256 = $recursiveGeometrySha256
+            recursiveShapeContentSha256 = $recursiveContentSha256
+            recursiveShapeStyleSha256 = $recursiveStyleSha256
+            nativeChartShapeCount = $nativeChartRecords.Count
+            nativeChartShapeNamesSha256 = $nativeChartNamesSha256
+            nativeTableCount = $draft.nativeTableCount
+            nativeTableCellCount = $draft.nativeTableCellCount
+            connectorRouteCount = $draft.connectorRouteCount
+            connectorSegmentCount = $draft.connectorSegmentCount
+            connectorPrimitiveSha256 = $draft.connectorPrimitiveSha256
+            connectorRouteMetadataSha256 = $draft.connectorRouteMetadataSha256
+            connectorPointSequenceSha256 = $draft.connectorPointSequenceSha256
+            connectorCostStatus = $draft.connectorCostStatus
+            render = $draft.render
+            renderSha256 = $draft.renderSha256
+            notesSha256 = $draft.notesSha256
+            overflow = $draft.overflow
+        })
+    }
+    $nativeShapesReceipt = [pscustomobject][ordered]@{
+        recursiveShapeCount = $recursiveShapeCount
+        nativeChartShapeCount = $nativeChartShapeCount
+        recursiveShapeTreeSha256 = Get-TextSha256 -Text ($recursiveShapeHashLines -join "`n")
+    }
     $reportObject = [ordered]@{
         status = 'WORKER_PASS'
         stagingEvidence = $true
-        worker = 'fde-powerpoint-tables-connectors/1.0'
+        worker = 'fde-powerpoint-native-shapes/2.0'
         spec = $specPath
         specSha256 = $actualSpecSha256
         skeleton = $skeletonPath
@@ -2878,7 +6047,8 @@ try {
             reopenedExactVerification = $true
             slides = @($connectorSpecReport.slides)
         }
-        slides = $slideReports.ToArray()
+        slides = $finalSlideReports.ToArray()
+        nativeShapes = $nativeShapesReceipt
         cleanup = $cleanupReceiptObject
         elapsedMilliseconds = $elapsedMilliseconds
     }

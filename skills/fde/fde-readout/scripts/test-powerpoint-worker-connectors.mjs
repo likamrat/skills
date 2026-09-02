@@ -1189,7 +1189,7 @@ function assertConnectorReport(report, spec) {
     (slide) => slide.id === "native-connector-workflow",
   );
   check(
-    report.worker === "fde-powerpoint-tables-connectors/1.0",
+    report.worker === "fde-powerpoint-native-shapes/2.0",
     "native worker report version changed",
   );
   check(

@@ -173,7 +173,7 @@ for (const [name, pattern] of [
   ["table report count", /nativeTableCount/],
   ["table cell report count", /nativeTableCellCount/],
   ["table verification mutation hook", /FDE_POWERPOINT_TEST_MUTATE_TABLE_BEFORE_VERIFY/],
-  ["integrated table worker receipt version", /fde-powerpoint-tables-connectors\/1\.0/],
+  ["integrated table worker receipt version", /fde-powerpoint-native-shapes\/2\.0/],
 ]) {
   check(pattern.test(workerSource), `worker omits ${name}`);
 }
@@ -392,7 +392,7 @@ if (hasWindowsPowerShell) {
     const malformedCases = [
       {
         name: "row-width",
-        message: /row 1 width does not match the headers/,
+        message: /row width must match headers/,
         mutate(spec) {
           spec.slides
             .flatMap((slide) => slide.primitives)
@@ -402,7 +402,7 @@ if (hasWindowsPowerShell) {
       },
       {
         name: "boolean-margin",
-        message: /table cell margin must be a number/,
+        message: /cellMargin: expected positive number/,
         mutate(spec) {
           spec.slides
             .flatMap((slide) => slide.primitives)
@@ -411,7 +411,7 @@ if (hasWindowsPowerShell) {
       },
       {
         name: "fractional-font",
-        message: /Table line, margin, or font contract is invalid/,
+        message: /table font size must be 8/,
         mutate(spec) {
           spec.slides
             .flatMap((slide) => slide.primitives)
@@ -421,7 +421,7 @@ if (hasWindowsPowerShell) {
       },
       {
         name: "numeric-header",
-        message: /Table header 1 must be a string/,
+        message: /table text is blank/,
         mutate(spec) {
           spec.slides
             .flatMap((slide) => slide.primitives)
@@ -430,7 +430,7 @@ if (hasWindowsPowerShell) {
       },
       {
         name: "scalar-row-evidence",
-        message: /Table row 1 evidence IDs must be an array/,
+        message: /expected a nonempty duplicate-free dense string array/,
         mutate(spec) {
           const table = spec.slides
             .flatMap((slide) => slide.primitives)
@@ -440,7 +440,7 @@ if (hasWindowsPowerShell) {
       },
       {
         name: "fractional-z",
-        message: /Table primitive z must be a positive integer/,
+        message: /must use a mathematically safe integer token/,
         mutate(spec) {
           spec.slides
             .flatMap((slide) => slide.primitives)
@@ -482,6 +482,7 @@ if (hasWindowsPowerShell) {
       check(
         result.status !== 0 &&
           malformedCase.message.test(result.stderr) &&
+          !/PowerPoint cleanup: PID/.test(result.stderr) &&
           !(await pathExists(outputPath)),
         `${malformedCase.name} table preflight did not fail before COM: ${result.stdout}${result.stderr}`,
       );
@@ -666,7 +667,7 @@ if (failures.length === 0) {
         );
         check(
           report.status === "WORKER_PASS" &&
-            report.worker === "fde-powerpoint-tables-connectors/1.0" &&
+            report.worker === "fde-powerpoint-native-shapes/2.0" &&
             report.cleanup?.exited === true &&
             tableSlides.length === 2 &&
             tableSlides.every(
