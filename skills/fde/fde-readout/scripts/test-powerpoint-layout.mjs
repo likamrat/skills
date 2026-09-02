@@ -367,7 +367,7 @@ try {
     spec.slides[0].primitives[0].kind = "image";
   }, full);
   assertThrowsCode("unknown family", "E_UNSUPPORTED_FAMILY", (spec) => {
-    spec.slides[0].family = "workflow";
+    spec.slides[0].family = "matrix";
   }, full);
   assertThrowsCode("null", "E_SPEC_SCHEMA", (spec) => {
     spec.theme.requiredFooter = null;
@@ -424,6 +424,7 @@ try {
 
   const unsupportedPlan = buildPlan(sample);
   unsupportedPlan.slides[2] = clone(sample.slides.find((slide) => slide.family === "workflow"));
+  unsupportedPlan.slides[2].family = "matrix";
   try {
     compileReadoutPlan(unsupportedPlan, { sourcePlanSha256, mode: "full" });
     failures.push("unsupported selected family must fail");

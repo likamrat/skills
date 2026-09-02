@@ -61,7 +61,7 @@ When an Office presentation tool is available:
 2. verify the copied seed's slide size before content;
 3. create and verify the complete slide-and-notes skeleton in the native PowerPoint host;
 4. map plan families to layouts without changing slide structure in the canvas;
-5. build `table` and `chart` families as native PowerPoint tables and charts; build other families with editable text, shapes, and SVG diagrams;
+5. build `table` and `chart` families as native PowerPoint tables and charts; build other families with editable text, shapes, and connector segments;
 6. use exact coordinates for connectors and repeated geometry;
 7. preserve the plan's evidence IDs and footer;
 8. inspect package and render every slide.

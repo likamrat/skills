@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 
+import {
+  RouterError,
+  routeOrthogonalEdge,
+} from "./powerpoint-orthogonal-router.mjs";
 import { selectSmokeSlides } from "./powerpoint-smoke-contract.mjs";
 
 const SCHEMA_VERSION = "fde-drawing-spec/1.0";
@@ -15,6 +19,7 @@ const SUPPORTED_FAMILIES = new Set([
   "timeline",
   "chart",
   "table",
+  "workflow",
   "evaluation",
   "evidence",
 ]);
@@ -26,6 +31,37 @@ const RESPONSIBILITY_TYPES = new Set([
   "hybrid",
 ]);
 const EVALUATION_RESULTS = new Set(["pass", "escalate", "fail"]);
+const WORKFLOW_EDGE_KINDS = new Set(["system", "decision"]);
+const WORKFLOW_NODE_ROLES = ["source", "actor", "system", "decision"];
+const WORKFLOW_ROUTING_STAGE = Object.freeze({
+  x: 48,
+  y: 116,
+  w: 864,
+  h: 362,
+});
+const WORKFLOW_ROLE_STYLES = Object.freeze({
+  source: Object.freeze({
+    fillColorRole: "paper",
+    fillTransparency: 0,
+    lineColorRole: "system",
+  }),
+  actor: Object.freeze({
+    fillColorRole: "system",
+    fillTransparency: 0.9,
+    lineColorRole: "system",
+  }),
+  system: Object.freeze({
+    fillColorRole: "ink",
+    fillTransparency: 0.94,
+    lineColorRole: "system",
+  }),
+  decision: Object.freeze({
+    fillColorRole: "decision",
+    fillTransparency: 0.9,
+    lineColorRole: "decision",
+  }),
+});
+const WORKFLOW_EDGE_ROLE_PATTERN = /^workflow-edge-(system|decision)-(\d{2})$/;
 const NAME_PATTERN = /^fde-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const STRICT_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
@@ -90,6 +126,7 @@ const SHAPE_KEYS = [
   "lineWidth",
   "lineDash",
 ];
+const WORKFLOW_SHAPE_KEYS = [...SHAPE_KEYS, "nodeId"];
 const LINE_KEYS = [
   ...BASE_KEYS,
   "x1",
@@ -102,6 +139,13 @@ const LINE_KEYS = [
   "dash",
   "arrowStart",
   "arrowEnd",
+];
+const WORKFLOW_LINE_KEYS = [
+  ...LINE_KEYS,
+  "sourceNodeId",
+  "targetNodeId",
+  "edgeIndex",
+  "segmentIndex",
 ];
 const TABLE_KEYS = [
   ...BASE_KEYS,
@@ -409,6 +453,7 @@ function shapePrimitive(ctx, semanticPath, role, box, options = {}) {
     lineTransparency: options.lineTransparency ?? 0,
     lineWidth: options.lineWidth ?? 0.75,
     lineDash: options.lineDash ?? "solid",
+    ...(options.nodeId === undefined ? {} : { nodeId: options.nodeId }),
   });
 }
 
@@ -424,6 +469,7 @@ function linePrimitive(ctx, semanticPath, role, points, options = {}) {
     dash: options.dash ?? "solid",
     arrowStart: "none",
     arrowEnd: options.arrowEnd ?? "none",
+    ...(options.workflow ?? {}),
   });
 }
 
@@ -875,6 +921,145 @@ function gridCells(region, count, columns, horizontalGap, verticalGap) {
     w: width,
     h: height,
   }));
+}
+
+function workflowNodeBoxes(nodes) {
+  const bandWidth = WORKFLOW_ROUTING_STAGE.w / WORKFLOW_NODE_ROLES.length;
+  const regionY = 124;
+  const regionH = 346;
+  const nodeH = 64;
+  const rowGap = 27;
+  const result = new Map();
+
+  WORKFLOW_NODE_ROLES.forEach((role, roleIndex) => {
+    const roleNodes = nodes.filter((node) => node.role === role);
+    const columns = roleNodes.length > 4 ? 2 : 1;
+    const rows = Math.ceil(roleNodes.length / columns);
+    const totalHeight = rows * nodeH + Math.max(0, rows - 1) * rowGap;
+    const startY = regionY + (regionH - totalHeight) / 2;
+    const bandX = WORKFLOW_ROUTING_STAGE.x + roleIndex * bandWidth;
+    const nodeW = columns === 1 ? 156 : 84;
+    const columnOffsets = columns === 1 ? [30] : [12, 120];
+
+    roleNodes.forEach((node, index) => {
+      result.set(node.id, {
+        id: node.id,
+        x: bandX + columnOffsets[index % columns],
+        y: startY + Math.floor(index / columns) * (nodeH + rowGap),
+        w: nodeW,
+        h: nodeH,
+      });
+    });
+  });
+
+  return result;
+}
+
+function compileWorkflow(ctx, slide) {
+  addStandardHeader(ctx, slide);
+  const boxes = workflowNodeBoxes(slide.content.nodes);
+  const nodeRects = slide.content.nodes.map((node) => boxes.get(node.id));
+  const routes = [];
+
+  slide.content.edges.forEach((edge, edgeIndex) => {
+    const edgePath = `$.slides[${ctx.sourceIndex - 1}].content.edges[${edgeIndex}]`;
+    const sourceRect = boxes.get(edge.from);
+    const targetRect = boxes.get(edge.to);
+    const obstacles = nodeRects.filter(
+      (rect) => rect.id !== sourceRect.id && rect.id !== targetRect.id,
+    );
+    let route;
+    try {
+      route = routeOrthogonalEdge({
+        sourceRect,
+        targetRect,
+        obstacles,
+        existingRoutes: routes,
+        stage: { ...WORKFLOW_ROUTING_STAGE },
+      });
+    } catch (error) {
+      if (error instanceof RouterError) {
+        fail(error.code, edgePath, error.message);
+      }
+      throw error;
+    }
+
+    const edgeNumber = String(edgeIndex + 1).padStart(2, "0");
+    const routeId = `workflow-edge-${edgeNumber}`;
+    routes.push({ ...route, routeId });
+    route.segments.forEach((segment, segmentIndex) => {
+      const segmentNumber = String(segmentIndex + 1).padStart(2, "0");
+      linePrimitive(
+        ctx,
+        `edge-${edgeNumber}-${edge.from}-to-${edge.to}-${edge.kind}-segment-${segmentNumber}`,
+        `workflow-edge-${edge.kind}-${edgeNumber}`,
+        {
+          x1: segment.x1,
+          y1: segment.y1,
+          x2: segment.x2,
+          y2: segment.y2,
+        },
+        {
+          colorRole: edge.kind,
+          width: edge.kind === "decision" ? 1.5 : 1,
+          arrowEnd: segmentIndex === route.segments.length - 1 ? "open" : "none",
+          workflow: {
+            sourceNodeId: edge.from,
+            targetNodeId: edge.to,
+            edgeIndex: edgeIndex + 1,
+            segmentIndex: segmentIndex + 1,
+          },
+        },
+      );
+    });
+  });
+
+  slide.content.nodes.forEach((node, nodeIndex) => {
+    const box = boxes.get(node.id);
+    const style = WORKFLOW_ROLE_STYLES[node.role];
+    const nodeToken = `${itemToken("node", nodeIndex)}-${node.id}`;
+    shapePrimitive(
+      ctx,
+      `${nodeToken}-shape`,
+      `workflow-node-${node.role}`,
+      { x: box.x, y: box.y, w: box.w, h: box.h },
+      {
+        shapeType: "roundRect",
+        ...style,
+        lineWidth: node.role === "decision" ? 1.5 : 1,
+        nodeId: node.id,
+      },
+    );
+    textPrimitive(
+      ctx,
+      `${nodeToken}-label`,
+      "workflow-node-label",
+      { x: box.x + 8, y: box.y + 5, w: box.w - 16, h: 14 },
+      node.label,
+      {
+        fontSize: 8,
+        bold: true,
+        colorRole: node.role === "decision" ? "decision" : "ink",
+        verticalAlign: "middle",
+        maxLines: 1,
+      },
+    );
+    textPrimitive(
+      ctx,
+      `${nodeToken}-detail`,
+      "workflow-node-detail",
+      { x: box.x + 8, y: box.y + 21, w: box.w - 16, h: 36 },
+      node.detail,
+      {
+        fontSize: 8,
+        colorRole: "muted",
+        verticalAlign: "middle",
+        maxLines: 3,
+      },
+    );
+  });
+
+  addFooter(ctx, slide);
 }
 
 function itemToken(label, index) {
@@ -1929,6 +2114,9 @@ function compileSlide(plan, slide, sourceIndex) {
     case "table":
       compileTable(ctx, slide);
       break;
+    case "workflow":
+      compileWorkflow(ctx, slide);
+      break;
     case "evaluation":
       compileEvaluation(ctx, slide);
       break;
@@ -2010,6 +2198,8 @@ function validateNestedEvidence(slide, slideIndex) {
         ...entries(slide.content.rows, "rows"),
         { item: slide.content.insight, path: `${path}.insight` },
       ];
+      break;
+    case "workflow":
       break;
     case "evaluation":
       nested = [
@@ -2333,6 +2523,61 @@ function validateSupportedContent(slide, slideIndex) {
       });
       validateClaimContent(slide.content.insight, `${path}.insight`);
       break;
+    case "workflow": {
+      allowedKeys(slide.content, ["nodes", "edges"], ["nodes", "edges"], path);
+      validateContentArray(slide.content.nodes, `${path}.nodes`, 3, 8);
+      const nodeIds = new Set();
+      slide.content.nodes.forEach((node, nodeIndex) => {
+        const nodePath = `${path}.nodes[${nodeIndex}]`;
+        allowedKeys(
+          node,
+          ["id", "label", "detail", "role"],
+          ["id", "label", "detail", "role"],
+          nodePath,
+        );
+        for (const field of ["id", "label", "detail", "role"]) {
+          validateContentString(node[field], `${nodePath}.${field}`);
+        }
+        if (!NAME_PATTERN.test(`fde-${node.id}`)) {
+          fail("E_SPEC_SCHEMA", `${nodePath}.id`, "workflow node ID must use kebab-case");
+        }
+        if (nodeIds.has(node.id)) {
+          fail("E_SPEC_SCHEMA", `${nodePath}.id`, "workflow node IDs must be unique");
+        }
+        if (!WORKFLOW_NODE_ROLES.includes(node.role)) {
+          fail("E_SPEC_SCHEMA", `${nodePath}.role`, "invalid workflow node role");
+        }
+        nodeIds.add(node.id);
+      });
+      validateContentArray(slide.content.edges, `${path}.edges`, 2, 10);
+      let hasDecisionEdge = false;
+      slide.content.edges.forEach((edge, edgeIndex) => {
+        const edgePath = `${path}.edges[${edgeIndex}]`;
+        allowedKeys(
+          edge,
+          ["from", "to", "kind"],
+          ["from", "to", "kind"],
+          edgePath,
+        );
+        for (const field of ["from", "to", "kind"]) {
+          validateContentString(edge[field], `${edgePath}.${field}`);
+        }
+        if (!nodeIds.has(edge.from)) {
+          fail("E_SPEC_SCHEMA", `${edgePath}.from`, "unknown workflow source node");
+        }
+        if (!nodeIds.has(edge.to)) {
+          fail("E_SPEC_SCHEMA", `${edgePath}.to`, "unknown workflow target node");
+        }
+        if (!WORKFLOW_EDGE_KINDS.has(edge.kind)) {
+          fail("E_SPEC_SCHEMA", `${edgePath}.kind`, "invalid workflow edge kind");
+        }
+        hasDecisionEdge ||= edge.kind === "decision";
+      });
+      if (!hasDecisionEdge) {
+        fail("E_SPEC_SCHEMA", `${path}.edges`, "workflow requires a decision edge");
+      }
+      break;
+    }
     case "evaluation":
       allowedKeys(
         slide.content,
@@ -3126,9 +3371,15 @@ function validatePrimitive(
     primitive.kind === "text"
       ? TEXT_KEYS
       : primitive.kind === "shape"
-        ? SHAPE_KEYS
+        ? typeof primitive.role === "string" &&
+          primitive.role.startsWith("workflow-node-")
+          ? WORKFLOW_SHAPE_KEYS
+          : SHAPE_KEYS
         : primitive.kind === "line"
-          ? LINE_KEYS
+          ? typeof primitive.role === "string" &&
+            primitive.role.startsWith("workflow-edge-")
+            ? WORKFLOW_LINE_KEYS
+            : LINE_KEYS
           : primitive.kind === "table"
             ? TABLE_KEYS
             : primitive.kind === "nativeChart"
@@ -3174,6 +3425,9 @@ function validatePrimitive(
     }
     if (!Number.isFinite(primitive.lineWidth) || primitive.lineWidth <= 0) fail("E_GEOMETRY_BOUNDS", `${path}.lineWidth`, "line width must be positive");
     if (!["solid", "dash", "dot", "dashDot"].includes(primitive.lineDash)) fail("E_SPEC_SCHEMA", `${path}.lineDash`, "invalid line dash");
+    if (primitive.role.startsWith("workflow-node-")) {
+      assertString(primitive.nodeId, `${path}.nodeId`);
+    }
   } else if (primitive.kind === "line") {
     for (const key of ["x1", "y1", "x2", "y2", "width", "transparency"]) {
       if (!Number.isFinite(primitive[key])) fail("E_GEOMETRY_NONFINITE", `${path}.${key}`, "expected finite number");
@@ -3185,6 +3439,22 @@ function validatePrimitive(
     if (primitive.transparency < 0 || primitive.transparency > 1) fail("E_SPEC_SCHEMA", `${path}.transparency`, "expected number from 0 to 1");
     if (!["solid", "dash", "dot", "dashDot"].includes(primitive.dash) || primitive.arrowStart !== "none" || !["none", "open"].includes(primitive.arrowEnd)) {
       fail("E_SPEC_SCHEMA", path, "line style is invalid");
+    }
+    if (primitive.role.startsWith("workflow-edge-")) {
+      assertString(primitive.sourceNodeId, `${path}.sourceNodeId`);
+      assertString(primitive.targetNodeId, `${path}.targetNodeId`);
+      if (
+        !Number.isInteger(primitive.edgeIndex) ||
+        primitive.edgeIndex < 1 ||
+        !Number.isInteger(primitive.segmentIndex) ||
+        primitive.segmentIndex < 1
+      ) {
+        fail(
+          "E_SPEC_SCHEMA",
+          path,
+          "workflow connector indexes must be positive integers",
+        );
+      }
     }
   } else if (primitive.kind === "table") {
     assertGeometryBox(primitive, path, stage);
@@ -3344,6 +3614,270 @@ function validatePrimitive(
       names,
       family,
       slideEvidenceIds,
+    );
+  }
+}
+
+function workflowPointInStage(x, y) {
+  return (
+    x >= WORKFLOW_ROUTING_STAGE.x &&
+    x <= WORKFLOW_ROUTING_STAGE.x + WORKFLOW_ROUTING_STAGE.w &&
+    y >= WORKFLOW_ROUTING_STAGE.y &&
+    y <= WORKFLOW_ROUTING_STAGE.y + WORKFLOW_ROUTING_STAGE.h
+  );
+}
+
+function workflowAnchorMatches(x, y, box) {
+  return (
+    (x === box.x && y === box.y + box.h / 2) ||
+    (x === box.x + box.w && y === box.y + box.h / 2) ||
+    (x === box.x + box.w / 2 && y === box.y) ||
+    (x === box.x + box.w / 2 && y === box.y + box.h)
+  );
+}
+
+function workflowSegmentCrossesBox(line, box) {
+  if (line.y1 === line.y2) {
+    return (
+      line.y1 > box.y &&
+      line.y1 < box.y + box.h &&
+      Math.max(Math.min(line.x1, line.x2), box.x) <
+        Math.min(Math.max(line.x1, line.x2), box.x + box.w)
+    );
+  }
+  return (
+    line.x1 > box.x &&
+    line.x1 < box.x + box.w &&
+    Math.max(Math.min(line.y1, line.y2), box.y) <
+      Math.min(Math.max(line.y1, line.y2), box.y + box.h)
+  );
+}
+
+function validateWorkflowPrimitives(slide, path) {
+  const nodeShapes = slide.primitives.filter(
+    (primitive) =>
+      primitive.kind === "shape" && primitive.role.startsWith("workflow-node-"),
+  );
+  if (nodeShapes.length < 3 || nodeShapes.length > 8) {
+    fail(
+      "E_SPEC_SCHEMA",
+      `${path}.primitives`,
+      "workflow requires 3-8 editable node shapes",
+    );
+  }
+  const labels = slide.primitives.filter(
+    (primitive) => primitive.kind === "text" && primitive.role === "workflow-node-label",
+  );
+  const details = slide.primitives.filter(
+    (primitive) => primitive.kind === "text" && primitive.role === "workflow-node-detail",
+  );
+  if (labels.length !== nodeShapes.length || details.length !== nodeShapes.length) {
+    fail(
+      "E_SPEC_SCHEMA",
+      `${path}.primitives`,
+      "every workflow node requires editable label and detail text",
+    );
+  }
+  const nodeById = new Map();
+
+  const bandWidth = WORKFLOW_ROUTING_STAGE.w / WORKFLOW_NODE_ROLES.length;
+  nodeShapes.forEach((shape, shapeIndex) => {
+    if (nodeById.has(shape.nodeId)) {
+      fail(
+        "E_SPEC_SCHEMA",
+        `${path}.primitives[${shapeIndex}].nodeId`,
+        "workflow node IDs must be unique",
+      );
+    }
+    nodeById.set(shape.nodeId, shape);
+    const role = shape.role.slice("workflow-node-".length);
+    const roleIndex = WORKFLOW_NODE_ROLES.indexOf(role);
+    if (roleIndex < 0) {
+      fail("E_SPEC_SCHEMA", `${path}.primitives`, "invalid workflow node role");
+    }
+    const style = WORKFLOW_ROLE_STYLES[role];
+    const bandLeft = WORKFLOW_ROUTING_STAGE.x + roleIndex * bandWidth;
+    const bandRight = bandLeft + bandWidth;
+    if (
+      shape.x < bandLeft ||
+      shape.x + shape.w > bandRight ||
+      shape.y < WORKFLOW_ROUTING_STAGE.y ||
+      shape.y + shape.h > WORKFLOW_ROUTING_STAGE.y + WORKFLOW_ROUTING_STAGE.h
+    ) {
+      fail(
+        "E_GEOMETRY_BOUNDS",
+        `${path}.primitives`,
+        "workflow node escapes its deterministic role band",
+      );
+    }
+    if (
+      shape.shapeType !== "roundRect" ||
+      shape.fillVisible !== true ||
+      shape.lineVisible !== true ||
+      shape.fillColorRole !== style.fillColorRole ||
+      shape.fillTransparency !== style.fillTransparency ||
+      shape.lineColorRole !== style.lineColorRole ||
+      shape.lineTransparency !== 0 ||
+      shape.lineWidth !== (role === "decision" ? 1.5 : 1) ||
+      shape.lineDash !== "solid"
+    ) {
+      fail(
+        "E_SPEC_SCHEMA",
+        `${path}.primitives`,
+        "workflow node style does not match its semantic role",
+      );
+    }
+    for (const [textRole, items] of [
+      ["label", labels],
+      ["detail", details],
+    ]) {
+      if (items.filter((item) => boxWithin(item, shape)).length !== 1) {
+        fail(
+          "E_GEOMETRY_BOUNDS",
+          `${path}.primitives[${shapeIndex}]`,
+          `workflow node requires exactly one contained ${textRole}`,
+        );
+      }
+    }
+  });
+  nodeShapes.forEach((left, leftIndex) => {
+    nodeShapes.slice(leftIndex + 1).forEach((right) => {
+      if (overlap(left, right)) {
+        fail("E_GEOMETRY_OVERLAP", `${path}.primitives`, "workflow node shapes overlap");
+      }
+    });
+  });
+
+  const edgeGroups = new Map();
+  slide.primitives.forEach((primitive, primitiveIndex) => {
+    if (primitive.kind !== "line" || !primitive.role.startsWith("workflow-edge-")) {
+      return;
+    }
+    const match = WORKFLOW_EDGE_ROLE_PATTERN.exec(primitive.role);
+    if (!match) {
+      fail(
+        "E_SPEC_SCHEMA",
+        `${path}.primitives[${primitiveIndex}].role`,
+        "invalid workflow edge role",
+      );
+    }
+    const group = edgeGroups.get(primitive.role) ?? {
+      kind: match[1],
+      index: Number(match[2]),
+      lines: [],
+    };
+    group.lines.push({ line: primitive, path: `${path}.primitives[${primitiveIndex}]` });
+    edgeGroups.set(primitive.role, group);
+  });
+  if (edgeGroups.size < 2 || edgeGroups.size > 10) {
+    fail(
+      "E_SPEC_SCHEMA",
+      `${path}.primitives`,
+      "workflow requires 2-10 connector routes",
+    );
+  }
+  const groups = [...edgeGroups.values()].sort((left, right) => left.index - right.index);
+  if (
+    groups.some((group, index) => group.index !== index + 1) ||
+    !groups.some((group) => group.kind === "decision")
+  ) {
+    fail(
+      "E_SPEC_SCHEMA",
+      `${path}.primitives`,
+      "workflow connector routes require contiguous indexes and a decision edge",
+    );
+  }
+
+  groups.forEach((group) => {
+    group.lines.forEach(({ line, path: linePath }, segmentIndex) => {
+      if (
+        line.edgeIndex !== group.index ||
+        line.segmentIndex !== segmentIndex + 1 ||
+        line.sourceNodeId !== group.lines[0].line.sourceNodeId ||
+        line.targetNodeId !== group.lines[0].line.targetNodeId ||
+        !nodeById.has(line.sourceNodeId) ||
+        !nodeById.has(line.targetNodeId)
+      ) {
+        fail(
+          "E_SPEC_SCHEMA",
+          linePath,
+          "workflow connector metadata is inconsistent",
+        );
+      }
+      if (
+        (line.x1 === line.x2) === (line.y1 === line.y2) ||
+        !workflowPointInStage(line.x1, line.y1) ||
+        !workflowPointInStage(line.x2, line.y2)
+      ) {
+        fail(
+          "E_GEOMETRY_BOUNDS",
+          linePath,
+          "workflow connector segment must be orthogonal and remain in its stage",
+        );
+      }
+      if (
+        line.colorRole !== group.kind ||
+        line.transparency !== 0 ||
+        line.width !== (group.kind === "decision" ? 1.5 : 1) ||
+        line.dash !== "solid" ||
+        line.arrowStart !== "none" ||
+        line.arrowEnd !==
+          (segmentIndex === group.lines.length - 1 ? "open" : "none")
+      ) {
+        fail(
+          "E_SPEC_SCHEMA",
+          linePath,
+          "workflow connector style does not match its semantic edge kind",
+        );
+      }
+      if (
+        segmentIndex > 0 &&
+        (group.lines[segmentIndex - 1].line.x2 !== line.x1 ||
+          group.lines[segmentIndex - 1].line.y2 !== line.y1)
+      ) {
+        fail(
+          "E_GEOMETRY_BOUNDS",
+          linePath,
+          "workflow connector segments must share exact anchors",
+        );
+      }
+      if (nodeShapes.some((shape) => workflowSegmentCrossesBox(line, shape))) {
+        fail(
+          "E_GEOMETRY_OVERLAP",
+          linePath,
+          "workflow connector crosses a node interior",
+        );
+      }
+    });
+    const first = group.lines[0].line;
+    const last = group.lines.at(-1).line;
+    if (
+      !workflowAnchorMatches(
+        first.x1,
+        first.y1,
+        nodeById.get(first.sourceNodeId),
+      ) ||
+      !workflowAnchorMatches(
+        last.x2,
+        last.y2,
+        nodeById.get(first.targetNodeId),
+      )
+    ) {
+      fail(
+        "E_GEOMETRY_BOUNDS",
+        `${path}.primitives`,
+        "workflow connector endpoints must use exact anchors on their declared nodes",
+      );
+    }
+  });
+
+  const connectorZ = groups.flatMap((group) => group.lines.map(({ line }) => line.z));
+  const nodeZ = nodeShapes.map((shape) => shape.z);
+  if (Math.max(...connectorZ) >= Math.min(...nodeZ)) {
+    fail(
+      "E_NONDETERMINISTIC_OUTPUT",
+      `${path}.primitives`,
+      "workflow connectors must remain behind editable nodes",
     );
   }
 }
@@ -3555,6 +4089,9 @@ function validateDrawingSpecSnapshot(spec) {
           "chart insight geometry does not match the fixed contract",
         );
       }
+    }
+    if (slide.family === "workflow") {
+      validateWorkflowPrimitives(slide, path);
     }
     validateFooterContract(slide, path, spec.theme);
     for (const role of [

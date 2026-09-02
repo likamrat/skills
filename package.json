@@ -26,6 +26,7 @@
     "check": "node scripts/check-em-dashes.mjs && node scripts/check-acronyms.mjs && node scripts/validate-skills.mjs && node scripts/check-links.mjs --local && node scripts/test-fde-evaluator.mjs",
     "check:cli": "node --no-deprecation scripts/test-cli-commands.mjs",
     "test:powerpoint-router-interactions": "node skills/fde/fde-readout/scripts/test-powerpoint-router-interactions.mjs",
+    "test:powerpoint-workflow-family": "node skills/fde/fde-readout/scripts/test-powerpoint-workflow-family.mjs",
     "check:fde:e2e": "node scripts/test-fde-evaluator.mjs",
     "check:links": "node scripts/check-links.mjs --external",
     "eval:fde:e2e": "node scripts/evaluate-fde-run.mjs",
