@@ -207,6 +207,10 @@ const requiredAssets = [
     join(skillRoot, "scripts", "render-powerpoint-spec.mjs"),
     "PowerPoint drawing-spec CLI",
   ],
+  [
+    join(skillRoot, "scripts", "pptx-package-qa.mjs"),
+    "dependency-free PPTX package QA CLI",
+  ],
 ];
 for (const [path, label] of requiredAssets) {
   try {
@@ -372,6 +376,7 @@ for (const script of [
   "test-powerpoint-router-grid.mjs",
   "test-powerpoint-router-interactions.mjs",
   "test-powerpoint-workflow-family.mjs",
+  "test-pptx-package-qa.mjs",
 ]) {
   const result = spawnSync(process.execPath, [join(skillRoot, "scripts", script)], {
     encoding: "utf8",

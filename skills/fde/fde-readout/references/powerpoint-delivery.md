@@ -17,9 +17,10 @@ Use this authoring order:
 4. author and render the three selected slides, then obtain coordinator or accountable-human approval;
 5. discard the smoke deck and copy a fresh seed to the full-deck output path;
 6. invoke the helper without `-SmokeSlideIds` against the same complete plan;
-7. save, close, and reopen the native deck, then confirm that the active slide count equals the unique notes-relationship and notes-part counts;
-8. only after that check, open the full deck in the Office canvas and build the planned native shapes, tables, charts, and diagrams;
-9. do not add, delete, reorder, or assign notes to slides in the canvas after either native skeleton passes.
+7. save and close the native deck, then run `node scripts/pptx-package-qa.mjs readout.pptx`;
+8. require a zero exit and confirm that the active slide count equals the unique notes-relationship and notes-part counts in its deterministic JSON report;
+9. reopen the deck and only after that check open it in the Office canvas to build the planned native shapes, tables, charts, and diagrams;
+10. do not add, delete, reorder, or assign notes to slides in the canvas after either native skeleton passes.
 
 If the script cannot run, use another approved native PowerPoint host for the same smoke-first sequence. Assign each selected slide's original notes before creating the next slide.
 
@@ -61,7 +62,7 @@ When an Office presentation tool is available:
 2. verify the copied seed's slide size before content;
 3. create and verify the complete slide-and-notes skeleton in the native PowerPoint host;
 4. map plan families to layouts without changing slide structure in the canvas;
-5. build `table` and `chart` families as native PowerPoint tables and charts; build other families with editable text, shapes, and connector segments;
+5. build `table` families as native PowerPoint tables; build chart and diagram families with editable PowerPoint shapes and connectors so the package contains no embedded workbook or media parts;
 6. use exact coordinates for connectors and repeated geometry;
 7. preserve the plan's evidence IDs and footer;
 8. inspect package and render every slide.
@@ -79,7 +80,7 @@ Capture one final, hash-bound evidence record after the contact-sheet render. It
 - `invoke_canvas_action` calls, batch-member actions, canvas failures, elapsed time, model calls, and input tokens;
 - the human contact-sheet decision.
 
-Count only `invoke_canvas_action` calls against the temporary 10-call canvas budget. Record `get_model` inspections and batch-member actions separately. Package facts must come from the native Office canvas. Do not add a custom PPTX, ZIP, XML, or OPC parser, and do not add a live PowerPoint evaluator; Hill 0 consumes sanitized frozen replay evidence only.
+Count only `invoke_canvas_action` calls against the temporary 10-call canvas budget. Record `get_model` inspections and batch-member actions separately. Package facts must come from the deterministic JSON emitted by `scripts/pptx-package-qa.mjs`; visual and native-object facts still come from the Office canvas. The package inspector is read-only and must never edit ZIP, XML, OOXML, or OPC content. Do not add a live PowerPoint evaluator; Hill 0 consumes sanitized frozen replay evidence only.
 
 ## Conversion boundary
 

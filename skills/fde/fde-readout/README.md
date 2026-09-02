@@ -82,6 +82,16 @@ Create a clean native PowerPoint slide-and-notes skeleton on Windows:
 powershell -ExecutionPolicy Bypass -File scripts/create-powerpoint-skeleton.ps1 -Plan path/to/readout-plan.json -Output path/to/readout.pptx
 ```
 
+Inspect a local PPTX package without Office or third-party packages:
+
+```text
+node scripts/pptx-package-qa.mjs --pretty path/to/readout.pptx
+```
+
+The command emits deterministic JSON with the package hash, ordered slides and notes, part hashes, counts, and findings. It exits nonzero for malformed ZIP or OOXML, unsafe content, external relationships, hidden slides, page-size drift, and slide-to-notes graph failures.
+
+The package policy forbids slide media and embedded workbooks. PowerPoint charts and diagrams must use editable shapes and connectors rather than media-backed SVG or workbook-backed chart parts.
+
 Run the HTML deck on localhost:
 
 ```text
@@ -128,6 +138,7 @@ fde-readout/
 - Narrative slides require supplied human-context IDs.
 - HTML playback has no remote runtime dependency.
 - Runtime converters and hosted services are not used.
+- PPTX package QA is read-only, dependency-free, and bounded against ZIP bombs.
 - Reference-deck asset reuse requires named authorization.
 - Rendered-slide review remains required after plan and Office-package validation.
 

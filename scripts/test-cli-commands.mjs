@@ -124,8 +124,20 @@ try {
             "readout-plan.template.json",
           ),
         );
+        await access(
+          join(
+            cwd,
+            ".agents",
+            "skills",
+            skill,
+            "scripts",
+            "pptx-package-qa.mjs",
+          ),
+        );
       } catch {
-        failures.push("fde-readout install is missing renderer or plan template");
+        failures.push(
+          "fde-readout install is missing renderer, plan template, or PPTX package QA",
+        );
       }
     }
 
