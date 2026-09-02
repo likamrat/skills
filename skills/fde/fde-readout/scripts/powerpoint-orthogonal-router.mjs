@@ -1302,6 +1302,11 @@ function validateExistingRoutes(value, path, rects = [], stage = null) {
       points: canonicalPoints,
       segments: buildSegments(canonicalPoints),
     };
+    const exactFoundationRoute = isExactFoundationRoute(
+      snapshot,
+      sourceRect,
+      targetRect,
+    );
     const routeCanonicalSegments = canonicalRoute.segments.length;
     canonicalSegments += routeCanonicalSegments;
     if (
@@ -1320,29 +1325,16 @@ function validateExistingRoutes(value, path, rects = [], stage = null) {
             (rect) => rect.id !== sourceRect.id && rect.id !== targetRect.id,
           )
         : [];
-    let canonicalFoundation = null;
-    if (sourceRect && targetRect && sourceRect.id !== targetRect.id) {
-      const foundation = routeWithoutObstacles(sourceRect, targetRect);
-      const foundationPoints = collapseCollinearPoints(foundation.points);
-      canonicalFoundation = {
-        ...foundation,
-        points: foundationPoints,
-        segments: buildSegments(foundationPoints),
-      };
-    }
-    const comparableRoute = { ...canonicalRoute };
-    delete comparableRoute.routeId;
-    const isFoundationRoute =
-      canonicalFoundation !== null &&
-      stableRouteJson(comparableRoute) === stableRouteJson(canonicalFoundation);
-    if (isFoundationRoute) {
-      const blockers = unrelatedObstacles.map((obstacle, obstacleIndex) =>
-        inflateBounds(
-          rectToUnitBounds(obstacle, `${routePath}.obstacles[${obstacleIndex}]`),
-          `${routePath}.obstacles[${obstacleIndex}]`,
-        ),
-      );
-      const unitPoints = canonicalRoute.points.map((point, pointIndex) =>
+    const normalizedRoute = exactFoundationRoute ? snapshot : canonicalRoute;
+    if (exactFoundationRoute && unrelatedObstacles.length > 0) {
+      const blockers = unrelatedObstacles.map((obstacle, obstacleIndex) => {
+        const obstaclePath = `${routePath}.obstacles[${obstacleIndex}]`;
+        return inflateBounds(
+          rectToUnitBounds(obstacle, obstaclePath),
+          obstaclePath,
+        );
+      });
+      const unitPoints = snapshot.points.map((point, pointIndex) =>
         pointToUnits(point, `${routePath}.points[${pointIndex}]`),
       );
       for (let pointIndex = 1; pointIndex < unitPoints.length; pointIndex += 1) {
@@ -1364,13 +1356,13 @@ function validateExistingRoutes(value, path, rects = [], stage = null) {
       }
     } else {
       validateOrthogonalRoute(
-        canonicalRoute,
+        normalizedRoute,
         sourceRect && targetRect
           ? { ...baseContext, obstacles: unrelatedObstacles }
           : {},
       );
     }
-    return canonicalRoute;
+    return normalizedRoute;
   });
   routes.sort((a, b) => compareStrings(routeSortKey(a), routeSortKey(b)));
   const segments = [];
@@ -1451,6 +1443,16 @@ function routeWithoutObstacles(source, target) {
     segments,
     cost: fromBigIntThousandths(best.costUnits, "$.cost"),
   };
+}
+
+function isExactFoundationRoute(route, source, target) {
+  if (!source || !target || source.id === target.id) return false;
+  const comparable = { ...route };
+  delete comparable.routeId;
+  return (
+    stableRouteJson(comparable) ===
+    stableRouteJson(routeWithoutObstacles(source, target))
+  );
 }
 
 function validateAndSortObstacles(value, source, target) {
@@ -1687,16 +1689,24 @@ export function routeOrthogonalEdge(input) {
 
   if (obstacles.length === 0 && existing.routes.length === 0) {
     const foundationRoute = routeWithoutObstacles(source, target);
-    if (!stage) return foundationRoute;
     try {
       validateOrthogonalRoute(foundationRoute, {
         sourceRect: source,
         targetRect: target,
-        stage: { x: stage.x, y: stage.y, w: stage.w, h: stage.h },
+        obstacles: [],
+        existingRoutes: [],
+        ...(stage
+          ? { stage: { x: stage.x, y: stage.y, w: stage.w, h: stage.h } }
+          : {}),
       });
       return foundationRoute;
     } catch (error) {
-      if (!(error instanceof RouterError) || error.code !== "E_ROUTER_BOUNDS") throw error;
+      if (
+        !(error instanceof RouterError) ||
+        !["E_ROUTER_BOUNDS", "E_WORKFLOW_ROUTE"].includes(error.code)
+      ) {
+        throw error;
+      }
     }
   }
 
@@ -1938,6 +1948,7 @@ export function validateOrthogonalRoute(route, context = {}) {
   const hasTargetRect = Object.hasOwn(contextSnapshot, "targetRect");
   let sourceRect = null;
   let targetRect = null;
+  let exactFoundationRoute = false;
   if (hasSourceRect !== hasTargetRect) {
     fail(
       "E_ROUTER_INPUT",
@@ -1954,6 +1965,21 @@ export function validateOrthogonalRoute(route, context = {}) {
     if (targetRect.id !== targetId) {
       fail("E_WORKFLOW_ROUTE", "$.targetId", "targetId must match context.targetRect.id");
     }
+    if (
+      sourceRect.id === targetRect.id &&
+      ["x", "y", "w", "h"].some((key) => sourceRect[key] !== targetRect[key])
+    ) {
+      fail(
+        "E_ROUTER_INPUT",
+        "$context.targetRect",
+        "self-edge rectangles must be identical",
+      );
+    }
+    exactFoundationRoute = isExactFoundationRoute(
+      routeSnapshot,
+      sourceRect,
+      targetRect,
+    );
     const expectedSourceAnchor = anchorPoint(sourceRect, fromSide);
     const expectedTargetAnchor = anchorPoint(targetRect, toSide);
     const firstPoint = points[0];
@@ -1999,43 +2025,53 @@ export function validateOrthogonalRoute(route, context = {}) {
       }
       ids.add(obstacle.id);
     }
-    const validationRects = [
-      sourceRect,
-      ...(targetRect.id === sourceRect.id ? [] : [targetRect]),
-      ...contextObstacles,
-    ];
-    const sourceHalo = inflateBounds(
-      rectToUnitBounds(sourceRect, "$context.sourceRect"),
-      "$context.sourceRect",
-    );
-    const targetHalo =
-      targetRect.id === sourceRect.id
-        ? sourceHalo
-        : inflateBounds(
-            rectToUnitBounds(targetRect, "$context.targetRect"),
-            "$context.targetRect",
-          );
-    const endpointHalosOverlap =
-      sourceHalo.left <= targetHalo.right &&
-      sourceHalo.right >= targetHalo.left &&
-      sourceHalo.top <= targetHalo.bottom &&
-      sourceHalo.bottom >= targetHalo.top;
-    const blockers = validationRects.map((rect, index) =>
-      inflateBounds(
-        rectToUnitBounds(
+    const blockerEntries = exactFoundationRoute
+      ? contextObstacles.map((rect, index) => ({
           rect,
-          index === 0
-            ? "$context.sourceRect"
-            : index === 1
-              ? "$context.targetRect"
-              : `$context.obstacles[${index - 2}]`,
-        ),
-        index === 0
-          ? "$context.sourceRect"
-          : index === 1
-            ? "$context.targetRect"
-            : `$context.obstacles[${index - 2}]`,
-      ),
+          path: `$context.obstacles[${index}]`,
+        }))
+      : [
+          { rect: sourceRect, path: "$context.sourceRect" },
+          ...(targetRect.id === sourceRect.id
+            ? []
+            : [{ rect: targetRect, path: "$context.targetRect" }]),
+          ...contextObstacles.map((rect, index) => ({
+            rect,
+            path: `$context.obstacles[${index}]`,
+          })),
+        ];
+    let endpointHalosOverlap = false;
+    if (!exactFoundationRoute) {
+      const sourceHalo = inflateBounds(
+        rectToUnitBounds(sourceRect, "$context.sourceRect"),
+        "$context.sourceRect",
+      );
+      const targetHalo =
+        targetRect.id === sourceRect.id
+          ? sourceHalo
+          : inflateBounds(
+              rectToUnitBounds(targetRect, "$context.targetRect"),
+              "$context.targetRect",
+            );
+      endpointHalosOverlap =
+        sourceHalo.left <= targetHalo.right &&
+        sourceHalo.right >= targetHalo.left &&
+        sourceHalo.top <= targetHalo.bottom &&
+        sourceHalo.bottom >= targetHalo.top;
+    } else if (contextObstacles.length > 0) {
+      inflateBounds(
+        rectToUnitBounds(sourceRect, "$context.sourceRect"),
+        "$context.sourceRect",
+      );
+      if (targetRect.id !== sourceRect.id) {
+        inflateBounds(
+          rectToUnitBounds(targetRect, "$context.targetRect"),
+          "$context.targetRect",
+        );
+      }
+    }
+    const blockers = blockerEntries.map(({ rect, path }) =>
+      inflateBounds(rectToUnitBounds(rect, path), path),
     );
     const unitPoints = points.map((point, index) =>
       pointToUnits(point, `$.points[${index}]`),
@@ -2109,7 +2145,10 @@ export function validateOrthogonalRoute(route, context = {}) {
       pointToUnits(point, `$.points[${index}]`),
     );
     const canonicalPoints = collapseCollinearPoints(unitPoints);
-    if (canonicalPoints.length !== unitPoints.length) {
+    if (
+      canonicalPoints.length !== unitPoints.length &&
+      !exactFoundationRoute
+    ) {
       fail(
         "E_WORKFLOW_ROUTE",
         "$.points",
@@ -2137,7 +2176,11 @@ export function validateOrthogonalRoute(route, context = {}) {
       fail("E_WORKFLOW_ROUTE", "$", "route anchor pair cannot be ranked");
     }
     const expectedCost = fromBigIntThousandths(
-      routeCostUnits(canonicalPoints, preferenceRank, interactionRoutes.segments),
+      routeCostUnits(
+        exactFoundationRoute ? unitPoints : canonicalPoints,
+        preferenceRank,
+        interactionRoutes.segments,
+      ),
       "$.cost",
     );
     if (cost !== expectedCost) {

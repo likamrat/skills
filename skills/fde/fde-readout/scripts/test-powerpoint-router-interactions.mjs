@@ -437,6 +437,31 @@ function interactions(route, existingRoutes) {
 }
 
 {
+  const source = rect("near-source", -40, 0, 20, 20);
+  const target = rect("near-target", 0, 5, 20, 20);
+  const route = routeOrthogonalEdge(routeInput(source, target));
+  validate(route, source, target, [], []);
+  validate(
+    route,
+    source,
+    target,
+    [rect("distant-obstacle", 1000, 1000)],
+    [],
+  );
+  const reused = routeOrthogonalEdge(
+    routeInput(source, target, [], [route]),
+  );
+  validate(reused, source, target, [], [route]);
+  check(
+    stableRouteJson(reused) ===
+      stableRouteJson(
+        routeOrthogonalEdge(routeInput(source, target, [], [route])),
+      ),
+    "near-endpoint foundation reuse is deterministic",
+  );
+}
+
+{
   const source = rect("outer", 0, 0, 100, 100);
   const target = rect("inner", 30, 30, 20, 20);
   const farObstacle = rect("far-obstacle", 180, 180, 10, 10);
@@ -476,6 +501,25 @@ function interactions(route, existingRoutes) {
   };
   assertThrows("distant target is not a first-leg exemption", "E_WORKFLOW_ROUTE", () =>
     validateOrthogonalRoute(invalid, { sourceRect: source, targetRect: target, obstacles: [] }),
+  );
+}
+
+{
+  const source = rect("same", 0, 0);
+  const target = rect("same", 100, 0);
+  const distinctRoute = routeOrthogonalEdge(
+    routeInput({ ...source, id: "source" }, { ...target, id: "target" }),
+  );
+  const mismatchedSelfRoute = {
+    ...distinctRoute,
+    sourceId: "same",
+    targetId: "same",
+  };
+  assertThrows("mismatched self-edge rectangles", "E_ROUTER_INPUT", () =>
+    validateOrthogonalRoute(mismatchedSelfRoute, {
+      sourceRect: source,
+      targetRect: target,
+    }),
   );
 }
 
