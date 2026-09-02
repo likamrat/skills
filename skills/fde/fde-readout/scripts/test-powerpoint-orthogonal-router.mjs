@@ -169,6 +169,16 @@ function preferredPair(source, target) {
 
 {
   const source = rect("s", 0, 0, 20, 20);
+  const target = rect("t", -61.308, -61.308, 20, 20);
+  const pair = preferredPair(source, target);
+  check(
+    pair.sourceSide === "left" && pair.targetSide === "right",
+    "quantized negative diagonal (-61.308, -61.308) resolves horizontal-first",
+  );
+}
+
+{
+  const source = rect("s", 0, 0, 20, 20);
   const target = rect("t", 100, 40, 20, 20);
   const pairs = preferredAnchorPairs(source, target);
   check(pairs.length === 16, "preferredAnchorPairs returns all 16 side combinations");
@@ -245,43 +255,171 @@ function comparePts(a, b) {
   return 0;
 }
 
+const REF_THOUSAND = 1000;
+const REF_MAX_COORDINATE = Number.MAX_SAFE_INTEGER / REF_THOUSAND;
+
+function referenceRound3(value) {
+  if (!Number.isFinite(value)) throw new Error("reference input must be finite");
+  if (Math.abs(value) > REF_MAX_COORDINATE) return Object.is(value, -0) ? 0 : value;
+  const rounded = Math.round(value * REF_THOUSAND) / REF_THOUSAND;
+  if (!Number.isFinite(rounded)) throw new Error("reference rounded value must be finite");
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
+function referenceUnits(value) {
+  const rounded = referenceRound3(value);
+  if (Math.abs(rounded) > REF_MAX_COORDINATE) {
+    throw new Error("reference value exceeds safe integer thousandths");
+  }
+  const units = Math.round(rounded * REF_THOUSAND);
+  if (!Number.isSafeInteger(units)) throw new Error("reference thousandths must be safe");
+  return units;
+}
+
+function referenceAnchors(rectangle) {
+  const centerX = referenceRound3(rectangle.x + rectangle.w / 2);
+  const centerY = referenceRound3(rectangle.y + rectangle.h / 2);
+  return {
+    left: { x: referenceRound3(rectangle.x), y: centerY },
+    right: { x: referenceRound3(rectangle.x + rectangle.w), y: centerY },
+    top: { x: centerX, y: referenceRound3(rectangle.y) },
+    bottom: { x: centerX, y: referenceRound3(rectangle.y + rectangle.h) },
+  };
+}
+
+function referencePairs(source, target) {
+  const sourceAnchors = referenceAnchors(source);
+  const targetAnchors = referenceAnchors(target);
+  const dx = referenceUnits(
+    target.x + target.w / 2 - (source.x + source.w / 2),
+  );
+  const dy = referenceUnits(
+    target.y + target.h / 2 - (source.y + source.h / 2),
+  );
+  const preferred =
+    Math.abs(dx) >= Math.abs(dy)
+      ? dx >= 0
+        ? { sourceSide: "right", targetSide: "left" }
+        : { sourceSide: "left", targetSide: "right" }
+      : dy >= 0
+        ? { sourceSide: "bottom", targetSide: "top" }
+        : { sourceSide: "top", targetSide: "bottom" };
+  const clockwise = ["top", "right", "bottom", "left"];
+  const pairs = [];
+  for (const sourceSide of clockwise) {
+    for (const targetSide of clockwise) pairs.push({ sourceSide, targetSide });
+  }
+  const preferredIndex = pairs.findIndex(
+    (pair) =>
+      pair.sourceSide === preferred.sourceSide &&
+      pair.targetSide === preferred.targetSide,
+  );
+  pairs.unshift(...pairs.splice(preferredIndex, 1));
+  return pairs.map((pair, preferenceRank) => ({
+    ...pair,
+    preferenceRank,
+    sourceAnchor: sourceAnchors[pair.sourceSide],
+    targetAnchor: targetAnchors[pair.targetSide],
+  }));
+}
+
+function collapseReferencePoints(points) {
+  return points.filter(
+    (point, index) =>
+      index === 0 ||
+      point.x !== points[index - 1].x ||
+      point.y !== points[index - 1].y,
+  );
+}
+
+function referenceCandidates(pair, withOffsets) {
+  const s = {
+    x: referenceUnits(pair.sourceAnchor.x),
+    y: referenceUnits(pair.sourceAnchor.y),
+  };
+  const t = {
+    x: referenceUnits(pair.targetAnchor.x),
+    y: referenceUnits(pair.targetAnchor.y),
+  };
+  const dx = t.x - s.x;
+  const dy = t.y - s.y;
+  if (dx === 0 && dy === 0) return [];
+  const exitNormal = normalFor(pair.sourceSide);
+  const targetNormal = normalFor(pair.targetSide);
+  const entryNormal = { x: -targetNormal.x, y: -targetNormal.y };
+  const candidates = [];
+  if (!withOffsets && (dx === 0 || dy === 0)) {
+    if (vecEq(dirOf(s, t), exitNormal) && vecEq(dirOf(s, t), entryNormal)) {
+      candidates.push([s, t]);
+    }
+    return candidates;
+  }
+  if (!withOffsets) {
+    for (const bend of [{ x: t.x, y: s.y }, { x: s.x, y: t.y }]) {
+      if (
+        vecEq(dirOf(s, bend), exitNormal) &&
+        vecEq(dirOf(bend, t), entryNormal)
+      ) {
+        candidates.push([s, bend, t]);
+      }
+    }
+    return candidates;
+  }
+  const egress = { x: s.x + exitNormal.x, y: s.y + exitNormal.y };
+  const ingress = { x: t.x + targetNormal.x, y: t.y + targetNormal.y };
+  for (const middle of [
+    { x: ingress.x, y: egress.y },
+    { x: egress.x, y: ingress.y },
+  ]) {
+    const points = collapseReferencePoints([s, egress, middle, ingress, t]);
+    if (
+      vecEq(dirOf(points[0], points[1]), exitNormal) &&
+      vecEq(dirOf(points.at(-2), points.at(-1)), entryNormal)
+    ) {
+      candidates.push(points);
+    }
+  }
+  return candidates;
+}
+
 // Independent reference implementation used to cross-check the module's
 // optimal-route selection without reusing its internal code paths.
 function referenceRoute(source, target) {
-  const pairs = preferredAnchorPairs(source, target);
+  const pairs = referencePairs(source, target);
   let best = null;
-  for (const pair of pairs) {
-    const s = pair.sourceAnchor;
-    const t = pair.targetAnchor;
-    const dx = t.x - s.x;
-    const dy = t.y - s.y;
-    if (dx === 0 && dy === 0) continue;
-    const exitNormal = normalFor(pair.sourceSide);
-    const entryNormal = { x: -normalFor(pair.targetSide).x, y: -normalFor(pair.targetSide).y };
-    const candidates = [];
-    if (dx === 0 || dy === 0) {
-      const direction = dirOf(s, t);
-      if (vecEq(direction, exitNormal) && vecEq(direction, entryNormal)) candidates.push([s, t]);
-    } else {
-      const bendHV = { x: t.x, y: s.y };
-      if (vecEq(dirOf(s, bendHV), exitNormal) && vecEq(dirOf(bendHV, t), entryNormal)) {
-        candidates.push([s, bendHV, t]);
-      }
-      const bendVH = { x: s.x, y: t.y };
-      if (vecEq(dirOf(s, bendVH), exitNormal) && vecEq(dirOf(bendVH, t), entryNormal)) {
-        candidates.push([s, bendVH, t]);
-      }
-    }
-    for (const points of candidates) {
-      const bendCount = points.length - 2;
-      const manhattan = Math.abs(dx) + Math.abs(dy);
-      const cost = manhattan + bendCount * 18 + pair.preferenceRank * 20;
-      if (!best || cost < best.cost || (cost === best.cost && comparePts(points, best.points) < 0)) {
-        best = { pair, points, cost };
+  for (const withOffsets of [false, true]) {
+    for (const pair of pairs) {
+      for (const points of referenceCandidates(pair, withOffsets)) {
+        const bendCount = points.length - 2;
+        let manhattan = 0;
+        for (let index = 1; index < points.length; index += 1) {
+          manhattan += Math.abs(points[index].x - points[index - 1].x);
+          manhattan += Math.abs(points[index].y - points[index - 1].y);
+        }
+        const costUnits =
+          manhattan +
+          bendCount * 18 * REF_THOUSAND +
+          pair.preferenceRank * 20 * REF_THOUSAND;
+        if (
+          !best ||
+          costUnits < best.costUnits ||
+          (costUnits === best.costUnits && comparePts(points, best.points) < 0)
+        ) {
+          best = { pair, points, costUnits };
+        }
       }
     }
+    if (best) break;
   }
-  return best;
+  if (!best) return null;
+  return {
+    pair: best.pair,
+    points: best.points.map((point) => ({
+      x: point.x / REF_THOUSAND,
+      y: point.y / REF_THOUSAND,
+    })),
+    cost: best.costUnits / REF_THOUSAND,
+  };
 }
 
 function checkReferenceMatch(label, source, target) {
@@ -342,6 +480,19 @@ checkReferenceMatch("upper-left quadrant", rect("s", 200, 150, 40, 20), rect("t"
   );
 }
 
+{
+  const source = rect("s", 0, 0, 40, 40);
+  const target = rect("t", 407.786, 407.786, 40, 40);
+  const reference = referenceRoute(source, target);
+  const route = routeOrthogonalEdge(routeInput(source, target));
+  check(reference.cost === 893.572, "reference equal-candidate regression cost is exactly 893.572");
+  check(route.cost === 893.572, "router exposes the selected integer-thousandth cost as 893.572");
+  check(
+    JSON.stringify(route.points) === JSON.stringify(reference.points),
+    "893.572 exact-cost tie uses the reference lexicographic point sequence",
+  );
+}
+
 function mulberry32(seed) {
   let state = seed;
   return function next() {
@@ -373,6 +524,7 @@ function mulberry32(seed) {
       10 + Math.round(random() * 90),
     );
     const reference = referenceRoute(sourceRect, targetRect);
+    check(reference !== null, `fuzz ${i}: independent reference finds a route`);
     if (!reference) continue;
     const before = clone(routeInput(sourceRect, targetRect));
     const route = routeOrthogonalEdge(routeInput(sourceRect, targetRect));
@@ -397,7 +549,7 @@ function mulberry32(seed) {
       `fuzz ${i}: routing must not mutate input rects`,
     );
   }
-  check(checkedRoutes > 300, "fuzz sweep exercises several hundred successful routes");
+  check(checkedRoutes === iterations, "fuzz sweep cross-checks all 400 seeded cases");
 }
 
 // ---------------------------------------------------------------------------
@@ -414,6 +566,25 @@ function mulberry32(seed) {
     check(!Object.is(point.x, -0) && !Object.is(point.y, -0), "route points normalize -0 to 0");
   }
 }
+
+{
+  for (const x of [1e306, Number.MAX_VALUE]) {
+    const anchors = nodeAnchors(rect(`huge-${x}`, x, 0, 1, 1));
+    check(
+      anchors.every((anchor) => Number.isFinite(anchor.x) && Number.isFinite(anchor.y)),
+      `overflow-safe anchor quantization remains finite for x=${x}`,
+    );
+  }
+}
+
+assertThrows("unsafe integer-thousandth route coordinates fail closed", "E_ROUTER_NONFINITE", () =>
+  routeOrthogonalEdge(
+    routeInput(rect("s", 1e13, 0, 20, 20), rect("t", 1e13 + 100, 0, 20, 20)),
+  ),
+);
+assertThrows("overflowing anchor arithmetic is deterministic", "E_ROUTER_NONFINITE", () =>
+  nodeAnchors(rect("overflow", Number.MAX_VALUE, 0, Number.MAX_VALUE, 1)),
+);
 
 // ---------------------------------------------------------------------------
 // Determinism and stable JSON
@@ -487,6 +658,54 @@ assertThrows("snapshotGeometry rejects non-finite numbers", "E_ROUTER_NONFINITE"
 });
 assertThrows("snapshotGeometry rejects null values", "E_ROUTER_INPUT", () => {
   snapshotGeometry({ id: null });
+});
+assertThrows("snapshotGeometry wraps ownKeys proxy errors", "E_ROUTER_INPUT", () => {
+  snapshotGeometry(new Proxy({}, { ownKeys: () => { throw new Error("ownKeys leak"); } }));
+});
+assertThrows("snapshotGeometry normalizes proxy-thrown RouterError", "E_ROUTER_INPUT", () => {
+  snapshotGeometry(
+    new Proxy(
+      {},
+      { ownKeys: () => { throw new RouterError("E_ROUTER_NONFINITE", "$.spoof", "spoof"); } },
+    ),
+  );
+});
+assertThrows("snapshotGeometry wraps getPrototypeOf proxy errors", "E_ROUTER_INPUT", () => {
+  snapshotGeometry(new Proxy({}, { getPrototypeOf: () => { throw new Error("prototype leak"); } }));
+});
+assertThrows("snapshotGeometry wraps descriptor proxy errors", "E_ROUTER_INPUT", () => {
+  snapshotGeometry(
+    new Proxy(
+      { value: 1 },
+      { getOwnPropertyDescriptor: () => { throw new Error("descriptor leak"); } },
+    ),
+  );
+});
+assertThrows("snapshotGeometry wraps descriptor value access errors", "E_ROUTER_INPUT", () => {
+  snapshotGeometry(
+    new Proxy(
+      { value: 1 },
+      {
+        getOwnPropertyDescriptor() {
+          return new Proxy(
+            { value: 1, writable: true, enumerable: true, configurable: true },
+            { get: () => { throw new Error("value leak"); } },
+          );
+        },
+      },
+    ),
+  );
+});
+assertThrows("snapshotGeometry rejects self cycles", "E_ROUTER_INPUT", () => {
+  const value = {};
+  value.self = value;
+  snapshotGeometry(value);
+});
+assertThrows("snapshotGeometry rejects mutual cycles", "E_ROUTER_INPUT", () => {
+  const left = {};
+  const right = { left };
+  left.right = right;
+  snapshotGeometry(left);
 });
 
 {
@@ -613,6 +832,39 @@ assertRouteThrows("bad segment index", "E_WORKFLOW_ROUTE", (route) => {
 assertRouteThrows("mismatched sourceId", "E_WORKFLOW_ROUTE", (route) => {
   route.sourceId = "not-a";
 });
+
+{
+  const sourceRect = rect("a", 100, 0, 40, 20);
+  const targetRect = rect("b", 0, 0, 40, 20);
+  const route = routeOrthogonalEdge(routeInput(sourceRect, targetRect));
+  route.points.splice(1, 0, { x: 120, y: 10 });
+  route.segments = [
+    { x1: 100, y1: 10, x2: 120, y2: 10, index: 0 },
+    { x1: 120, y1: 10, x2: 40, y2: 10, index: 1 },
+  ];
+  assertThrows("source-left route cannot travel right through source", "E_WORKFLOW_ROUTE", () =>
+    validateOrthogonalRoute(route, { sourceRect, targetRect }),
+  );
+}
+
+{
+  const sourceRect = rect("same-place-source", 0, 0, 40, 20);
+  const targetRect = rect("same-place-target", 0, 0, 40, 20);
+  const route = routeOrthogonalEdge(routeInput(sourceRect, targetRect));
+  check(route.points.length >= 4, "coincident geometry receives deterministic egress and ingress points");
+  check(
+    vecEq(dirOf(route.points[0], route.points[1]), normalFor(route.fromSide)),
+    "generated fallback route exits on the outward source normal",
+  );
+  check(
+    vecEq(
+      dirOf(route.points.at(-2), route.points.at(-1)),
+      { x: -normalFor(route.toSide).x, y: -normalFor(route.toSide).y },
+    ),
+    "generated fallback route approaches on the inward target normal",
+  );
+  validateOrthogonalRoute(route, { sourceRect, targetRect });
+}
 
 {
   const { route, context } = baseRouteAndContext();

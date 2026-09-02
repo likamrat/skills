@@ -20,6 +20,9 @@ const NORMALS = {
 };
 const BEND_COST = 18;
 const PREFERENCE_COST = 20;
+const THOUSAND = 1000;
+const BEND_COST_UNITS = BEND_COST * THOUSAND;
+const PREFERENCE_COST_UNITS = PREFERENCE_COST * THOUSAND;
 
 export class RouterError extends Error {
   constructor(code, path, message) {
@@ -34,9 +37,43 @@ function fail(code, path, message) {
   throw new RouterError(code, path, message);
 }
 
-function round3(value) {
-  const rounded = Math.round(value * 1000) / 1000;
+function round3(value, path = "$") {
+  if (!Number.isFinite(value)) {
+    fail("E_ROUTER_NONFINITE", path, "number must be finite");
+  }
+  // Above this threshold every representable number is already coarser than
+  // one thousandth, and multiplying by 1000 could overflow.
+  if (Math.abs(value) > Number.MAX_SAFE_INTEGER / THOUSAND) {
+    return Object.is(value, -0) ? 0 : value;
+  }
+  const rounded = Math.round(value * THOUSAND) / THOUSAND;
+  if (!Number.isFinite(rounded)) {
+    fail("E_ROUTER_NONFINITE", path, "rounded number must be finite");
+  }
   return Object.is(rounded, -0) ? 0 : rounded;
+}
+
+function toThousandths(value, path) {
+  const rounded = round3(value, path);
+  if (Math.abs(rounded) > Number.MAX_SAFE_INTEGER / THOUSAND) {
+    fail("E_ROUTER_NONFINITE", path, "number exceeds the safe integer-thousandth range");
+  }
+  const units = Math.round(rounded * THOUSAND);
+  if (!Number.isSafeInteger(units)) {
+    fail("E_ROUTER_NONFINITE", path, "number cannot be represented as safe integer thousandths");
+  }
+  return Object.is(units, -0) ? 0 : units;
+}
+
+function fromThousandths(units, path = "$") {
+  if (!Number.isSafeInteger(units)) {
+    fail("E_ROUTER_NONFINITE", path, "integer-thousandth value is unsafe");
+  }
+  const value = units / THOUSAND;
+  if (!Number.isFinite(value)) {
+    fail("E_ROUTER_NONFINITE", path, "integer-thousandth value is nonfinite");
+  }
+  return Object.is(value, -0) ? 0 : value;
 }
 
 function isPlainObject(value) {
@@ -49,8 +86,8 @@ function descriptorFor(value, key, path) {
   let descriptor;
   try {
     descriptor = Object.getOwnPropertyDescriptor(value, key);
-  } catch (error) {
-    fail("E_ROUTER_INPUT", path, `property inspection failed: ${error.message}`);
+  } catch {
+    fail("E_ROUTER_INPUT", path, "property inspection failed");
   }
   if (
     !descriptor ||
@@ -75,7 +112,16 @@ function descriptorFor(value, key, path) {
  * caller cannot observe further mutation of, or accessor/proxy tricks on,
  * the original input.
  */
-export function snapshotGeometry(value, path = "$") {
+function snapshotGeometryAt(value, path, active) {
+  try {
+    return snapshotGeometryValue(value, path, active);
+  } catch (error) {
+    if (error instanceof RouterError) throw error;
+    fail("E_ROUTER_INPUT", path, "property inspection failed");
+  }
+}
+
+function snapshotGeometryValue(value, path, active) {
   if (value === null) fail("E_ROUTER_INPUT", path, "null is not allowed");
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
@@ -88,63 +134,81 @@ export function snapshotGeometry(value, path = "$") {
     fail("E_ROUTER_INPUT", path, "value must be plain JSON data");
   }
 
-  let prototype;
-  let keys;
+  if (active.has(value)) {
+    fail("E_ROUTER_INPUT", path, "cyclic references are not allowed");
+  }
+  active.add(value);
   try {
-    prototype = Object.getPrototypeOf(value);
-    keys = Reflect.ownKeys(value);
-  } catch (error) {
-    fail("E_ROUTER_INPUT", path, `property inspection failed: ${error.message}`);
-  }
-  if (keys.some((key) => typeof key === "symbol")) {
-    fail("E_ROUTER_INPUT", path, "symbol properties are not allowed");
-  }
+    let prototype;
+    let keys;
+    try {
+      prototype = Object.getPrototypeOf(value);
+      keys = Reflect.ownKeys(value);
+    } catch {
+      fail("E_ROUTER_INPUT", path, "property inspection failed");
+    }
+    if (keys.some((key) => typeof key === "symbol")) {
+      fail("E_ROUTER_INPUT", path, "symbol properties are not allowed");
+    }
 
-  if (Array.isArray(value)) {
-    if (prototype !== Array.prototype) {
-      fail("E_ROUTER_INPUT", path, "array prototype must be Array.prototype");
+    if (Array.isArray(value)) {
+      if (prototype !== Array.prototype) {
+        fail("E_ROUTER_INPUT", path, "array prototype must be Array.prototype");
+      }
+      let lengthDescriptor;
+      try {
+        lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+      } catch {
+        fail("E_ROUTER_INPUT", `${path}.length`, "property inspection failed");
+      }
+      if (
+        !lengthDescriptor ||
+        !Object.hasOwn(lengthDescriptor, "value") ||
+        lengthDescriptor.writable !== true
+      ) {
+        fail("E_ROUTER_INPUT", `${path}.length`, "array length descriptor is invalid");
+      }
+      const length = lengthDescriptor.value;
+      if (!Number.isSafeInteger(length) || length < 0) {
+        fail("E_ROUTER_INPUT", `${path}.length`, "array length descriptor is invalid");
+      }
+      const indexKeys = keys.filter((key) => key !== "length");
+      if (
+        indexKeys.length !== length ||
+        indexKeys.some((key, index) => key !== String(index))
+      ) {
+        fail("E_ROUTER_INPUT", path, "array must contain only dense owned indexes");
+      }
+      const snapshot = new Array(length);
+      for (let index = 0; index < length; index += 1) {
+        const descriptor = descriptorFor(value, String(index), `${path}[${index}]`);
+        snapshot[index] = snapshotGeometryAt(descriptor.value, `${path}[${index}]`, active);
+      }
+      return snapshot;
     }
-    const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
-    const length = lengthDescriptor?.value;
-    if (
-      !lengthDescriptor ||
-      !Object.hasOwn(lengthDescriptor, "value") ||
-      !Number.isSafeInteger(length) ||
-      length < 0 ||
-      lengthDescriptor.writable !== true
-    ) {
-      fail("E_ROUTER_INPUT", `${path}.length`, "array length descriptor is invalid");
+
+    if (prototype !== Object.prototype && prototype !== null) {
+      fail("E_ROUTER_INPUT", path, "object prototype must be Object.prototype or null");
     }
-    const indexKeys = keys.filter((key) => key !== "length");
-    if (
-      indexKeys.length !== length ||
-      indexKeys.some((key, index) => key !== String(index))
-    ) {
-      fail("E_ROUTER_INPUT", path, "array must contain only dense owned indexes");
-    }
-    const snapshot = new Array(length);
-    for (let index = 0; index < length; index += 1) {
-      const descriptor = descriptorFor(value, String(index), `${path}[${index}]`);
-      snapshot[index] = snapshotGeometry(descriptor.value, `${path}[${index}]`);
+    const snapshot =
+      prototype === null ? Object.create(null) : Object.create(Object.prototype);
+    for (const key of keys) {
+      const descriptor = descriptorFor(value, key, `${path}.${key}`);
+      Object.defineProperty(snapshot, key, {
+        value: snapshotGeometryAt(descriptor.value, `${path}.${key}`, active),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
     return snapshot;
+  } finally {
+    active.delete(value);
   }
+}
 
-  if (prototype !== Object.prototype && prototype !== null) {
-    fail("E_ROUTER_INPUT", path, "object prototype must be Object.prototype or null");
-  }
-  const snapshot =
-    prototype === null ? Object.create(null) : Object.create(Object.prototype);
-  for (const key of keys) {
-    const descriptor = descriptorFor(value, key, `${path}.${key}`);
-    Object.defineProperty(snapshot, key, {
-      value: snapshotGeometry(descriptor.value, `${path}.${key}`),
-      enumerable: true,
-      writable: true,
-      configurable: true,
-    });
-  }
-  return snapshot;
+export function snapshotGeometry(value, path = "$") {
+  return snapshotGeometryAt(value, path, new WeakSet());
 }
 
 function exactKeys(value, expected, path) {
@@ -219,8 +283,8 @@ export function nodeAnchors(rect) {
 function dominantPreferredSides(source, target) {
   const sourceCenter = { x: source.x + source.w / 2, y: source.y + source.h / 2 };
   const targetCenter = { x: target.x + target.w / 2, y: target.y + target.h / 2 };
-  const dx = targetCenter.x - sourceCenter.x;
-  const dy = targetCenter.y - sourceCenter.y;
+  const dx = toThousandths(targetCenter.x - sourceCenter.x, "$.center.dx");
+  const dy = toThousandths(targetCenter.y - sourceCenter.y, "$.center.dy");
   const horizontalDominant = Math.abs(dx) >= Math.abs(dy);
   if (horizontalDominant) {
     return dx >= 0
@@ -291,37 +355,69 @@ function pointsEqual(a, b) {
   return a.x === b.x && a.y === b.y;
 }
 
-function candidateRoutes(sourceAnchor, targetAnchor, sourceSide, targetSide) {
-  const dx = targetAnchor.x - sourceAnchor.x;
-  const dy = targetAnchor.y - sourceAnchor.y;
+function pointToUnits(point, path) {
+  return {
+    x: toThousandths(point.x, `${path}.x`),
+    y: toThousandths(point.y, `${path}.y`),
+  };
+}
+
+function candidateRoutes(sourceAnchor, targetAnchor, sourceSide, targetSide, withOffsets) {
+  const source = pointToUnits(sourceAnchor, "$.sourceAnchor");
+  const target = pointToUnits(targetAnchor, "$.targetAnchor");
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
   if (dx === 0 && dy === 0) return [];
 
   const exitNormal = NORMALS[sourceSide];
   const entryNormal = negate(NORMALS[targetSide]);
   const candidates = [];
 
-  if (dx === 0 || dy === 0) {
-    const direction = segmentDirection(sourceAnchor, targetAnchor);
+  if (!withOffsets && (dx === 0 || dy === 0)) {
+    const direction = segmentDirection(source, target);
     if (sameVector(direction, exitNormal) && sameVector(direction, entryNormal)) {
-      candidates.push([sourceAnchor, targetAnchor]);
+      candidates.push([source, target]);
     }
     return candidates;
   }
 
-  const bendHV = { x: targetAnchor.x, y: sourceAnchor.y };
-  const firstHV = segmentDirection(sourceAnchor, bendHV);
-  const secondHV = segmentDirection(bendHV, targetAnchor);
-  if (sameVector(firstHV, exitNormal) && sameVector(secondHV, entryNormal)) {
-    candidates.push([sourceAnchor, bendHV, targetAnchor]);
+  if (!withOffsets) {
+    const bendHV = { x: target.x, y: source.y };
+    const firstHV = segmentDirection(source, bendHV);
+    const secondHV = segmentDirection(bendHV, target);
+    if (sameVector(firstHV, exitNormal) && sameVector(secondHV, entryNormal)) {
+      candidates.push([source, bendHV, target]);
+    }
+
+    const bendVH = { x: source.x, y: target.y };
+    const firstVH = segmentDirection(source, bendVH);
+    const secondVH = segmentDirection(bendVH, target);
+    if (sameVector(firstVH, exitNormal) && sameVector(secondVH, entryNormal)) {
+      candidates.push([source, bendVH, target]);
+    }
+    return candidates;
   }
 
-  const bendVH = { x: sourceAnchor.x, y: targetAnchor.y };
-  const firstVH = segmentDirection(sourceAnchor, bendVH);
-  const secondVH = segmentDirection(bendVH, targetAnchor);
-  if (sameVector(firstVH, exitNormal) && sameVector(secondVH, entryNormal)) {
-    candidates.push([sourceAnchor, bendVH, targetAnchor]);
+  const egress = { x: source.x + exitNormal.x, y: source.y + exitNormal.y };
+  const ingress = {
+    x: target.x + NORMALS[targetSide].x,
+    y: target.y + NORMALS[targetSide].y,
+  };
+  const middleHV = { x: ingress.x, y: egress.y };
+  const middleVH = { x: egress.x, y: ingress.y };
+  for (const raw of [
+    [source, egress, middleHV, ingress, target],
+    [source, egress, middleVH, ingress, target],
+  ]) {
+    const points = collapsePoints(raw);
+    if (
+      points.length >= 2 &&
+      sameVector(segmentDirection(points[0], points[1]), exitNormal) &&
+      sameVector(segmentDirection(points.at(-2), points.at(-1)), entryNormal)
+    ) {
+      candidates.push(points);
+    }
   }
-
   return candidates;
 }
 
@@ -334,11 +430,24 @@ function collapsePoints(points) {
   return collapsed;
 }
 
-function manhattanLength(points) {
+function safeAdd(total, value, path) {
+  const result = total + value;
+  if (!Number.isSafeInteger(result)) {
+    fail("E_ROUTER_NONFINITE", path, "route cost exceeds the safe integer-thousandth range");
+  }
+  return result;
+}
+
+function manhattanLengthUnits(points) {
   let total = 0;
   for (let index = 1; index < points.length; index += 1) {
-    total += Math.abs(points[index].x - points[index - 1].x);
-    total += Math.abs(points[index].y - points[index - 1].y);
+    const dx = Math.abs(points[index].x - points[index - 1].x);
+    const dy = Math.abs(points[index].y - points[index - 1].y);
+    if (!Number.isSafeInteger(dx) || !Number.isSafeInteger(dy)) {
+      fail("E_ROUTER_NONFINITE", "$.cost", "route length exceeds the safe integer-thousandth range");
+    }
+    total = safeAdd(total, dx, "$.cost");
+    total = safeAdd(total, dy, "$.cost");
   }
   return total;
 }
@@ -360,10 +469,10 @@ function buildSegments(points) {
   const segments = [];
   for (let index = 0; index < points.length - 1; index += 1) {
     segments.push({
-      x1: round3(points[index].x),
-      y1: round3(points[index].y),
-      x2: round3(points[index + 1].x),
-      y2: round3(points[index + 1].y),
+      x1: points[index].x,
+      y1: points[index].y,
+      x2: points[index + 1].x,
+      y2: points[index + 1].y,
       index,
     });
   }
@@ -407,30 +516,38 @@ export function routeOrthogonalEdge(input) {
 
   const pairs = preferredAnchorPairs(source, target);
   let best = null;
-  for (const pair of pairs) {
-    const candidates = candidateRoutes(
-      pair.sourceAnchor,
-      pair.targetAnchor,
-      pair.sourceSide,
-      pair.targetSide,
-    );
-    for (const rawPoints of candidates) {
-      const points = collapsePoints(rawPoints);
-      if (points.length < 2) continue;
-      const bendCount = points.length - 2;
-      const cost =
-        manhattanLength(points) + bendCount * BEND_COST + pair.preferenceRank * PREFERENCE_COST;
-      const candidate = { pair, points, cost };
-      if (!best) {
-        best = candidate;
-        continue;
-      }
-      if (candidate.cost < best.cost) {
-        best = candidate;
-      } else if (candidate.cost === best.cost) {
-        if (comparePointSequences(candidate.points, best.points) < 0) best = candidate;
+  for (const withOffsets of [false, true]) {
+    for (const pair of pairs) {
+      const candidates = candidateRoutes(
+        pair.sourceAnchor,
+        pair.targetAnchor,
+        pair.sourceSide,
+        pair.targetSide,
+        withOffsets,
+      );
+      for (const rawPoints of candidates) {
+        const points = collapsePoints(rawPoints);
+        if (points.length < 2) continue;
+        const bendCount = points.length - 2;
+        let costUnits = manhattanLengthUnits(points);
+        costUnits = safeAdd(costUnits, bendCount * BEND_COST_UNITS, "$.cost");
+        costUnits = safeAdd(
+          costUnits,
+          pair.preferenceRank * PREFERENCE_COST_UNITS,
+          "$.cost",
+        );
+        const candidate = { pair, points, costUnits };
+        if (
+          !best ||
+          candidate.costUnits < best.costUnits ||
+          (candidate.costUnits === best.costUnits &&
+            comparePointSequences(candidate.points, best.points) < 0)
+        ) {
+          best = candidate;
+        }
       }
     }
+    if (best) break;
   }
 
   if (!best) {
@@ -441,7 +558,10 @@ export function routeOrthogonalEdge(input) {
     );
   }
 
-  const points = best.points.map((point) => ({ x: round3(point.x), y: round3(point.y) }));
+  const points = best.points.map((point, index) => ({
+    x: fromThousandths(point.x, `$.points[${index}].x`),
+    y: fromThousandths(point.y, `$.points[${index}].y`),
+  }));
   const segments = buildSegments(points);
   return {
     sourceId: source.id,
@@ -450,7 +570,7 @@ export function routeOrthogonalEdge(input) {
     toSide: best.pair.targetSide,
     points,
     segments,
-    cost: round3(best.cost),
+    cost: fromThousandths(best.costUnits, "$.cost"),
   };
 }
 
@@ -537,6 +657,22 @@ export function validateOrthogonalRoute(route, context = {}) {
     const path = `$.segments[${index}]`;
     if (segment.index !== index) {
       fail("E_WORKFLOW_ROUTE", `${path}.index`, "segment index must match its position");
+    }
+
+    if (!sameVector(segmentDirection(points[0], points[1]), NORMALS[fromSide])) {
+      fail("E_WORKFLOW_ROUTE", "$.segments[0]", "first segment must follow the outward source normal");
+    }
+    if (
+      !sameVector(
+        segmentDirection(points.at(-2), points.at(-1)),
+        negate(NORMALS[toSide]),
+      )
+    ) {
+      fail(
+        "E_WORKFLOW_ROUTE",
+        `$.segments[${segments.length - 1}]`,
+        "final segment must follow the inward target normal",
+      );
     }
     const point = points[index];
     const nextPoint = points[index + 1];
