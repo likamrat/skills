@@ -18,6 +18,7 @@ param(
         'text',
         'shape',
         'line',
+        'table',
         'activation',
         'hwnd',
         'process-acquired',
@@ -551,6 +552,1162 @@ function Add-LinePrimitive {
     }
 }
 
+function Get-FiniteTableNumber {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    $numericTypes = @(
+        [byte],
+        [sbyte],
+        [int16],
+        [uint16],
+        [int32],
+        [uint32],
+        [int64],
+        [uint64],
+        [single],
+        [double],
+        [decimal]
+    )
+    if ($null -eq $Value -or $Value.GetType() -notin $numericTypes) {
+        throw "$Label must be a number."
+    }
+    $number = [double]$Value
+    if ([double]::IsNaN($number) -or [double]::IsInfinity($number)) {
+        throw "$Label must be finite."
+    }
+    return $number
+}
+
+function Assert-TablePrimitiveSpec {
+    param(
+        [Parameter(Mandatory = $true)]$Primitive,
+        [Parameter(Mandatory = $true)]$SlideSpec,
+        [Parameter(Mandatory = $true)]$Theme
+    )
+
+    $requiredProperties = @(
+        'kind',
+        'name',
+        'role',
+        'z',
+        'x',
+        'y',
+        'w',
+        'h',
+        'headers',
+        'rows',
+        'rowEvidenceIds',
+        'columnWidths',
+        'rowHeights',
+        'headerFillColorRole',
+        'headerFillTransparency',
+        'bodyFillColorRole',
+        'alternateFillColorRole',
+        'alternateFillTransparency',
+        'lineColorRole',
+        'lineWidth',
+        'headerFontSize',
+        'bodyFontSize',
+        'headerFontColorRole',
+        'bodyFontColorRole',
+        'cellMargin'
+    )
+    $actualProperties = @($Primitive.PSObject.Properties.Name)
+    if ($actualProperties.Count -ne $requiredProperties.Count) {
+        throw "Table primitive $($Primitive.name) has an unexpected property set."
+    }
+    for ($propertyIndex = 0; $propertyIndex -lt $requiredProperties.Count; $propertyIndex++) {
+        if ($requiredProperties[$propertyIndex] -notin $actualProperties) {
+            throw "Table primitive $($Primitive.name) omits $($requiredProperties[$propertyIndex])."
+        }
+    }
+
+    if (
+        $Primitive.kind -isnot [string] -or
+        $Primitive.name -isnot [string] -or
+        $Primitive.role -isnot [string] -or
+        [string]$Primitive.kind -ne 'table' -or
+        [string]::IsNullOrWhiteSpace([string]$Primitive.name) -or
+        [string]$Primitive.name -notmatch '^fde-[a-z0-9]+(?:-[a-z0-9]+)*$'
+    ) {
+        throw 'Table primitive identity is invalid.'
+    }
+    $z = Get-FiniteTableNumber -Value $Primitive.z -Label 'table z'
+    if ($z -lt 1 -or $z -ne [math]::Truncate($z)) {
+        throw 'Table primitive z must be a positive integer.'
+    }
+
+    $x = Get-FiniteTableNumber -Value $Primitive.x -Label 'table x'
+    $y = Get-FiniteTableNumber -Value $Primitive.y -Label 'table y'
+    $width = Get-FiniteTableNumber -Value $Primitive.w -Label 'table width'
+    $height = Get-FiniteTableNumber -Value $Primitive.h -Label 'table height'
+    if (
+        $x -lt 0 -or
+        $y -lt 0 -or
+        $width -le 0 -or
+        $height -le 0 -or
+        $x + $width -gt 960 -or
+        $y + $height -gt 478
+    ) {
+        throw "Table primitive $($Primitive.name) geometry is outside the safe content area."
+    }
+
+    foreach ($arrayProperty in @(
+        'headers',
+        'rows',
+        'rowEvidenceIds',
+        'columnWidths',
+        'rowHeights'
+    )) {
+        if ($Primitive.$arrayProperty -isnot [Array]) {
+            throw "Table $arrayProperty must be an array."
+        }
+    }
+    if ($SlideSpec.evidenceIds -isnot [Array]) {
+        throw 'Slide evidenceIds must be an array for native tables.'
+    }
+    $headers = @($Primitive.headers)
+    $rows = @($Primitive.rows)
+    $rowEvidenceIds = @($Primitive.rowEvidenceIds)
+    $columnWidths = @($Primitive.columnWidths)
+    $rowHeights = @($Primitive.rowHeights)
+    $family = [string]$SlideSpec.family
+    if ($family -eq 'table') {
+        if (
+            [string]$Primitive.role -ne 'native-table' -or
+            $headers.Count -lt 2 -or
+            $headers.Count -gt 6 -or
+            $rows.Count -lt 1 -or
+            $rows.Count -gt 10
+        ) {
+            throw 'Ordinary native table requires 2-6 columns and 1-10 rows.'
+        }
+    }
+    elseif ($family -eq 'evaluation') {
+        $expectedHeaders = @('Cohort', 'Expected behavior', 'Result')
+        if (
+            [string]$Primitive.role -ne 'native-evaluation-table' -or
+            $headers.Count -ne 3 -or
+            $rows.Count -lt 3 -or
+            $rows.Count -gt 8
+        ) {
+            throw 'Evaluation native table requires its exact headers and 3-8 rows.'
+        }
+        for ($headerIndex = 0; $headerIndex -lt $expectedHeaders.Count; $headerIndex++) {
+            if (-not [string]::Equals(
+                [string]$headers[$headerIndex],
+                $expectedHeaders[$headerIndex],
+                [StringComparison]::Ordinal
+            )) {
+                throw 'Evaluation native table headers changed.'
+            }
+        }
+    }
+    else {
+        throw "Native table $($Primitive.name) is not allowed on a $family slide."
+    }
+
+    for ($headerIndex = 0; $headerIndex -lt $headers.Count; $headerIndex++) {
+        if ($headers[$headerIndex] -isnot [string]) {
+            throw "Table header $($headerIndex + 1) must be a string."
+        }
+        $header = [string]$headers[$headerIndex]
+        if (
+            [string]::IsNullOrWhiteSpace($header) -or
+            $header -match '[\x00-\x1F\x7F-\x9F]'
+        ) {
+            throw "Table header $($headerIndex + 1) is empty or contains a control character."
+        }
+    }
+    if ($rowEvidenceIds.Count -ne $rows.Count) {
+        throw 'Table row evidence arrays must match table rows.'
+    }
+    $declaredEvidence = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::Ordinal
+    )
+    foreach ($evidenceId in @($SlideSpec.evidenceIds)) {
+        if ($evidenceId -isnot [string]) {
+            throw 'Slide evidence IDs must be strings for native tables.'
+        }
+        [void]$declaredEvidence.Add([string]$evidenceId)
+    }
+    for ($rowIndex = 0; $rowIndex -lt $rows.Count; $rowIndex++) {
+        if ($rows[$rowIndex] -isnot [Array]) {
+            throw "Table row $($rowIndex + 1) must be an array."
+        }
+        $cells = @($rows[$rowIndex])
+        if ($cells.Count -ne $headers.Count) {
+            throw "Table row $($rowIndex + 1) width does not match the headers."
+        }
+        for ($cellIndex = 0; $cellIndex -lt $cells.Count; $cellIndex++) {
+            if ($cells[$cellIndex] -isnot [string]) {
+                throw "Table cell $($rowIndex + 1),$($cellIndex + 1) must be a string."
+            }
+            $text = [string]$cells[$cellIndex]
+            if (
+                [string]::IsNullOrWhiteSpace($text) -or
+                $text -match '[\x00-\x1F\x7F-\x9F]'
+            ) {
+                throw "Table cell $($rowIndex + 1),$($cellIndex + 1) is empty or contains a control character."
+            }
+        }
+        if ($rowEvidenceIds[$rowIndex] -isnot [Array]) {
+            throw "Table row $($rowIndex + 1) evidence IDs must be an array."
+        }
+        $evidenceIds = @($rowEvidenceIds[$rowIndex])
+        if ($evidenceIds.Count -lt 1) {
+            throw "Table row $($rowIndex + 1) has no evidence IDs."
+        }
+        $seenEvidence = [Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::Ordinal
+        )
+        for ($evidenceIndex = 0; $evidenceIndex -lt $evidenceIds.Count; $evidenceIndex++) {
+            if ($evidenceIds[$evidenceIndex] -isnot [string]) {
+                throw "Table row $($rowIndex + 1) evidence IDs must be strings."
+            }
+            $evidenceId = [string]$evidenceIds[$evidenceIndex]
+            if (
+                [string]::IsNullOrWhiteSpace($evidenceId) -or
+                -not $seenEvidence.Add($evidenceId) -or
+                -not $declaredEvidence.Contains($evidenceId)
+            ) {
+                throw "Table row $($rowIndex + 1) evidence IDs are invalid."
+            }
+        }
+        if (
+            $family -eq 'evaluation' -and
+            [string]$cells[2] -notin @('pass', 'escalate', 'fail')
+        ) {
+            throw "Evaluation table row $($rowIndex + 1) has an invalid result."
+        }
+    }
+
+    if (
+        $columnWidths.Count -ne $headers.Count -or
+        $rowHeights.Count -ne $rows.Count + 1
+    ) {
+        throw 'Table row or column geometry count is invalid.'
+    }
+    $columnWidthSum = 0.0
+    for ($columnIndex = 0; $columnIndex -lt $columnWidths.Count; $columnIndex++) {
+        $columnWidth = Get-FiniteTableNumber `
+            -Value $columnWidths[$columnIndex] `
+            -Label "table column $($columnIndex + 1) width"
+        if ($columnWidth -le 0) {
+            throw 'Table column widths must be positive.'
+        }
+        $columnWidthSum += $columnWidth
+    }
+    $rowHeightSum = 0.0
+    for ($rowIndex = 0; $rowIndex -lt $rowHeights.Count; $rowIndex++) {
+        $rowHeight = Get-FiniteTableNumber `
+            -Value $rowHeights[$rowIndex] `
+            -Label "table row $($rowIndex + 1) height"
+        if ($rowHeight -le 0) {
+            throw 'Table row heights must be positive.'
+        }
+        $rowHeightSum += $rowHeight
+    }
+    if (
+        [math]::Abs($columnWidthSum - $width) -gt 0.01 -or
+        [math]::Abs($rowHeightSum - $height) -gt 0.01
+    ) {
+        throw 'Table row or column geometry does not sum to the table bounds.'
+    }
+
+    foreach ($roleProperty in @(
+        'headerFillColorRole',
+        'bodyFillColorRole',
+        'alternateFillColorRole',
+        'lineColorRole',
+        'headerFontColorRole',
+        'bodyFontColorRole'
+    )) {
+        if ($Primitive.$roleProperty -isnot [string]) {
+            throw "$roleProperty must be a string."
+        }
+        [void](Get-RoleColor -Theme $Theme -Role ([string]$Primitive.$roleProperty))
+    }
+    foreach ($transparencyProperty in @(
+        'headerFillTransparency',
+        'alternateFillTransparency'
+    )) {
+        $transparency = Get-FiniteTableNumber `
+            -Value $Primitive.$transparencyProperty `
+            -Label $transparencyProperty
+        if ($transparency -lt 0 -or $transparency -gt 1) {
+            throw "$transparencyProperty must be between zero and one."
+        }
+    }
+    $lineWidth = Get-FiniteTableNumber -Value $Primitive.lineWidth -Label 'table line width'
+    $cellMargin = Get-FiniteTableNumber -Value $Primitive.cellMargin -Label 'table cell margin'
+    $headerFontSize = Get-FiniteTableNumber `
+        -Value $Primitive.headerFontSize `
+        -Label 'table header font size'
+    $bodyFontSize = Get-FiniteTableNumber `
+        -Value $Primitive.bodyFontSize `
+        -Label 'table body font size'
+    if (
+        $lineWidth -le 0 -or
+        $cellMargin -le 0 -or
+        $headerFontSize -ne 8 -or
+        $bodyFontSize -ne 8
+    ) {
+        throw 'Table line, margin, or font contract is invalid.'
+    }
+}
+
+function Set-NativeTableGeometry {
+    param(
+        [Parameter(Mandatory = $true)]$Shape,
+        [Parameter(Mandatory = $true)]$Table,
+        [Parameter(Mandatory = $true)]$Primitive
+    )
+
+    $tableRows = $null
+    $tableRow = $null
+    $tableColumns = $null
+    $tableColumn = $null
+    try {
+        $Shape.Left = [single]$Primitive.x
+        $Shape.Top = [single]$Primitive.y
+        $Shape.Width = [single]$Primitive.w
+        $Shape.Height = [single]$Primitive.h
+
+        $tableColumns = $Table.Columns
+        try {
+            for ($columnIndex = 1; $columnIndex -le $tableColumns.Count; $columnIndex++) {
+                $tableColumn = $tableColumns.Item($columnIndex)
+                try {
+                    $tableColumn.Width = [single]$Primitive.columnWidths[$columnIndex - 1]
+                }
+                finally {
+                    Release-ComRef -Reference ([ref]$tableColumn) -Label 'table geometry column'
+                }
+            }
+        }
+        finally {
+            Release-ComRef -Reference ([ref]$tableColumn) -Label 'table geometry column'
+            Release-ComRef -Reference ([ref]$tableColumns) -Label 'table geometry columns collection'
+        }
+
+        $tableRows = $Table.Rows
+        try {
+            for ($rowIndex = 1; $rowIndex -le $tableRows.Count; $rowIndex++) {
+                $tableRow = $tableRows.Item($rowIndex)
+                try {
+                    $tableRow.Height = [single]$Primitive.rowHeights[$rowIndex - 1]
+                }
+                finally {
+                    Release-ComRef -Reference ([ref]$tableRow) -Label 'table geometry row'
+                }
+            }
+        }
+        finally {
+            Release-ComRef -Reference ([ref]$tableRow) -Label 'table geometry row'
+            Release-ComRef -Reference ([ref]$tableRows) -Label 'table geometry rows collection'
+        }
+
+        $Shape.Left = [single]$Primitive.x
+        $Shape.Top = [single]$Primitive.y
+    }
+    finally {
+        Release-ComRef -Reference ([ref]$tableRow) -Label 'table geometry row'
+        Release-ComRef -Reference ([ref]$tableRows) -Label 'table geometry rows collection'
+        Release-ComRef -Reference ([ref]$tableColumn) -Label 'table geometry column'
+        Release-ComRef -Reference ([ref]$tableColumns) -Label 'table geometry columns collection'
+    }
+}
+
+function Assert-TableCellTextFits {
+    param(
+        [Parameter(Mandatory = $true)]$Shapes,
+        [Parameter(Mandatory = $true)]$Primitive,
+        [Parameter(Mandatory = $true)]$Theme,
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][bool]$IsHeader,
+        [Parameter(Mandatory = $true)][int]$RowIndex,
+        [Parameter(Mandatory = $true)][int]$ColumnIndex
+    )
+
+    $measureShape = $null
+    $measureLine = $null
+    $measureFill = $null
+    $measureLegacyFrame = $null
+    $measureFrame2 = $null
+    $measureRange2 = $null
+    $measureFont2 = $null
+    $measureParagraph = $null
+    try {
+        $cellWidth = [single]$Primitive.columnWidths[$ColumnIndex - 1]
+        $cellHeight = [single]$Primitive.rowHeights[$RowIndex - 1]
+        $fontSize = if ($IsHeader) {
+            [single]$Primitive.headerFontSize
+        }
+        else {
+            [single]$Primitive.bodyFontSize
+        }
+        $measureShape = $Shapes.AddTextbox(
+            1,
+            0,
+            0,
+            $cellWidth,
+            $cellHeight
+        )
+        $measureLine = $measureShape.Line
+        $measureLine.Visible = 0
+        $measureFill = $measureShape.Fill
+        $measureFill.Visible = 0
+
+        $measureLegacyFrame = $measureShape.TextFrame
+        $measureLegacyFrame.AutoSize = 0
+        $measureLegacyFrame.WordWrap = -1
+
+        $measureFrame2 = $measureShape.TextFrame2
+        $measureFrame2.MarginLeft = [single]$Primitive.cellMargin
+        $measureFrame2.MarginRight = [single]$Primitive.cellMargin
+        $measureFrame2.MarginTop = [single]$Primitive.cellMargin
+        $measureFrame2.MarginBottom = [single]$Primitive.cellMargin
+        $measureFrame2.WordWrap = -1
+        $measureFrame2.AutoSize = 0
+        $measureFrame2.VerticalAnchor = 3
+
+        $measureRange2 = $measureFrame2.TextRange
+        $measureRange2.Text = $Text
+        $measureFont2 = $measureRange2.Font
+        $measureFont2.Name = [string]$Theme.fontFamily
+        $measureFont2.Size = $fontSize
+        $measureFont2.Bold = if ($IsHeader) { -1 } else { 0 }
+        $measureFont2.Italic = 0
+        $measureParagraph = $measureRange2.ParagraphFormat
+        $measureParagraph.Alignment = 1
+
+        $availableHeight = [double]$cellHeight -
+            ([double]$Primitive.cellMargin * 2) +
+            2
+        $availableWidth = [double]$cellWidth -
+            ([double]$Primitive.cellMargin * 2) +
+            2
+        if (
+            [double]$measureRange2.BoundHeight -gt $availableHeight -or
+            [double]$measureRange2.BoundWidth -gt $availableWidth
+        ) {
+            throw "Table-cell overflow in $($Primitive.name) cell $RowIndex,$ColumnIndex."
+        }
+    }
+    finally {
+        Release-ComRef -Reference ([ref]$measureParagraph) -Label 'table measurement paragraph format'
+        Release-ComRef -Reference ([ref]$measureFont2) -Label 'table measurement font'
+        Release-ComRef -Reference ([ref]$measureRange2) -Label 'table measurement text range'
+        Release-ComRef -Reference ([ref]$measureFrame2) -Label 'table measurement text frame 2'
+        Release-ComRef -Reference ([ref]$measureLegacyFrame) -Label 'table measurement legacy text frame'
+        Release-ComRef -Reference ([ref]$measureFill) -Label 'table measurement shape fill'
+        Release-ComRef -Reference ([ref]$measureLine) -Label 'table measurement shape line'
+        if ($null -ne $measureShape) {
+            try {
+                $measureShape.Delete()
+            }
+            catch {
+                $script:cleanupErrors.Add(
+                    "table measurement shape delete: $($_.Exception.Message)"
+                )
+            }
+        }
+        Release-ComRef -Reference ([ref]$measureShape) -Label 'table measurement shape'
+    }
+}
+
+function Add-TablePrimitive {
+    param(
+        [Parameter(Mandatory = $true)]$Shapes,
+        [Parameter(Mandatory = $true)]$Primitive,
+        [Parameter(Mandatory = $true)]$Theme
+    )
+
+    $shape = $null
+    $table = $null
+    $cell = $null
+    $cellShape = $null
+    $cellFill = $null
+    $cellFillColor = $null
+    $textFrame = $null
+    $textRange = $null
+    $font = $null
+    $fontColor = $null
+    $paragraph = $null
+    $borders = $null
+    $borderLine = $null
+    $borderColor = $null
+    try {
+        $headers = @($Primitive.headers)
+        $bodyRows = @($Primitive.rows)
+        $shape = $Shapes.AddTable(
+            $bodyRows.Count + 1,
+            $headers.Count,
+            [single]$Primitive.x,
+            [single]$Primitive.y,
+            [single]$Primitive.w,
+            [single]$Primitive.h
+        )
+        $shape.Name = [string]$Primitive.name
+        $table = $shape.Table
+        Set-NativeTableGeometry -Shape $shape -Table $table -Primitive $Primitive
+
+        for ($rowIndex = 1; $rowIndex -le $bodyRows.Count + 1; $rowIndex++) {
+            for ($columnIndex = 1; $columnIndex -le $headers.Count; $columnIndex++) {
+                $cell = $table.Cell($rowIndex, $columnIndex)
+                try {
+                    $cellShape = $cell.Shape
+                    try {
+                        $isHeader = $rowIndex -eq 1
+                        $isAlternate = -not $isHeader -and (($rowIndex - 2) % 2 -eq 1)
+                        $cellText = if ($isHeader) {
+                            [string]$headers[$columnIndex - 1]
+                        }
+                        else {
+                            [string]$bodyRows[$rowIndex - 2][$columnIndex - 1]
+                        }
+                        $fillRole = if ($isHeader) {
+                            [string]$Primitive.headerFillColorRole
+                        }
+                        elseif ($isAlternate) {
+                            [string]$Primitive.alternateFillColorRole
+                        }
+                        else {
+                            [string]$Primitive.bodyFillColorRole
+                        }
+                        $fillTransparency = if ($isHeader) {
+                            [single]$Primitive.headerFillTransparency
+                        }
+                        elseif ($isAlternate) {
+                            [single]$Primitive.alternateFillTransparency
+                        }
+                        else {
+                            [single]0
+                        }
+
+                        Assert-TableCellTextFits `
+                            -Shapes $Shapes `
+                            -Primitive $Primitive `
+                            -Theme $Theme `
+                            -Text $cellText `
+                            -IsHeader $isHeader `
+                            -RowIndex $rowIndex `
+                            -ColumnIndex $columnIndex
+
+                        $cellFill = $cellShape.Fill
+                        try {
+                            $cellFill.Visible = -1
+                            $cellFill.Solid()
+                            $cellFillColor = $cellFill.ForeColor
+                            try {
+                                $cellFillColor.RGB = Get-RoleColor -Theme $Theme -Role $fillRole
+                            }
+                            finally {
+                                Release-ComRef -Reference ([ref]$cellFillColor) -Label 'table cell fill color'
+                            }
+                            $cellFill.Transparency = $fillTransparency
+                        }
+                        finally {
+                            Release-ComRef -Reference ([ref]$cellFillColor) -Label 'table cell fill color'
+                            Release-ComRef -Reference ([ref]$cellFill) -Label 'table cell fill'
+                        }
+
+                        $textFrame = $cellShape.TextFrame
+                        try {
+                            $textFrame.MarginLeft = [single]$Primitive.cellMargin
+                            $textFrame.MarginRight = [single]$Primitive.cellMargin
+                            $textFrame.MarginTop = [single]$Primitive.cellMargin
+                            $textFrame.MarginBottom = [single]$Primitive.cellMargin
+                            $textFrame.VerticalAnchor = 3
+                            $textRange = $textFrame.TextRange
+                            try {
+                                $textRange.Text = $cellText
+                                $font = $textRange.Font
+                                try {
+                                    $font.Name = [string]$Theme.fontFamily
+                                    $font.Size = if ($isHeader) {
+                                        [single]$Primitive.headerFontSize
+                                    }
+                                    else {
+                                        [single]$Primitive.bodyFontSize
+                                    }
+                                    $font.Bold = if ($isHeader) { -1 } else { 0 }
+                                    $font.Italic = 0
+                                    $fontColor = $font.Color
+                                    try {
+                                        $fontColor.RGB = Get-RoleColor `
+                                            -Theme $Theme `
+                                            -Role $(if ($isHeader) {
+                                                [string]$Primitive.headerFontColorRole
+                                            }
+                                            else {
+                                                [string]$Primitive.bodyFontColorRole
+                                            })
+                                    }
+                                    finally {
+                                        Release-ComRef -Reference ([ref]$fontColor) -Label 'table cell font color'
+                                    }
+                                }
+                                finally {
+                                    Release-ComRef -Reference ([ref]$fontColor) -Label 'table cell font color'
+                                    Release-ComRef -Reference ([ref]$font) -Label 'table cell font'
+                                }
+                                $paragraph = $textRange.ParagraphFormat
+                                try {
+                                    $paragraph.Alignment = 1
+                                }
+                                finally {
+                                    Release-ComRef -Reference ([ref]$paragraph) -Label 'table cell paragraph format'
+                                }
+                            }
+                            finally {
+                                Release-ComRef -Reference ([ref]$paragraph) -Label 'table cell paragraph format'
+                                Release-ComRef -Reference ([ref]$fontColor) -Label 'table cell font color'
+                                Release-ComRef -Reference ([ref]$font) -Label 'table cell font'
+                                Release-ComRef -Reference ([ref]$textRange) -Label 'table cell text range'
+                            }
+                        }
+                        finally {
+                            Release-ComRef -Reference ([ref]$paragraph) -Label 'table cell paragraph format'
+                            Release-ComRef -Reference ([ref]$fontColor) -Label 'table cell font color'
+                            Release-ComRef -Reference ([ref]$font) -Label 'table cell font'
+                            Release-ComRef -Reference ([ref]$textRange) -Label 'table cell text range'
+                            Release-ComRef -Reference ([ref]$textFrame) -Label 'table cell text frame'
+                        }
+
+                        $borders = $cell.Borders
+                        try {
+                            foreach ($borderType in @(1, 2, 3, 4)) {
+                                $borderLine = $borders.Item($borderType)
+                                try {
+                                    $borderLine.Visible = -1
+                                    $borderLine.Weight = [single]$Primitive.lineWidth
+                                    $borderLine.DashStyle = 1
+                                    $borderLine.Transparency = 0
+                                    $borderColor = $borderLine.ForeColor
+                                    try {
+                                        $borderColor.RGB = Get-RoleColor `
+                                            -Theme $Theme `
+                                            -Role ([string]$Primitive.lineColorRole)
+                                    }
+                                    finally {
+                                        Release-ComRef -Reference ([ref]$borderColor) -Label 'table cell border color'
+                                    }
+                                }
+                                finally {
+                                    Release-ComRef -Reference ([ref]$borderColor) -Label 'table cell border color'
+                                    Release-ComRef -Reference ([ref]$borderLine) -Label 'table cell border line'
+                                }
+                            }
+                        }
+                        finally {
+                            Release-ComRef -Reference ([ref]$borderColor) -Label 'table cell border color'
+                            Release-ComRef -Reference ([ref]$borderLine) -Label 'table cell border line'
+                            Release-ComRef -Reference ([ref]$borders) -Label 'table cell borders collection'
+                        }
+                    }
+                    finally {
+                        Release-ComRef -Reference ([ref]$borderColor) -Label 'table cell border color'
+                        Release-ComRef -Reference ([ref]$borderLine) -Label 'table cell border line'
+                        Release-ComRef -Reference ([ref]$borders) -Label 'table cell borders collection'
+                        Release-ComRef -Reference ([ref]$paragraph) -Label 'table cell paragraph format'
+                        Release-ComRef -Reference ([ref]$fontColor) -Label 'table cell font color'
+                        Release-ComRef -Reference ([ref]$font) -Label 'table cell font'
+                        Release-ComRef -Reference ([ref]$textRange) -Label 'table cell text range'
+                        Release-ComRef -Reference ([ref]$textFrame) -Label 'table cell text frame'
+                        Release-ComRef -Reference ([ref]$cellFillColor) -Label 'table cell fill color'
+                        Release-ComRef -Reference ([ref]$cellFill) -Label 'table cell fill'
+                        Release-ComRef -Reference ([ref]$cellShape) -Label 'table cell shape'
+                    }
+                }
+                finally {
+                    Release-ComRef -Reference ([ref]$cell) -Label 'table cell'
+                }
+            }
+        }
+        Set-NativeTableGeometry -Shape $shape -Table $table -Primitive $Primitive
+    }
+    finally {
+        Release-ComRef -Reference ([ref]$borderColor) -Label 'table cell border color'
+        Release-ComRef -Reference ([ref]$borderLine) -Label 'table cell border line'
+        Release-ComRef -Reference ([ref]$borders) -Label 'table cell borders collection'
+        Release-ComRef -Reference ([ref]$paragraph) -Label 'table cell paragraph format'
+        Release-ComRef -Reference ([ref]$fontColor) -Label 'table cell font color'
+        Release-ComRef -Reference ([ref]$font) -Label 'table cell font'
+        Release-ComRef -Reference ([ref]$textRange) -Label 'table cell text range'
+        Release-ComRef -Reference ([ref]$textFrame) -Label 'table cell text frame'
+        Release-ComRef -Reference ([ref]$cellFillColor) -Label 'table cell fill color'
+        Release-ComRef -Reference ([ref]$cellFill) -Label 'table cell fill'
+        Release-ComRef -Reference ([ref]$cellShape) -Label 'table cell shape'
+        Release-ComRef -Reference ([ref]$cell) -Label 'table cell'
+        Release-ComRef -Reference ([ref]$table) -Label 'native table'
+        Release-ComRef -Reference ([ref]$shape) -Label 'native table shape'
+    }
+}
+
+function Assert-WithinTableTolerance {
+    param(
+        [Parameter(Mandatory = $true)][double]$Actual,
+        [Parameter(Mandatory = $true)][double]$Expected,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    if ([math]::Abs($Actual - $Expected) -gt 2) {
+        throw "$Label differs from the drawing spec: expected $Expected, found $Actual."
+    }
+}
+
+function Assert-TablePrimitive {
+    param(
+        [Parameter(Mandatory = $true)]$Shapes,
+        [Parameter(Mandatory = $true)]$Primitive,
+        [Parameter(Mandatory = $true)]$Theme,
+        [Parameter(Mandatory = $true)][int]$SlideIndex
+    )
+
+    $shape = $null
+    $table = $null
+    $tableRows = $null
+    $tableRow = $null
+    $tableColumns = $null
+    $tableColumn = $null
+    $cell = $null
+    $cellShape = $null
+    $cellFill = $null
+    $cellFillColor = $null
+    $textFrame = $null
+    $textRange = $null
+    $font = $null
+    $fontColor = $null
+    $paragraph = $null
+    $measureFrame = $null
+    $measureRange = $null
+    $borders = $null
+    $borderLine = $null
+    $borderColor = $null
+    try {
+        $shape = $Shapes.Item([string]$Primitive.name)
+        if ([int]$shape.HasTable -ne -1) {
+            throw "Shape $($Primitive.name) on slide $SlideIndex is not a native table."
+        }
+        Assert-WithinTableTolerance -Actual $shape.Left -Expected $Primitive.x -Label 'table left'
+        Assert-WithinTableTolerance -Actual $shape.Top -Expected $Primitive.y -Label 'table top'
+        Assert-WithinTableTolerance -Actual $shape.Width -Expected $Primitive.w -Label 'table width'
+        Assert-WithinTableTolerance -Actual $shape.Height -Expected $Primitive.h -Label 'table height'
+
+        $headers = @($Primitive.headers)
+        $bodyRows = @($Primitive.rows)
+        $table = $shape.Table
+        $tableRows = $table.Rows
+        try {
+            if ($tableRows.Count -ne $bodyRows.Count + 1) {
+                throw "Table $($Primitive.name) row count changed on slide $SlideIndex."
+            }
+            for ($rowIndex = 1; $rowIndex -le $tableRows.Count; $rowIndex++) {
+                $tableRow = $tableRows.Item($rowIndex)
+                try {
+                    Assert-WithinTableTolerance `
+                        -Actual $tableRow.Height `
+                        -Expected $Primitive.rowHeights[$rowIndex - 1] `
+                        -Label "table row $rowIndex height"
+                }
+                finally {
+                    Release-ComRef -Reference ([ref]$tableRow) -Label 'verified table row'
+                }
+            }
+        }
+        finally {
+            Release-ComRef -Reference ([ref]$tableRow) -Label 'verified table row'
+            Release-ComRef -Reference ([ref]$tableRows) -Label 'verified table rows collection'
+        }
+        $tableColumns = $table.Columns
+        try {
+            if ($tableColumns.Count -ne $headers.Count) {
+                throw "Table $($Primitive.name) column count changed on slide $SlideIndex."
+            }
+            for ($columnIndex = 1; $columnIndex -le $tableColumns.Count; $columnIndex++) {
+                $tableColumn = $tableColumns.Item($columnIndex)
+                try {
+                    Assert-WithinTableTolerance `
+                        -Actual $tableColumn.Width `
+                        -Expected $Primitive.columnWidths[$columnIndex - 1] `
+                        -Label "table column $columnIndex width"
+                }
+                finally {
+                    Release-ComRef -Reference ([ref]$tableColumn) -Label 'verified table column'
+                }
+            }
+        }
+        finally {
+            Release-ComRef -Reference ([ref]$tableColumn) -Label 'verified table column'
+            Release-ComRef -Reference ([ref]$tableColumns) -Label 'verified table columns collection'
+        }
+
+        $expectedTop = [double]$Primitive.y
+        for ($rowIndex = 1; $rowIndex -le $bodyRows.Count + 1; $rowIndex++) {
+            $expectedLeft = [double]$Primitive.x
+            for ($columnIndex = 1; $columnIndex -le $headers.Count; $columnIndex++) {
+                $cell = $table.Cell($rowIndex, $columnIndex)
+                try {
+                    $cellShape = $cell.Shape
+                    try {
+                        $isHeader = $rowIndex -eq 1
+                        $isAlternate = -not $isHeader -and (($rowIndex - 2) % 2 -eq 1)
+                        $expectedText = if ($isHeader) {
+                            [string]$headers[$columnIndex - 1]
+                        }
+                        else {
+                            [string]$bodyRows[$rowIndex - 2][$columnIndex - 1]
+                        }
+                        $fillRole = if ($isHeader) {
+                            [string]$Primitive.headerFillColorRole
+                        }
+                        elseif ($isAlternate) {
+                            [string]$Primitive.alternateFillColorRole
+                        }
+                        else {
+                            [string]$Primitive.bodyFillColorRole
+                        }
+                        $fillTransparency = if ($isHeader) {
+                            [double]$Primitive.headerFillTransparency
+                        }
+                        elseif ($isAlternate) {
+                            [double]$Primitive.alternateFillTransparency
+                        }
+                        else {
+                            0.0
+                        }
+                        Assert-WithinTableTolerance `
+                            -Actual $cellShape.Left `
+                            -Expected $expectedLeft `
+                            -Label "table cell $rowIndex,$columnIndex left"
+                        Assert-WithinTableTolerance `
+                            -Actual $cellShape.Top `
+                            -Expected $expectedTop `
+                            -Label "table cell $rowIndex,$columnIndex top"
+                        Assert-WithinTableTolerance `
+                            -Actual $cellShape.Width `
+                            -Expected $Primitive.columnWidths[$columnIndex - 1] `
+                            -Label "table cell $rowIndex,$columnIndex width"
+                        Assert-WithinTableTolerance `
+                            -Actual $cellShape.Height `
+                            -Expected $Primitive.rowHeights[$rowIndex - 1] `
+                            -Label "table cell $rowIndex,$columnIndex height"
+
+                        $cellFill = $cellShape.Fill
+                        try {
+                            if ([int]$cellFill.Visible -ne -1) {
+                                throw "Table cell $rowIndex,$columnIndex fill is hidden."
+                            }
+                            $cellFillColor = $cellFill.ForeColor
+                            try {
+                                $expectedFillColor = Get-RoleColor -Theme $Theme -Role $fillRole
+                                if ([int]$cellFillColor.RGB -ne $expectedFillColor) {
+                                    throw "Table cell $rowIndex,$columnIndex fill color changed."
+                                }
+                            }
+                            finally {
+                                Release-ComRef -Reference ([ref]$cellFillColor) -Label 'verified table cell fill color'
+                            }
+                            if ([math]::Abs([double]$cellFill.Transparency - $fillTransparency) -gt 0.01) {
+                                throw "Table cell $rowIndex,$columnIndex fill transparency changed."
+                            }
+                        }
+                        finally {
+                            Release-ComRef -Reference ([ref]$cellFillColor) -Label 'verified table cell fill color'
+                            Release-ComRef -Reference ([ref]$cellFill) -Label 'verified table cell fill'
+                        }
+
+                        $textFrame = $cellShape.TextFrame
+                        try {
+                            foreach ($marginProperty in @(
+                                'MarginLeft',
+                                'MarginRight',
+                                'MarginTop',
+                                'MarginBottom'
+                            )) {
+                                Assert-WithinTableTolerance `
+                                    -Actual $textFrame.$marginProperty `
+                                    -Expected $Primitive.cellMargin `
+                                    -Label "table cell $rowIndex,$columnIndex $marginProperty"
+                            }
+                            if ([int]$textFrame.VerticalAnchor -ne 3) {
+                                throw "Table cell $rowIndex,$columnIndex vertical alignment changed."
+                            }
+                            $textRange = $textFrame.TextRange
+                            try {
+                                if (-not [string]::Equals(
+                                    [string]$textRange.Text,
+                                    $expectedText,
+                                    [StringComparison]::Ordinal
+                                )) {
+                                    throw "Table cell $rowIndex,$columnIndex content changed."
+                                }
+                                $font = $textRange.Font
+                                try {
+                                    $expectedFontSize = if ($isHeader) {
+                                        [double]$Primitive.headerFontSize
+                                    }
+                                    else {
+                                        [double]$Primitive.bodyFontSize
+                                    }
+                                    if (
+                                        -not [string]::Equals(
+                                            [string]$font.Name,
+                                            [string]$Theme.fontFamily,
+                                            [StringComparison]::Ordinal
+                                        ) -or
+                                        [math]::Abs([double]$font.Size - $expectedFontSize) -gt 0.01 -or
+                                        [int]$font.Bold -ne $(if ($isHeader) { -1 } else { 0 }) -or
+                                        [int]$font.Italic -ne 0
+                                    ) {
+                                        throw "Table cell $rowIndex,$columnIndex typography changed."
+                                    }
+                                    $fontColor = $font.Color
+                                    try {
+                                        $fontRole = if ($isHeader) {
+                                            [string]$Primitive.headerFontColorRole
+                                        }
+                                        else {
+                                            [string]$Primitive.bodyFontColorRole
+                                        }
+                                        if (
+                                            [int]$fontColor.RGB -ne
+                                            (Get-RoleColor -Theme $Theme -Role $fontRole)
+                                        ) {
+                                            throw "Table cell $rowIndex,$columnIndex font color changed."
+                                        }
+                                    }
+                                    finally {
+                                        Release-ComRef -Reference ([ref]$fontColor) -Label 'verified table cell font color'
+                                    }
+                                }
+                                finally {
+                                    Release-ComRef -Reference ([ref]$fontColor) -Label 'verified table cell font color'
+                                    Release-ComRef -Reference ([ref]$font) -Label 'verified table cell font'
+                                }
+                                $paragraph = $textRange.ParagraphFormat
+                                try {
+                                    if ([int]$paragraph.Alignment -ne 1) {
+                                        throw "Table cell $rowIndex,$columnIndex horizontal alignment changed."
+                                    }
+                                }
+                                finally {
+                                    Release-ComRef -Reference ([ref]$paragraph) -Label 'verified table cell paragraph format'
+                                }
+                            }
+                            finally {
+                                Release-ComRef -Reference ([ref]$paragraph) -Label 'verified table cell paragraph format'
+                                Release-ComRef -Reference ([ref]$fontColor) -Label 'verified table cell font color'
+                                Release-ComRef -Reference ([ref]$font) -Label 'verified table cell font'
+                                Release-ComRef -Reference ([ref]$textRange) -Label 'verified table cell text range'
+                            }
+                        }
+                        finally {
+                            Release-ComRef -Reference ([ref]$paragraph) -Label 'verified table cell paragraph format'
+                            Release-ComRef -Reference ([ref]$fontColor) -Label 'verified table cell font color'
+                            Release-ComRef -Reference ([ref]$font) -Label 'verified table cell font'
+                            Release-ComRef -Reference ([ref]$textRange) -Label 'verified table cell text range'
+                            Release-ComRef -Reference ([ref]$textFrame) -Label 'verified table cell text frame'
+                        }
+
+                        $measureFrame = $cellShape.TextFrame2
+                        try {
+                            $measureRange = $measureFrame.TextRange
+                            try {
+                                $availableHeight = [double]$cellShape.Height -
+                                    ([double]$Primitive.cellMargin * 2) +
+                                    2
+                                $availableWidth = [double]$cellShape.Width -
+                                    ([double]$Primitive.cellMargin * 2) +
+                                    2
+                                if (
+                                    [double]$measureRange.BoundHeight -gt $availableHeight -or
+                                    [double]$measureRange.BoundWidth -gt $availableWidth
+                                ) {
+                                    throw "Table-cell overflow in $($Primitive.name) cell $rowIndex,$columnIndex on slide $SlideIndex."
+                                }
+                            }
+                            finally {
+                                Release-ComRef -Reference ([ref]$measureRange) -Label 'table cell overflow text range'
+                            }
+                        }
+                        finally {
+                            Release-ComRef -Reference ([ref]$measureRange) -Label 'table cell overflow text range'
+                            Release-ComRef -Reference ([ref]$measureFrame) -Label 'table cell overflow text frame'
+                        }
+
+                        $borders = $cell.Borders
+                        try {
+                            foreach ($borderType in @(1, 2, 3, 4)) {
+                                $borderLine = $borders.Item($borderType)
+                                try {
+                                    if (
+                                        [int]$borderLine.Visible -ne -1 -or
+                                        [math]::Abs(
+                                            [double]$borderLine.Weight -
+                                            [double]$Primitive.lineWidth
+                                        ) -gt 0.01 -or
+                                        [int]$borderLine.DashStyle -ne 1 -or
+                                        [math]::Abs([double]$borderLine.Transparency) -gt 0.01
+                                    ) {
+                                        throw "Table cell $rowIndex,$columnIndex border style changed."
+                                    }
+                                    $borderColor = $borderLine.ForeColor
+                                    try {
+                                        if (
+                                            [int]$borderColor.RGB -ne
+                                            (Get-RoleColor `
+                                                -Theme $Theme `
+                                                -Role ([string]$Primitive.lineColorRole))
+                                        ) {
+                                            throw "Table cell $rowIndex,$columnIndex border color changed."
+                                        }
+                                    }
+                                    finally {
+                                        Release-ComRef -Reference ([ref]$borderColor) -Label 'verified table cell border color'
+                                    }
+                                }
+                                finally {
+                                    Release-ComRef -Reference ([ref]$borderColor) -Label 'verified table cell border color'
+                                    Release-ComRef -Reference ([ref]$borderLine) -Label 'verified table cell border line'
+                                }
+                            }
+                        }
+                        finally {
+                            Release-ComRef -Reference ([ref]$borderColor) -Label 'verified table cell border color'
+                            Release-ComRef -Reference ([ref]$borderLine) -Label 'verified table cell border line'
+                            Release-ComRef -Reference ([ref]$borders) -Label 'verified table cell borders collection'
+                        }
+                    }
+                    finally {
+                        Release-ComRef -Reference ([ref]$borderColor) -Label 'verified table cell border color'
+                        Release-ComRef -Reference ([ref]$borderLine) -Label 'verified table cell border line'
+                        Release-ComRef -Reference ([ref]$borders) -Label 'verified table cell borders collection'
+                        Release-ComRef -Reference ([ref]$measureRange) -Label 'table cell overflow text range'
+                        Release-ComRef -Reference ([ref]$measureFrame) -Label 'table cell overflow text frame'
+                        Release-ComRef -Reference ([ref]$paragraph) -Label 'verified table cell paragraph format'
+                        Release-ComRef -Reference ([ref]$fontColor) -Label 'verified table cell font color'
+                        Release-ComRef -Reference ([ref]$font) -Label 'verified table cell font'
+                        Release-ComRef -Reference ([ref]$textRange) -Label 'verified table cell text range'
+                        Release-ComRef -Reference ([ref]$textFrame) -Label 'verified table cell text frame'
+                        Release-ComRef -Reference ([ref]$cellFillColor) -Label 'verified table cell fill color'
+                        Release-ComRef -Reference ([ref]$cellFill) -Label 'verified table cell fill'
+                        Release-ComRef -Reference ([ref]$cellShape) -Label 'verified table cell shape'
+                    }
+                }
+                finally {
+                    Release-ComRef -Reference ([ref]$cell) -Label 'verified table cell'
+                }
+                $expectedLeft += [double]$Primitive.columnWidths[$columnIndex - 1]
+            }
+            $expectedTop += [double]$Primitive.rowHeights[$rowIndex - 1]
+        }
+    }
+    finally {
+        Release-ComRef -Reference ([ref]$borderColor) -Label 'verified table cell border color'
+        Release-ComRef -Reference ([ref]$borderLine) -Label 'verified table cell border line'
+        Release-ComRef -Reference ([ref]$borders) -Label 'verified table cell borders collection'
+        Release-ComRef -Reference ([ref]$measureRange) -Label 'table cell overflow text range'
+        Release-ComRef -Reference ([ref]$measureFrame) -Label 'table cell overflow text frame'
+        Release-ComRef -Reference ([ref]$paragraph) -Label 'verified table cell paragraph format'
+        Release-ComRef -Reference ([ref]$fontColor) -Label 'verified table cell font color'
+        Release-ComRef -Reference ([ref]$font) -Label 'verified table cell font'
+        Release-ComRef -Reference ([ref]$textRange) -Label 'verified table cell text range'
+        Release-ComRef -Reference ([ref]$textFrame) -Label 'verified table cell text frame'
+        Release-ComRef -Reference ([ref]$cellFillColor) -Label 'verified table cell fill color'
+        Release-ComRef -Reference ([ref]$cellFill) -Label 'verified table cell fill'
+        Release-ComRef -Reference ([ref]$cellShape) -Label 'verified table cell shape'
+        Release-ComRef -Reference ([ref]$cell) -Label 'verified table cell'
+        Release-ComRef -Reference ([ref]$tableColumn) -Label 'verified table column'
+        Release-ComRef -Reference ([ref]$tableColumns) -Label 'verified table columns collection'
+        Release-ComRef -Reference ([ref]$tableRow) -Label 'verified table row'
+        Release-ComRef -Reference ([ref]$tableRows) -Label 'verified table rows collection'
+        Release-ComRef -Reference ([ref]$table) -Label 'verified native table'
+        Release-ComRef -Reference ([ref]$shape) -Label 'verified native table shape'
+    }
+}
+
+function Assert-NativeTables {
+    param(
+        [Parameter(Mandatory = $true)]$Slide,
+        [Parameter(Mandatory = $true)]$SlideSpec,
+        [Parameter(Mandatory = $true)]$Theme
+    )
+
+    $shapes = $null
+    try {
+        $shapes = $Slide.Shapes
+        for ($primitiveIndex = 0; $primitiveIndex -lt $SlideSpec.primitives.Count; $primitiveIndex++) {
+            $primitive = $SlideSpec.primitives[$primitiveIndex]
+            if ([string]$primitive.kind -eq 'table') {
+                Assert-TablePrimitive `
+                    -Shapes $shapes `
+                    -Primitive $primitive `
+                    -Theme $Theme `
+                    -SlideIndex ([int]$Slide.SlideIndex)
+            }
+        }
+    }
+    finally {
+        Release-ComRef -Reference ([ref]$shapes) -Label 'native table verification shapes'
+    }
+}
+
+function Invoke-TestTableMutation {
+    param(
+        [Parameter(Mandatory = $true)]$Slide,
+        [Parameter(Mandatory = $true)]$SlideSpec
+    )
+
+    if (
+        $env:FDE_POWERPOINT_TEST_FAILPOINTS -ne '1' -or
+        $env:FDE_POWERPOINT_TEST_MUTATE_TABLE_BEFORE_VERIFY -ne '1'
+    ) {
+        return $false
+    }
+    $tablePrimitive = @(
+        $SlideSpec.primitives |
+            Where-Object { [string]$_.kind -eq 'table' } |
+            Select-Object -First 1
+    )
+    if ($tablePrimitive.Count -eq 0) {
+        return $false
+    }
+
+    $shapes = $null
+    $shape = $null
+    $table = $null
+    $cell = $null
+    $cellShape = $null
+    $textFrame = $null
+    $textRange = $null
+    try {
+        $shapes = $Slide.Shapes
+        $shape = $shapes.Item([string]$tablePrimitive[0].name)
+        $table = $shape.Table
+        $cell = $table.Cell(1, 1)
+        $cellShape = $cell.Shape
+        $textFrame = $cellShape.TextFrame
+        $textRange = $textFrame.TextRange
+        $textRange.Text = "$($textRange.Text) test-mutation"
+        return $true
+    }
+    finally {
+        Release-ComRef -Reference ([ref]$textRange) -Label 'mutated table cell text range'
+        Release-ComRef -Reference ([ref]$textFrame) -Label 'mutated table cell text frame'
+        Release-ComRef -Reference ([ref]$cellShape) -Label 'mutated table cell shape'
+        Release-ComRef -Reference ([ref]$cell) -Label 'mutated table cell'
+        Release-ComRef -Reference ([ref]$table) -Label 'mutated native table'
+        Release-ComRef -Reference ([ref]$shape) -Label 'mutated native table shape'
+        Release-ComRef -Reference ([ref]$shapes) -Label 'mutated native table shapes'
+    }
+}
+
 function Get-NativeNotesText {
     param([Parameter(Mandatory = $true)]$Slide)
 
@@ -910,6 +2067,7 @@ $reportObject = $null
 $baselinePowerPointIdentities = @()
 $nativeNotes = [System.Collections.Generic.List[string]]::new()
 $slideReports = [System.Collections.Generic.List[object]]::new()
+$tableMutationApplied = $false
 
 try {
     $rawPaths = [ordered]@{
@@ -980,13 +2138,22 @@ try {
         $primitives = @($slidesSpec[$slideIndex].primitives)
         for ($primitiveIndex = 0; $primitiveIndex -lt $primitives.Count; $primitiveIndex++) {
             $kind = [string]$primitives[$primitiveIndex].kind
-            if ($kind -notin @('text', 'shape', 'line')) {
-                throw "Unsupported primitive kind '$kind'. The basic PowerPoint worker supports only text, shape, and line; table, nativeChart, and connector require later layers."
+            if ($kind -notin @('text', 'shape', 'line', 'table')) {
+                throw "Unsupported primitive kind '$kind'. The PowerPoint worker supports text, shape, line, and table; nativeChart and connector require later layers."
+            }
+            if ($kind -eq 'table') {
+                Assert-TablePrimitiveSpec `
+                    -Primitive $primitives[$primitiveIndex] `
+                    -SlideSpec $slidesSpec[$slideIndex] `
+                    -Theme $specObject.theme
             }
         }
     }
     if ($PSBoundParameters.ContainsKey('FailAfter') -and $env:FDE_POWERPOINT_TEST_FAILPOINTS -ne '1') {
         throw 'PowerPoint worker failpoints require FDE_POWERPOINT_TEST_FAILPOINTS=1.'
+    }
+    if ($env:FDE_POWERPOINT_CODE_ONLY -eq '1') {
+        throw 'PowerPoint worker code-only guard prevented COM activation.'
     }
 
     $stagingDirectory = Join-Path $outputParent ".$([IO.Path]::GetFileName($outputPath)).$token.worker-stage"
@@ -1147,6 +2314,10 @@ try {
                                 Add-LinePrimitive -Shapes $shapes -Primitive $primitive -Theme $specObject.theme
                                 Invoke-TestFailpoint -Stage 'line'
                             }
+                            'table' {
+                                Add-TablePrimitive -Shapes $shapes -Primitive $primitive -Theme $specObject.theme
+                                Invoke-TestFailpoint -Stage 'table'
+                            }
                         }
                     }
                     catch {
@@ -1154,6 +2325,7 @@ try {
                     }
                 }
                 Assert-TextFits -Slide $slide -SlideSpec $slideSpec
+                Assert-NativeTables -Slide $slide -SlideSpec $slideSpec -Theme $specObject.theme
                 Invoke-TestFailpoint -Stage 'overflow'
             }
             finally {
@@ -1197,6 +2369,11 @@ try {
                 if (-not [string]::Equals($finalNotes, $nativeNotes[$slideIndex - 1], [StringComparison]::Ordinal)) {
                     throw "Final native notes changed on slide $slideIndex."
                 }
+                if (-not $tableMutationApplied) {
+                    $tableMutationApplied = Invoke-TestTableMutation `
+                        -Slide $slide `
+                        -SlideSpec $slideSpec
+                }
                 $actualNames = @(Get-ShapeNames -Slide $slide)
                 $expectedNames = [System.Collections.Generic.List[string]]::new()
                 for ($primitiveIndex = 0; $primitiveIndex -lt $slideSpec.primitives.Count; $primitiveIndex++) {
@@ -1204,6 +2381,7 @@ try {
                 }
                 Assert-ExactShapeNames -Expected $expectedNames.ToArray() -Actual $actualNames -SlideIndex $slideIndex
                 Assert-TextFits -Slide $slide -SlideSpec $slideSpec
+                Assert-NativeTables -Slide $slide -SlideSpec $slideSpec -Theme $specObject.theme
             }
             finally {
                 Release-ComRef -Reference ([ref]$slide) -Label 'reopen verification slide'
@@ -1222,6 +2400,18 @@ try {
                 Assert-PngDimensions -Path $renderFile
                 $shapeNames = @(Get-ShapeNames -Slide $slide)
                 $primitiveJson = $slideSpec.primitives | ConvertTo-Json -Depth 30 -Compress
+                $nativeTableCount = 0
+                $nativeTableCellCount = 0
+                for ($primitiveIndex = 0; $primitiveIndex -lt $slideSpec.primitives.Count; $primitiveIndex++) {
+                    $reportPrimitive = $slideSpec.primitives[$primitiveIndex]
+                    if ([string]$reportPrimitive.kind -eq 'table') {
+                        $nativeTableCount++
+                        $nativeTableCellCount += (
+                            @($reportPrimitive.headers).Count *
+                            (@($reportPrimitive.rows).Count + 1)
+                        )
+                    }
+                }
                 $slideReports.Add([pscustomobject]@{
                     index = $slideIndex
                     id = [string]$slideSpec.id
@@ -1231,6 +2421,8 @@ try {
                     primitiveSha256 = Get-TextSha256 -Text $primitiveJson
                     shapeCount = $shapeNames.Count
                     shapeNamesSha256 = Get-TextSha256 -Text ($shapeNames -join "`n")
+                    nativeTableCount = $nativeTableCount
+                    nativeTableCellCount = $nativeTableCellCount
                     render = $renderName
                     renderSha256 = Get-Sha256 -Path $renderFile
                     notesSha256 = Get-TextSha256 -Text $nativeNotes[$slideIndex - 1]
@@ -1421,7 +2613,7 @@ try {
     $reportObject = [ordered]@{
         status = 'WORKER_PASS'
         stagingEvidence = $true
-        worker = 'fde-powerpoint-basic/1.0'
+        worker = 'fde-powerpoint-tables/1.0'
         spec = $specPath
         specSha256 = $actualSpecSha256
         skeleton = $skeletonPath

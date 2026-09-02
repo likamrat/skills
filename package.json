@@ -30,6 +30,7 @@
     "check:fde:e2e": "node scripts/test-fde-evaluator.mjs",
     "check:links": "node scripts/check-links.mjs --external",
     "test:powerpoint-worker-basic": "node skills/fde/fde-readout/scripts/test-powerpoint-worker-basic.mjs",
+    "test:powerpoint-worker-tables": "node skills/fde/fde-readout/scripts/test-powerpoint-worker-tables.mjs",
     "eval:fde:e2e": "node scripts/evaluate-fde-run.mjs",
     "eval:triggers": "node scripts/evaluate-triggering.mjs",
     "list:skills": "npx skills@1.5.22 add . --list",

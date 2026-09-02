@@ -366,6 +366,7 @@ for (const script of [
   "test-powerpoint-layout.mjs",
   "test-powerpoint-shape-families.mjs",
   "test-powerpoint-table-families.mjs",
+  "test-powerpoint-worker-tables.mjs",
   "test-powerpoint-chart-family.mjs",
   "test-powerpoint-orthogonal-router.mjs",
   "test-powerpoint-router-grid.mjs",

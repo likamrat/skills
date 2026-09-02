@@ -203,7 +203,7 @@ for (const [name, pattern] of [
   ["failpoint bundle publish", /Invoke-TestFailpoint -Stage 'publish-bundle'/],
   ["failpoint environment guard", /FDE_POWERPOINT_TEST_FAILPOINTS/],
   ["internal staging evidence", /status = 'WORKER_PASS'[\s\S]*stagingEvidence = \$true/],
-  ["unsupported table rejection", /table, nativeChart, and connector/],
+  ["unsupported later primitive rejection", /nativeChart and connector/],
 ]) {
   if (!pattern.test(workerSource)) failures.push(`worker omits ${name}`);
 }
@@ -1351,7 +1351,7 @@ if (failures.length === 0) {
 
     if (failures.length === 0 && !nativeBaselineOnlyRequested) {
       const originalSpec = JSON.parse(await readFile(specPath, "utf8"));
-      for (const unsupported of ["table", "nativeChart", "connector"]) {
+      for (const unsupported of ["nativeChart", "connector"]) {
         const rejected = structuredClone(originalSpec);
         rejected.slides[0].primitives[0].kind = unsupported;
         const rejectedPath = join(temp, `unsupported-${unsupported}.json`);
