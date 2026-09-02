@@ -13,6 +13,8 @@ const SUPPORTED_FAMILIES = new Set([
   "responsibility",
   "risks",
   "timeline",
+  "table",
+  "evaluation",
   "evidence",
 ]);
 const TEXT_SIZES = new Set([8, 11, 28, 34]);
@@ -22,6 +24,7 @@ const RESPONSIBILITY_TYPES = new Set([
   "human",
   "hybrid",
 ]);
+const EVALUATION_RESULTS = new Set(["pass", "escalate", "fail"]);
 const NAME_PATTERN = /^fde-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const STRICT_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
@@ -98,6 +101,29 @@ const LINE_KEYS = [
   "dash",
   "arrowStart",
   "arrowEnd",
+];
+const TABLE_KEYS = [
+  ...BASE_KEYS,
+  "x",
+  "y",
+  "w",
+  "h",
+  "headers",
+  "rows",
+  "columnWidths",
+  "rowHeights",
+  "headerFillColorRole",
+  "headerFillTransparency",
+  "bodyFillColorRole",
+  "alternateFillColorRole",
+  "alternateFillTransparency",
+  "lineColorRole",
+  "lineWidth",
+  "headerFontSize",
+  "bodyFontSize",
+  "headerFontColorRole",
+  "bodyFontColorRole",
+  "cellMargin",
 ];
 
 export class DrawingSpecError extends Error {
@@ -348,6 +374,31 @@ function linePrimitive(ctx, semanticPath, role, points, options = {}) {
     dash: options.dash ?? "solid",
     arrowStart: "none",
     arrowEnd: options.arrowEnd ?? "none",
+  });
+}
+
+function tablePrimitive(ctx, semanticPath, role, box, headers, rows, columnWidths, rowHeights) {
+  return ctx.add({
+    kind: "table",
+    name: primitiveName(ctx.sourceIndex, ctx.id, semanticPath),
+    role,
+    ...box,
+    headers,
+    rows,
+    columnWidths,
+    rowHeights,
+    headerFillColorRole: "system",
+    headerFillTransparency: 0,
+    bodyFillColorRole: "paper",
+    alternateFillColorRole: "system",
+    alternateFillTransparency: 0.92,
+    lineColorRole: "line",
+    lineWidth: 0.75,
+    headerFontSize: 8,
+    bodyFontSize: 8,
+    headerFontColorRole: "ink",
+    bodyFontColorRole: "ink",
+    cellMargin: 6,
   });
 }
 
@@ -1232,6 +1283,144 @@ function compileEvidence(ctx, slide) {
   addFooter(ctx, slide);
 }
 
+function compileTable(ctx, slide) {
+  addStandardHeader(ctx, slide);
+  const rowCount = slide.content.rows.length;
+  const columnCount = slide.content.columns.length;
+  const availableH = 350;
+  const headerH = 28;
+  const insightH = 46;
+  const gap = 14;
+  const rowH = Math.min(32, (availableH - headerH - insightH - gap) / rowCount);
+  const tableH = headerH + rowCount * rowH;
+  const totalH = tableH + gap + insightH;
+  const blockY = 122 + (availableH - totalH) / 2;
+  const columnW = 864 / columnCount;
+  tablePrimitive(
+    ctx,
+    "table",
+    "native-table",
+    { x: 48, y: blockY, w: 864, h: tableH },
+    [...slide.content.columns],
+    slide.content.rows.map((row) => [...row.cells]),
+    Array.from({ length: columnCount }, () => round3(columnW)),
+    [headerH, ...Array.from({ length: rowCount }, () => round3(rowH))],
+  );
+  slide.content.rows.forEach((row, index) => {
+    textPrimitive(
+      ctx,
+      `row-${String(index + 1).padStart(2, "0")}-evidence-marker`,
+      "table-row-evidence-marker",
+      {
+        x: 916,
+        y: blockY + headerH + index * rowH,
+        w: 36,
+        h: rowH,
+      },
+      row.evidenceIds.join(", "),
+      {
+        fontSize: 8,
+        bold: true,
+        colorRole: "muted",
+        horizontalAlign: "center",
+        verticalAlign: "middle",
+        maxLines: 1,
+      },
+    );
+  });
+  textPrimitive(
+    ctx,
+    "insight",
+    "table-insight",
+    { x: 48, y: blockY + tableH + gap, w: 704, h: insightH },
+    slide.content.insight.statement,
+    { fontSize: 11, bold: true, verticalAlign: "middle", maxLines: 3 },
+  );
+  textPrimitive(
+    ctx,
+    "insight-evidence",
+    "table-insight-evidence",
+    { x: 768, y: blockY + tableH + gap, w: 144, h: insightH },
+    slide.content.insight.evidenceIds.join(", "),
+    {
+      fontSize: 8,
+      colorRole: "muted",
+      horizontalAlign: "right",
+      verticalAlign: "middle",
+      maxLines: 2,
+    },
+  );
+  addFooter(ctx, slide);
+}
+
+function compileEvaluation(ctx, slide) {
+  addStandardHeader(ctx, slide);
+  const rowCount = slide.content.cases.length;
+  const availableH = 352;
+  const headerH = 28;
+  const releaseH = 46;
+  const gap = 14;
+  const rowH = Math.min(34, (availableH - headerH - releaseH - gap) / rowCount);
+  const tableH = headerH + rowCount * rowH;
+  const totalH = tableH + gap + releaseH;
+  const blockY = 122 + (availableH - totalH) / 2;
+  tablePrimitive(
+    ctx,
+    "evaluation-table",
+    "native-evaluation-table",
+    { x: 48, y: blockY, w: 864, h: tableH },
+    ["Cohort", "Expected behavior", "Result"],
+    slide.content.cases.map((item) => [item.cohort, item.expected, item.result]),
+    [190, 484, 190],
+    [headerH, ...Array.from({ length: rowCount }, () => round3(rowH))],
+  );
+  slide.content.cases.forEach((item, index) => {
+    textPrimitive(
+      ctx,
+      `case-${String(index + 1).padStart(2, "0")}-evidence-marker`,
+      "evaluation-case-evidence-marker",
+      {
+        x: 916,
+        y: blockY + headerH + index * rowH,
+        w: 36,
+        h: rowH,
+      },
+      item.evidenceIds.join(", "),
+      {
+        fontSize: 8,
+        bold: true,
+        colorRole: "muted",
+        horizontalAlign: "center",
+        verticalAlign: "middle",
+        maxLines: 2,
+      },
+    );
+  });
+  textPrimitive(
+    ctx,
+    "release-implication",
+    "evaluation-release-implication",
+    { x: 48, y: blockY + tableH + gap, w: 704, h: releaseH },
+    slide.content.releaseImplication.statement,
+    { fontSize: 11, bold: true, verticalAlign: "middle", maxLines: 3 },
+  );
+  textPrimitive(
+    ctx,
+    "release-evidence",
+    "evaluation-release-evidence",
+    { x: 768, y: blockY + tableH + gap, w: 144, h: releaseH },
+    slide.content.releaseImplication.evidenceIds.join(", "),
+    {
+      fontSize: 8,
+      colorRole: "muted",
+      horizontalAlign: "right",
+      verticalAlign: "middle",
+      maxLines: 2,
+    },
+  );
+  addFooter(ctx, slide);
+}
+
 function compileSlide(plan, slide, sourceIndex) {
   const ctx = createContext(slide, sourceIndex);
   ctx.requiredFooter = plan.brand.requiredFooter;
@@ -1259,6 +1448,12 @@ function compileSlide(plan, slide, sourceIndex) {
       break;
     case "timeline":
       compileTimeline(ctx, slide);
+      break;
+    case "table":
+      compileTable(ctx, slide);
+      break;
+    case "evaluation":
+      compileEvaluation(ctx, slide);
       break;
     case "evidence":
       compileEvidence(ctx, slide);
@@ -1325,6 +1520,21 @@ function validateNestedEvidence(slide, slideIndex) {
       nested = [
         { item: slide.content.decision, path: `${path}.decision` },
         ...entries(slide.content.milestones, "milestones"),
+      ];
+      break;
+    case "table":
+      nested = [
+        ...entries(slide.content.rows, "rows"),
+        { item: slide.content.insight, path: `${path}.insight` },
+      ];
+      break;
+    case "evaluation":
+      nested = [
+        ...entries(slide.content.cases, "cases"),
+        {
+          item: slide.content.releaseImplication,
+          path: `${path}.releaseImplication`,
+        },
       ];
       break;
     case "evidence":
@@ -1573,6 +1783,58 @@ function validateSupportedContent(slide, slideIndex) {
         );
       });
       break;
+    case "table":
+      allowedKeys(slide.content, ["columns", "rows", "insight"], ["columns", "rows", "insight"], path);
+      validateContentArray(slide.content.columns, `${path}.columns`, 2, 6);
+      slide.content.columns.forEach((column, index) =>
+        validateContentString(column, `${path}.columns[${index}]`),
+      );
+      validateContentArray(slide.content.rows, `${path}.rows`, 1, 10);
+      slide.content.rows.forEach((row, rowIndex) => {
+        const rowPath = `${path}.rows[${rowIndex}]`;
+        allowedKeys(row, ["cells", "evidenceIds"], ["cells", "evidenceIds"], rowPath);
+        validateContentArray(
+          row.cells,
+          `${rowPath}.cells`,
+          slide.content.columns.length,
+          slide.content.columns.length,
+        );
+        row.cells.forEach((cell, cellIndex) =>
+          validateContentString(cell, `${rowPath}.cells[${cellIndex}]`),
+        );
+        validateEvidenceArray(row.evidenceIds, `${rowPath}.evidenceIds`);
+      });
+      validateClaimContent(slide.content.insight, `${path}.insight`);
+      break;
+    case "evaluation":
+      allowedKeys(
+        slide.content,
+        ["cases", "releaseImplication"],
+        ["cases", "releaseImplication"],
+        path,
+      );
+      validateContentArray(slide.content.cases, `${path}.cases`, 3, 8);
+      slide.content.cases.forEach((item, caseIndex) => {
+        const casePath = `${path}.cases[${caseIndex}]`;
+        allowedKeys(
+          item,
+          ["cohort", "expected", "result", "evidenceIds"],
+          ["cohort", "expected", "result", "evidenceIds"],
+          casePath,
+        );
+        for (const field of ["cohort", "expected", "result"]) {
+          validateContentString(item[field], `${casePath}.${field}`);
+        }
+        if (!EVALUATION_RESULTS.has(item.result)) {
+          fail("E_SPEC_SCHEMA", `${casePath}.result`, "invalid evaluation result");
+        }
+        validateEvidenceArray(item.evidenceIds, `${casePath}.evidenceIds`);
+      });
+      validateClaimContent(
+        slide.content.releaseImplication,
+        `${path}.releaseImplication`,
+      );
+      break;
     case "evidence":
       allowedKeys(slide.content, ["groups", "controls"], ["groups", "controls"], path);
       validateContentArray(slide.content.groups, `${path}.groups`, 2, 5);
@@ -1677,6 +1939,29 @@ function assertText(value, path) {
   if (CONTROL_PATTERN.test(value)) fail("E_TEXT_CONTROL_CHAR", path, "text contains a control character");
 }
 
+function assertTableText(value, path) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    fail("E_TEXT_EMPTY", path, "table text is blank");
+  }
+  if (STRICT_CONTROL_PATTERN.test(value)) {
+    fail("E_TEXT_CONTROL_CHAR", path, "table text contains a control character");
+  }
+}
+
+function assertPositiveNumberArray(value, path) {
+  if (!isDenseArray(value) || value.length === 0) {
+    fail("E_SPEC_SCHEMA", path, "expected a nonempty dense array");
+  }
+  value.forEach((item, index) => {
+    if (!Number.isFinite(item)) {
+      fail("E_GEOMETRY_NONFINITE", `${path}[${index}]`, "expected finite number");
+    }
+    if (item <= 0) {
+      fail("E_GEOMETRY_BOUNDS", `${path}[${index}]`, "expected positive number");
+    }
+  });
+}
+
 function assertGeometryBox(item, path, stage) {
   for (const key of ["x", "y", "w", "h"]) {
     if (typeof item[key] !== "number" || !Number.isFinite(item[key])) {
@@ -1699,7 +1984,7 @@ function overlap(a, b) {
   );
 }
 
-function validatePrimitive(primitive, path, stage, names) {
+function validatePrimitive(primitive, path, stage, names, family) {
   if (!isPlainObject(primitive)) fail("E_SPEC_SCHEMA", path, "expected primitive object");
   const keys =
     primitive.kind === "text"
@@ -1708,6 +1993,8 @@ function validatePrimitive(primitive, path, stage, names) {
         ? SHAPE_KEYS
         : primitive.kind === "line"
           ? LINE_KEYS
+          : primitive.kind === "table"
+            ? TABLE_KEYS
           : undefined;
   if (!keys) fail("E_SPEC_SCHEMA", `${path}.kind`, "primitive kind is not supported");
   exactKeys(primitive, keys, path);
@@ -1754,7 +2041,7 @@ function validatePrimitive(primitive, path, stage, names) {
     }
     if (!Number.isFinite(primitive.lineWidth) || primitive.lineWidth <= 0) fail("E_GEOMETRY_BOUNDS", `${path}.lineWidth`, "line width must be positive");
     if (!["solid", "dash", "dot", "dashDot"].includes(primitive.lineDash)) fail("E_SPEC_SCHEMA", `${path}.lineDash`, "invalid line dash");
-  } else {
+  } else if (primitive.kind === "line") {
     for (const key of ["x1", "y1", "x2", "y2", "width", "transparency"]) {
       if (!Number.isFinite(primitive[key])) fail("E_GEOMETRY_NONFINITE", `${path}.${key}`, "expected finite number");
     }
@@ -1765,6 +2052,109 @@ function validatePrimitive(primitive, path, stage, names) {
     if (primitive.transparency < 0 || primitive.transparency > 1) fail("E_SPEC_SCHEMA", `${path}.transparency`, "expected number from 0 to 1");
     if (!["solid", "dash", "dot", "dashDot"].includes(primitive.dash) || primitive.arrowStart !== "none" || !["none", "open"].includes(primitive.arrowEnd)) {
       fail("E_SPEC_SCHEMA", path, "line style is invalid");
+    }
+  } else {
+    assertGeometryBox(primitive, path, stage);
+    if (!isDenseArray(primitive.headers) || primitive.headers.length === 0) {
+      fail("E_SPEC_SCHEMA", `${path}.headers`, "expected nonempty dense string array");
+    }
+    primitive.headers.forEach((header, index) =>
+      assertTableText(header, `${path}.headers[${index}]`),
+    );
+    if (!isDenseArray(primitive.rows) || primitive.rows.length === 0) {
+      fail("E_SPEC_SCHEMA", `${path}.rows`, "expected nonempty dense row array");
+    }
+    primitive.rows.forEach((row, rowIndex) => {
+      const rowPath = `${path}.rows[${rowIndex}]`;
+      if (!isDenseArray(row) || row.length !== primitive.headers.length) {
+        fail("E_SPEC_SCHEMA", rowPath, "row width must match headers");
+      }
+      row.forEach((cell, cellIndex) =>
+        assertTableText(cell, `${rowPath}[${cellIndex}]`),
+      );
+    });
+    if (family === "table") {
+      if (
+        primitive.role !== "native-table" ||
+        primitive.headers.length < 2 ||
+        primitive.headers.length > 6 ||
+        primitive.rows.length < 1 ||
+        primitive.rows.length > 10
+      ) {
+        fail(
+          "E_SPEC_SCHEMA",
+          path,
+          "ordinary native table requires 2-6 columns and 1-10 rows",
+        );
+      }
+    } else if (family === "evaluation") {
+      if (
+        primitive.role !== "native-evaluation-table" ||
+        primitive.headers.length !== 3 ||
+        primitive.rows.length < 3 ||
+        primitive.rows.length > 8 ||
+        primitive.headers.some(
+          (header, index) =>
+            header !== ["Cohort", "Expected behavior", "Result"][index],
+        )
+      ) {
+        fail(
+          "E_SPEC_SCHEMA",
+          path,
+          "evaluation native table requires its exact headers and 3-8 rows",
+        );
+      }
+    } else {
+      fail(
+        "E_SPEC_SCHEMA",
+        path,
+        "native tables are supported only on table and evaluation slides",
+      );
+    }
+    assertPositiveNumberArray(primitive.columnWidths, `${path}.columnWidths`);
+    assertPositiveNumberArray(primitive.rowHeights, `${path}.rowHeights`);
+    if (primitive.columnWidths.length !== primitive.headers.length) {
+      fail("E_SPEC_SCHEMA", `${path}.columnWidths`, "column widths must match headers");
+    }
+    if (primitive.rowHeights.length !== primitive.rows.length + 1) {
+      fail("E_SPEC_SCHEMA", `${path}.rowHeights`, "row heights must include header and every row");
+    }
+    const widthSum = primitive.columnWidths.reduce((sum, value) => sum + value, 0);
+    const heightSum = primitive.rowHeights.reduce((sum, value) => sum + value, 0);
+    if (Math.abs(widthSum - primitive.w) > 0.01) {
+      fail("E_GEOMETRY_BOUNDS", `${path}.columnWidths`, "column widths must sum to table width");
+    }
+    if (Math.abs(heightSum - primitive.h) > 0.01) {
+      fail("E_GEOMETRY_BOUNDS", `${path}.rowHeights`, "row heights must sum to table height");
+    }
+    for (const key of [
+      "headerFillColorRole",
+      "bodyFillColorRole",
+      "alternateFillColorRole",
+      "lineColorRole",
+      "headerFontColorRole",
+      "bodyFontColorRole",
+    ]) {
+      assertColorRole(primitive[key], `${path}.${key}`);
+    }
+    for (const key of ["headerFillTransparency", "alternateFillTransparency"]) {
+      if (
+        !Number.isFinite(primitive[key]) ||
+        primitive[key] < 0 ||
+        primitive[key] > 1
+      ) {
+        fail("E_SPEC_SCHEMA", `${path}.${key}`, "expected number from 0 to 1");
+      }
+    }
+    for (const key of ["lineWidth", "cellMargin"]) {
+      if (!Number.isFinite(primitive[key]) || primitive[key] <= 0) {
+        fail("E_GEOMETRY_BOUNDS", `${path}.${key}`, "expected positive number");
+      }
+    }
+    for (const key of ["headerFontSize", "bodyFontSize"]) {
+      if (primitive[key] !== 8) {
+        fail("E_SPEC_SCHEMA", `${path}.${key}`, "table font size must be 8");
+      }
     }
   }
 }
@@ -1903,11 +2293,31 @@ function validateDrawingSpecSnapshot(spec) {
     if (typeof slide.notesText !== "string" || !slide.notesText.endsWith(suffix)) fail("E_EVIDENCE_NOT_DECLARED", `${path}.notesText`, "notes evidence does not match slide IDs");
     if (spec.selectedSlideIds[slideIndex] !== slide.id || spec.selectedSlideFamilies[slideIndex] !== slide.family) fail("E_SPEC_SCHEMA", path, "selection metadata does not match slide");
     if (!isDenseArray(slide.primitives) || slide.primitives.length === 0) fail("E_SPEC_SCHEMA", `${path}.primitives`, "expected nonempty primitive array");
-    slide.primitives.forEach((primitive, primitiveIndex) => validatePrimitive(primitive, `${path}.primitives[${primitiveIndex}]`, spec.stage, names));
+    slide.primitives.forEach((primitive, primitiveIndex) =>
+      validatePrimitive(
+        primitive,
+        `${path}.primitives[${primitiveIndex}]`,
+        spec.stage,
+        names,
+        slide.family,
+      ),
+    );
     slide.primitives.forEach((primitive, primitiveIndex) => {
       if (primitive.z !== primitiveIndex + 1) fail("E_NONDETERMINISTIC_OUTPUT", `${path}.primitives[${primitiveIndex}].z`, "z must be contiguous from 1");
       if (spec.theme.unbranded && primitive.role === "wordmark") fail("E_SPEC_SCHEMA", `${path}.primitives[${primitiveIndex}].role`, "unbranded spec cannot emit wordmark");
     });
+    if (["table", "evaluation"].includes(slide.family)) {
+      const tableCount = slide.primitives.filter(
+        (primitive) => primitive.kind === "table",
+      ).length;
+      if (tableCount !== 1) {
+        fail(
+          "E_SPEC_SCHEMA",
+          `${path}.primitives`,
+          "table families require exactly one native table primitive",
+        );
+      }
+    }
     validateFooterContract(slide, path, spec.theme);
     for (const role of [
       "decision-fact-card",
