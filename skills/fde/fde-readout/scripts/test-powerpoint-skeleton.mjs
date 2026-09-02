@@ -24,7 +24,7 @@ for (const [name, pattern] of [
   ["HWND-to-PID lookup", /GetWindowThreadProcessId/],
   ["baseline PowerPoint PID capture", /Get-Process\s+-Name\s+POWERPNT/i],
   ["process start-time identity", /\$powerPointProcessStart/],
-  ["cross-process automation mutex", /FdeReadoutPowerPointSkeleton/],
+  ["cross-process automation mutex", /FdeReadoutPowerPointAutomation/],
   ["exact PID cleanup", /Stop-Process\s+-Id\s+\$powerPointProcessId/i],
   ["cleanup result metadata", /powerPointCleanup/],
   ["dedicated worker exit", /\[Environment\]::Exit\(/],
@@ -35,7 +35,7 @@ for (const [name, pattern] of [
 }
 
 if (
-  helperSource.indexOf("FdeReadoutPowerPointSkeleton") >
+  helperSource.indexOf("FdeReadoutPowerPointAutomation") >
   helperSource.indexOf("Copy-Item -LiteralPath $seedPath")
 ) {
   failures.push("helper must acquire its automation mutex before copying output");

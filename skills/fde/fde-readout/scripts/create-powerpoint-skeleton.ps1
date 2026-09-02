@@ -217,7 +217,7 @@ public static class FdePowerPointNativeMethods
 
     $powerPointMutex = [Threading.Mutex]::new(
         $false,
-        'Local\FdeReadoutPowerPointSkeleton'
+        'Local\FdeReadoutPowerPointAutomation'
     )
     try {
         $powerPointMutexHeld = $powerPointMutex.WaitOne([TimeSpan]::FromSeconds(30))
