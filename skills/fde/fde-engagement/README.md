@@ -56,6 +56,8 @@ Before a durable artifact, the agent records these contributions in `fieldJudgme
 
 The agent must never invent a personal story, operator quote, disagreement, opinion, or changed mind to make writing feel human. If the human source material is missing, it asks for it before drafting.
 
+Durable reports require a firsthand observation or operator quote from audit onward, a decision rationale from design onward, and a captured or explicitly none-observed retrospective at handoff. Customer and technical-handoff reports use customer-safe judgment to satisfy these requirements. FDE leadership may retain internal judgment.
+
 Read [`references/human-judgment.md`](references/human-judgment.md) for the questions, ledger kinds, and artifact gate.
 
 ### Use a human-first editing loop
@@ -267,6 +269,8 @@ Validate the audience, evidence links, findings, recommendations, risks, and nex
 ```text
 node scripts/validate-readout-brief.mjs path/to/case-file.json path/to/readout-brief.json
 ```
+
+The brief validator accepts an open or blocked case-file gate so the report can describe it. The copied gate status must still match the case file. A structural pass does not prove that the evidence or judgment is true, sufficient, or safe for production.
 
 Render a standard Markdown report and/or slide outline:
 

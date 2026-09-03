@@ -74,6 +74,8 @@ Include:
 
 The standard technical handoff output is a report. Do not select deck or both unless a dedicated technical-handoff deck template has been supplied.
 
+Customer and technical-handoff reports are external-audience boundaries. Their applicable field judgment and report content must be marked customer-safe. FDE leadership is internal.
+
 ## Standard artifacts
 
 | Output | Template | Typical length |
@@ -89,7 +91,7 @@ Delete sections that do not support the audience's decision. Do not fill space.
 ## Reporting workflow
 
 1. Create and validate `assets/engagement-profile.template.json` against the case file.
-2. Snapshot the case file and state its phase.
+2. Snapshot the case file, state its phase, and validate the phase-appropriate `fieldJudgment`.
 3. Select only evidence authorized for this audience.
 4. Create a readout brief from `assets/readout-brief.template.json`.
 5. Link every finding, recommendation, and risk to evidence IDs.
@@ -121,7 +123,9 @@ Every readout requires the `next-steps` section. A readout without accountable f
 
 The named case file and explicitly attached evidence form a closed source set. Do not browse or borrow `evals/`, examples, other case files, or prior customer narratives to make the report feel complete.
 
-The readout brief must copy `caseFilePhase`, `gateStatus`, `gateStatusReason`, and `gateEvidenceIds` from the case file. It may not improve or reinterpret the gate status. `audienceGateReason` is the approved audience-safe rendering; customer and handoff outputs require `gateCustomerSafe: true`.
+The readout brief must copy `caseFilePhase`, `gateStatus`, `gateStatusReason`, and `gateEvidenceIds` from the case file. It may not improve or reinterpret the gate status. `audienceGateReason` is the approved audience-safe rendering; customer and technical-handoff outputs require `gateCustomerSafe: true`.
+
+Brief validation does not require the lifecycle gate to pass. It requires a firsthand observation or operator quote from audit onward, a decision rationale from design onward, and a captured or explicitly none-observed retrospective at handoff. For customer and technical-handoff reports, a customer-safe entry must satisfy each applicable field-judgment requirement. The brief schema keeps evidence and judgment separate and does not copy judgment text or IDs.
 
 ## Phase fidelity
 
@@ -264,12 +268,12 @@ When synchronized interactive HTML and editable PowerPoint are requested, use `f
 - every slide carries the required footer and confidentiality label;
 - fictional examples are labeled on the cover, footer, and evidence register;
 
-### Customer output
+### Customer and technical-handoff output
 
 - every finding, recommendation, and risk is marked customer-safe;
 - no internal product, staffing, margin, commercial, or stakeholder analysis remains;
 - restricted or unapproved evidence is absent;
-- the customer can identify decisions they own.
+- the intended external owner can identify decisions they own.
 
 ### Leadership output
 

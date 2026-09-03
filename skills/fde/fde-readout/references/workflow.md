@@ -27,6 +27,8 @@ The plan is the only narrative source used by renderers. Do not copy the case fi
 
 The plan keeps evidence and human context separate. Every entry in both ledgers requires a non-empty `sourceId` that preserves its exact source provenance; external IDs and JSON pointers are valid. The agent must not create missing observations, opinions, failures, disagreements, quotes, or rationale during rendering.
 
+Customer and technical-handoff plans require every slide and each human-context entry referenced by a slide to be marked customer-safe. FDE leadership plans may reference internal entries.
+
 ## 3. Narrative order
 
 Default order:
@@ -52,7 +54,7 @@ Validation checks:
 - known slide families and required slots;
 - evidence existence and authorization;
 - source provenance on every evidence and human-context entry;
-- customer-safe content;
+- customer-safe slides and referenced human context for customer and technical-handoff plans;
 - unique slide and workflow-node IDs;
 - brand color and text contrast;
 - brand-treatment authorization, wordmark mode, and evidence;

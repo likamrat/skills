@@ -80,11 +80,14 @@ The FDE owns:
 
 Before a durable artifact:
 
-- audit work has a firsthand observation or operator quote;
-- design work has a decision rationale;
-- a retrospective is captured or explicitly records that no material surprise was observed;
+- audit and later work has a firsthand observation or operator quote;
+- design and later work has a decision rationale;
+- handoff work has a captured retrospective or explicitly records that no material surprise was observed;
 - evidence and judgment are labeled separately;
-- customer output includes only customer-safe judgment;
+- customer and technical-handoff output uses customer-safe judgment for each applicable requirement;
+- FDE leadership output may retain internal judgment;
 - the artifact contains at least one detail that would not survive a customer-name swap.
 
 Lexical linting remains useful hygiene. It cannot prove that a human contributed substance.
+
+An open or blocked lifecycle gate may still be reported. This check validates structure and recorded safety decisions. It does not prove truth, evidence sufficiency, human identity, or production safety.

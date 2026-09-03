@@ -1,6 +1,6 @@
 # Forward deployed engineering (FDE) readout
 
-Create evidence-bound customer and leadership readouts as interactive HTML, editable PowerPoint, or both.
+Create evidence-bound customer, technical-handoff, and leadership readouts as interactive HTML, editable PowerPoint, or both.
 
 The skill uses one validated `ReadoutPlan` for content, evidence, slide structure, speaker notes, brand, and delivery requirements. HTML and PPTX render the same narrative from one plan.
 
@@ -16,6 +16,8 @@ The plan keeps two source types separate:
 Each entry must be human-provided or human-confirmed. The agent may challenge and organize this material. It may not invent a personal take, operator quote, anecdote, or rationale to make a deck feel human.
 
 Decision slides require a human rationale. Findings slides require firsthand human context. If those inputs are absent, rendering stops.
+
+Customer and technical-handoff plans reject slides and referenced human-context entries marked `customerSafe: false`. FDE leadership plans may retain internal slides and human context.
 
 Use a human-first 25/50/25 editing loop: the FDE supplies rough source notes, the agent organizes and drafts the middle from approved material, and the FDE verifies facts, restores natural voice, and approves the deck. Treat the percentages as a sequencing heuristic. Apply the minimum effective edit, protect names and numbers, and reject any sentence that could move unchanged to an unrelated customer. This approach adapts Peter Yang's MIT-licensed No AI Slop skill; see [third-party notices](THIRD_PARTY_NOTICES.md).
 
@@ -133,7 +135,7 @@ fde-readout/
 
 ## Safety
 
-- Customer and leadership outputs are separate.
+- Customer and technical-handoff outputs enforce external-audience safety. FDE leadership remains internal.
 - Every consequential claim requires evidence IDs.
 - Narrative slides require supplied human-context IDs.
 - HTML playback has no remote runtime dependency.

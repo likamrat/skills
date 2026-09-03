@@ -13,6 +13,7 @@ Before authoring, record:
 - slide-family geometry;
 - notes, evidence, footer, and confidentiality treatment.
 - human-context provenance for decision and findings slides.
+- external-audience safety for every slide and referenced human-context entry in customer and technical-handoff plans; FDE leadership remains internal.
 
 Use color by meaning:
 

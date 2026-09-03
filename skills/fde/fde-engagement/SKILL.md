@@ -222,7 +222,9 @@ Presentation design, interactive HTML, editable PowerPoint, reference-deck adapt
 4. Validate with `scripts/validate-readout-brief.mjs`, then render with `scripts/render-readout.mjs`.
 5. Read [references/style-and-quality.md](references/style-and-quality.md), lint the rendered text, and inspect every slide.
 6. Use `Unknown`, `Unassigned`, or `Not yet measured` instead of inventing workflow, metrics, owners, or dates.
-7. Fail delivery when a consequential finding lacks `[evidence-id]`, a next step lacks `Owner` or `Due`, or customer output contains internal-only material.
+7. Fail delivery when a consequential finding lacks `[evidence-id]`, a next step lacks `Owner` or `Due`, or external output contains internal-only material.
+
+A durable report may describe an open or blocked lifecycle gate. Brief validation checks the case file's field judgment through its current phase without requiring that gate to pass. Customer and technical-handoff reports require a customer-safe entry for each applicable field-judgment requirement. FDE leadership remains an internal audience.
 
 ## Hard stops
 
