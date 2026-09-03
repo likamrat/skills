@@ -5,6 +5,10 @@ import { readFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateDomainModelLifecycle } from "./domain-model-lifecycle.mjs";
+import {
+  isAuthorizedRealEvidence,
+  validateFieldJudgmentContract,
+} from "./field-judgment-contract.mjs";
 import { encodeJson, snapshotJson } from "./protocol-json.mjs";
 
 const phases = [
@@ -68,11 +72,6 @@ const sensitivityLevels = new Set([
   "confidential",
   "restricted",
 ]);
-const realEvidenceClasses = new Set([
-  "direct_observation",
-  "system_record",
-  "stakeholder_report",
-]);
 const evalCohorts = new Set([
   "normal",
   "edge",
@@ -105,21 +104,6 @@ const deploymentStages = new Set([
   "bounded-autonomy",
   "production",
 ]);
-const fieldJudgmentKinds = new Set([
-  "firsthand-observation",
-  "operator-quote",
-  "failed-attempt",
-  "surprise",
-  "disagreement",
-  "decision-rationale",
-  "changed-mind",
-]);
-const retrospectiveStatuses = new Set([
-  "pending",
-  "captured",
-  "none-observed",
-]);
-const humanOrigins = new Set(["human-provided", "human-confirmed"]);
 const virtualCasePath = fileURLToPath(
   new URL("../.virtual/case-file.json", import.meta.url),
 );
@@ -184,8 +168,7 @@ function validateEvidenceReferences(
     );
     if (requireAuthorizedReal) {
       requireValue(
-        evidence?.authorized === true &&
-          realEvidenceClasses.has(evidence?.class),
+        isAuthorizedRealEvidence(evidence),
         `${prefix} requires authorized real evidence: ${evidenceId}`,
       );
     }
@@ -483,78 +466,6 @@ function validateProblemLedger(data, evidenceById) {
   );
 }
 
-function validateFieldJudgment(data, { requireObservation = false } = {}) {
-  const evidenceById = new Map(
-    (data.evidence ?? []).map((item) => [item.id, item]),
-  );
-  const entries = data.fieldJudgment?.entries;
-  requireValue(
-    nonEmptyArray(entries),
-    "fieldJudgment.entries requires human source material",
-  );
-  const ids = new Set();
-  for (const [index, entry] of (entries ?? []).entries()) {
-    const prefix = `fieldJudgment.entries[${index}]`;
-    requireValue(
-      /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(entry?.id ?? ""),
-      `${prefix}.id must use lowercase kebab-case`,
-    );
-    requireValue(
-      fieldJudgmentKinds.has(entry?.kind),
-      `${prefix}.kind must be one of: ${[...fieldJudgmentKinds].join(", ")}`,
-    );
-    requireValue(
-      nonEmpty(entry?.authorRole),
-      `${prefix}.authorRole is required`,
-    );
-    requireValue(
-      humanOrigins.has(entry?.origin),
-      `${prefix}.origin must be human-provided or human-confirmed`,
-    );
-    requireValue(nonEmpty(entry?.statement), `${prefix}.statement is required`);
-    requireValue(nonEmpty(entry?.context), `${prefix}.context is required`);
-    requireValue(
-      nonEmpty(entry?.whyItMatters),
-      `${prefix}.whyItMatters is required`,
-    );
-    requireValue(
-      typeof entry?.customerSafe === "boolean",
-      `${prefix}.customerSafe must be true or false`,
-    );
-    validateEvidenceReferences(
-      entry?.evidenceIds,
-      `${prefix}.evidenceIds`,
-      evidenceById,
-      data.mode === "engage",
-    );
-    ids.add(entry?.id);
-  }
-  requireValue(
-    ids.size === (entries ?? []).length,
-    "fieldJudgment entry IDs must be unique",
-  );
-  if (requireObservation) {
-    requireValue(
-      (entries ?? []).some((entry) =>
-        ["firsthand-observation", "operator-quote"].includes(entry.kind),
-      ),
-      "fieldJudgment requires a firsthand observation or operator quote",
-    );
-  }
-
-  const retrospective = data.fieldJudgment?.retrospective;
-  requireValue(
-    retrospectiveStatuses.has(retrospective?.status),
-    `fieldJudgment.retrospective.status must be one of: ${[
-      ...retrospectiveStatuses,
-    ].join(", ")}`,
-  );
-  requireValue(
-    stringArray(retrospective?.evidenceIds),
-    "fieldJudgment.retrospective.evidenceIds must contain only non-empty strings",
-  );
-}
-
 function validateQualify(data) {
   const evidenceById = new Map(
     (data.evidence ?? []).map((item) => [item.id, item]),
@@ -582,8 +493,7 @@ function validateQualify(data) {
   if (data.mode === "engage") {
     requireValue(
       data.evidence?.some(
-        (item) =>
-          item?.authorized === true && realEvidenceClasses.has(item?.class),
+        (item) => isAuthorizedRealEvidence(item),
       ),
       "engage mode requires authorized direct observation, system record, or stakeholder evidence",
     );
@@ -888,8 +798,6 @@ function validateAudit(data) {
   );
   const requireReal = data.mode === "engage";
 
-  validateFieldJudgment(data, { requireObservation: true });
-
   for (const error of validateDomainModelLifecycle(
     data.domainModel,
     evidenceById,
@@ -1069,12 +977,6 @@ function validateAudit(data) {
 }
 
 function validateDesign(data) {
-  requireValue(
-    (data.fieldJudgment?.entries ?? []).some(
-      (entry) => entry.kind === "decision-rationale",
-    ),
-    "fieldJudgment requires a decision-rationale before design",
-  );
   requireValue(nonEmptyArray(data.allocationMatrix?.steps), "allocationMatrix.steps requires at least one future-state step");
   for (const [index, step] of (data.allocationMatrix?.steps ?? []).entries()) {
     const prefix = `allocationMatrix.steps[${index}]`;
@@ -1181,8 +1083,7 @@ function validateDeploy(data) {
   for (const evidenceId of data.deployment?.stageEvidenceIds ?? []) {
     const evidence = evidenceById.get(evidenceId);
     requireValue(
-      evidence?.authorized === true &&
-        realEvidenceClasses.has(evidence?.class),
+      isAuthorizedRealEvidence(evidence),
       `deployment.stageEvidenceIds requires authorized real evidence: ${evidenceId}`,
     );
   }
@@ -1194,34 +1095,6 @@ function validateDeploy(data) {
 }
 
 function validateHandoff(data) {
-  const retrospective = data.fieldJudgment?.retrospective;
-  requireValue(
-    ["captured", "none-observed"].includes(retrospective?.status),
-    "fieldJudgment.retrospective must be captured or none-observed at handoff",
-  );
-  requireValue(
-    nonEmpty(retrospective?.reason),
-    "fieldJudgment.retrospective.reason is required at handoff",
-  );
-  if (retrospective?.status === "captured") {
-    requireValue(
-      (data.fieldJudgment?.entries ?? []).some((entry) =>
-        [
-          "failed-attempt",
-          "surprise",
-          "disagreement",
-          "changed-mind",
-        ].includes(entry.kind),
-      ),
-      "captured retrospective requires a failed attempt, surprise, disagreement, or changed mind",
-    );
-    validateEvidenceReferences(
-      retrospective?.evidenceIds,
-      "fieldJudgment.retrospective.evidenceIds",
-      new Map((data.evidence ?? []).map((item) => [item.id, item])),
-      data.mode === "engage",
-    );
-  }
   requireValue(nonEmpty(data.handoff?.owner), "handoff.owner is required");
   requireValue(nonEmpty(data.handoff?.runbook), "handoff.runbook is required");
   requireValue(nonEmptyStringArray(data.handoff?.training), "handoff.training is required");
@@ -1270,6 +1143,9 @@ async function validateCaseFileDataUnsafe(data, options = {}) {
   requireValue(data?.evalPlan?.unresolvedSevereFailures === undefined ||
     stringArray(data.evalPlan.unresolvedSevereFailures), "evalPlan.unresolvedSevereFailures must be an array of non-empty strings");
   validateEvidence(data?.evidence);
+  for (const error of validateFieldJudgmentContract(data)) {
+    errors.push(error);
+  }
   const evidenceById = new Map((data?.evidence ?? []).map((item) => [item.id, item]));
   for (const [index, conflict] of (Array.isArray(data?.domainModel?.conflicts) ? data.domainModel.conflicts : []).entries()) {
     const prefix = `domainModel.conflicts[${index}]`;

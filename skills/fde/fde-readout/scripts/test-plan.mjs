@@ -410,6 +410,34 @@ const tests = [
     expectedText: "must be customerSafe",
   },
   {
+    name: "rejects unsafe technical handoff slide",
+    mutate: (data) => {
+      data.audience = "technical-handoff";
+      data.slides[3].customerSafe = false;
+    },
+    expectedStatus: 1,
+    expectedText: "must be customerSafe",
+  },
+  {
+    name: "rejects technical handoff internal human context",
+    mutate: (data) => {
+      data.audience = "technical-handoff";
+      data.humanContext[1].customerSafe = false;
+    },
+    expectedStatus: 1,
+    expectedText: "references internal-only human context",
+  },
+  {
+    name: "accepts internal slide and human context for leadership",
+    mutate: (data) => {
+      data.audience = "fde-leadership";
+      data.slides[3].customerSafe = false;
+      data.humanContext[1].customerSafe = false;
+    },
+    expectedStatus: 0,
+    expectedText: "5 slides; html + pptx",
+  },
+  {
     name: "rejects bad slide order",
     mutate: (data) => {
       [data.slides[0], data.slides[1]] = [data.slides[1], data.slides[0]];
