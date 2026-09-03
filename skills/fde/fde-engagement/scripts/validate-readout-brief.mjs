@@ -3,6 +3,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { validateDomainModelLifecycle } from "./domain-model-lifecycle.mjs";
+import { validateFieldJudgmentContract } from "./field-judgment-contract.mjs";
 
 const audiences = new Set(["customer", "fde-leadership", "technical-handoff"]);
 const externalAudiences = new Set(["customer", "technical-handoff"]);
@@ -179,6 +180,11 @@ requireValue(
   !containsPlaceholder(brief),
   "readout brief still contains template placeholders",
 );
+for (const error of validateFieldJudgmentContract(caseFile, {
+  externalAudience: externalAudiences.has(brief.audience),
+})) {
+  errors.push(error);
+}
 if (
   phases.indexOf(caseFile.phase) >= phases.indexOf("audit")
 ) {

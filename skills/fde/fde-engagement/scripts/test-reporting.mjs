@@ -16,6 +16,7 @@ const renderer = resolve(
 );
 
 const caseFile = {
+  mode: "engage",
   phase: "evaluate",
   gate: {
     status: "blocked",
@@ -94,6 +95,40 @@ const caseFile = {
     boundaries: [],
     relationships: [],
     conflicts: [],
+  },
+  fieldJudgment: {
+    entries: [
+      {
+        id: "judgment-observation-001",
+        kind: "firsthand-observation",
+        authorRole: "FDE",
+        origin: "human-confirmed",
+        statement:
+          "The operator used the same approval label for recommendation and authorization.",
+        context: "Workflow observation",
+        whyItMatters:
+          "The report must preserve the authority distinction found in the audit.",
+        evidenceIds: ["obs-001"],
+        customerSafe: true,
+      },
+      {
+        id: "judgment-rationale-001",
+        kind: "decision-rationale",
+        authorRole: "FDE",
+        origin: "human-confirmed",
+        statement:
+          "The pilot remains recommendation-only until the authorization owner is confirmed.",
+        context: "Pilot boundary decision",
+        whyItMatters:
+          "The recommendation follows the unresolved authority boundary.",
+        evidenceIds: ["obs-001"],
+        customerSafe: true,
+      },
+    ],
+    retrospective: {
+      status: "pending",
+      evidenceIds: [],
+    },
   },
   assignments: [
     {
@@ -238,6 +273,92 @@ const tests = [
   {
     name: "accepts customer report and deck brief",
     mutate: () => {},
+    expectedStatus: 0,
+    expectedText: "structurally ready for customer both",
+  },
+  {
+    name: "rejects missing field judgment",
+    mutate: () => {},
+    mutateCase: (data) => {
+      delete data.fieldJudgment;
+    },
+    expectedStatus: 1,
+    expectedText: "fieldJudgment.entries requires human source material",
+  },
+  {
+    name: "rejects agent-generated field judgment",
+    mutate: () => {},
+    mutateCase: (data) => {
+      data.fieldJudgment.entries[0].origin = "agent-generated";
+    },
+    expectedStatus: 1,
+    expectedText: "origin must be human-provided or human-confirmed",
+  },
+  {
+    name: "rejects evaluate report without firsthand field judgment",
+    mutate: () => {},
+    mutateCase: (data) => {
+      data.fieldJudgment.entries = data.fieldJudgment.entries.filter(
+        (entry) => entry.kind !== "firsthand-observation",
+      );
+    },
+    expectedStatus: 1,
+    expectedText: "firsthand observation or operator quote",
+  },
+  {
+    name: "rejects evaluate report without decision rationale",
+    mutate: () => {},
+    mutateCase: (data) => {
+      data.fieldJudgment.entries = data.fieldJudgment.entries.filter(
+        (entry) => entry.kind !== "decision-rationale",
+      );
+    },
+    expectedStatus: 1,
+    expectedText: "decision-rationale before design",
+  },
+  {
+    name: "rejects external report without customer-safe observation",
+    mutate: () => {},
+    mutateCase: (data) => {
+      data.fieldJudgment.entries[0].customerSafe = false;
+    },
+    expectedStatus: 1,
+    expectedText: "customer-safe firsthand observation or operator quote",
+  },
+  {
+    name: "rejects external report without customer-safe rationale",
+    mutate: () => {},
+    mutateCase: (data) => {
+      data.fieldJudgment.entries[1].customerSafe = false;
+    },
+    expectedStatus: 1,
+    expectedText: "customer-safe decision-rationale",
+  },
+  {
+    name: "rejects invalid handoff retrospective",
+    mutate: (brief) => {
+      brief.caseFilePhase = "handoff";
+    },
+    mutateCase: (data) => {
+      data.phase = "handoff";
+      data.fieldJudgment.retrospective.status = "pending";
+    },
+    expectedStatus: 1,
+    expectedText: "must be captured or none-observed at handoff",
+  },
+  {
+    name: "accepts none-observed handoff retrospective",
+    mutate: (brief) => {
+      brief.caseFilePhase = "handoff";
+    },
+    mutateCase: (data) => {
+      data.phase = "handoff";
+      data.fieldJudgment.retrospective = {
+        status: "none-observed",
+        reason: "The review found no material surprise or changed diagnosis.",
+        evidenceIds: [],
+      };
+    },
     expectedStatus: 0,
     expectedText: "structurally ready for customer both",
   },

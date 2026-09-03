@@ -482,7 +482,7 @@ for (const [index, slide] of (plan.slides ?? []).entries()) {
     typeof slide?.customerSafe === "boolean",
     `${prefix}.customerSafe must be true or false`,
   );
-  if (plan.audience === "customer") {
+  if (externalAudiences.has(plan.audience)) {
     requireValue(
       slide?.customerSafe === true,
       `${prefix} must be customerSafe`,
@@ -501,7 +501,7 @@ for (const [index, slide] of (plan.slides ?? []).entries()) {
       judgment !== undefined,
       `${prefix}.judgmentIds references unknown human context: ${judgmentId}`,
     );
-    if (plan.audience === "customer") {
+    if (externalAudiences.has(plan.audience)) {
       requireValue(
         judgment?.customerSafe === true,
         `${prefix}.judgmentIds references internal-only human context: ${judgmentId}`,
