@@ -12,6 +12,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputDirectory,
 
+    [Parameter(Mandatory = $true)]
+    [string]$NodeExecutable,
+
     [ValidateSet(
         'notes',
         'delete',
@@ -34,11 +37,64 @@ param(
     )]
     [string]$FailAfter,
 
-    [switch]$ValidateSpecOnly
+    [switch]$ValidateSpecOnly,
+
+    [string]$OwnershipReceipt
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+function Write-OwnershipReceipt {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$ProcessId,
+
+        [Parameter(Mandatory = $true)]
+        [datetime]$ProcessStart,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ProcessPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($script:OwnershipReceipt)) {
+        return
+    }
+    $receiptPath = [IO.Path]::GetFullPath($script:OwnershipReceipt)
+    $receiptDirectory = Split-Path -Parent $receiptPath
+    if (-not (Test-Path -LiteralPath $receiptDirectory -PathType Container)) {
+        throw 'OwnershipReceipt parent directory must already exist.'
+    }
+    if (Test-Path -LiteralPath $receiptPath) {
+        throw 'OwnershipReceipt must not already exist.'
+    }
+
+    $receipt = [ordered]@{
+        schemaVersion = 1
+        owner = 'fde-powerpoint-native-shapes/2.0'
+        status = 'owned'
+        processId = $ProcessId
+        processStartTimeUtc = $ProcessStart.ToUniversalTime().ToString(
+            'o',
+            [Globalization.CultureInfo]::InvariantCulture
+        )
+        processPath = [IO.Path]::GetFullPath($ProcessPath)
+    }
+    $temporaryPath = Join-Path $receiptDirectory ".$([IO.Path]::GetFileName($receiptPath)).$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [IO.File]::WriteAllText(
+            $temporaryPath,
+            ($receipt | ConvertTo-Json -Compress),
+            [Text.UTF8Encoding]::new($false)
+        )
+        [IO.FileInfo]::new($temporaryPath).MoveTo($receiptPath)
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force
+        }
+    }
+}
 
 Import-Module `
     -Name (Join-Path $PSScriptRoot 'powerpoint-workflow-connectors.psm1') `
@@ -433,8 +489,25 @@ function Get-WorkerPublicDrawingSpecJson {
     if (-not (Test-Path -LiteralPath $validatorPath -PathType Leaf)) {
         throw "Public drawing-spec validator is missing: $validatorPath."
     }
+    $nodeExecutablePath = [IO.Path]::GetFullPath($NodeExecutable)
+    if (
+        -not [IO.Path]::IsPathRooted($NodeExecutable) -or
+        -not (Test-Path -LiteralPath $nodeExecutablePath -PathType Leaf) -or
+        -not [string]::Equals(
+            [IO.Path]::GetFileName($nodeExecutablePath),
+            'node.exe',
+            [StringComparison]::OrdinalIgnoreCase
+        ) -or
+        -not [string]::Equals(
+            [string](Resolve-Path -LiteralPath $nodeExecutablePath -ErrorAction Stop),
+            $nodeExecutablePath,
+            [StringComparison]::OrdinalIgnoreCase
+        )
+    ) {
+        throw 'NodeExecutable must identify an absolute canonical node.exe file.'
+    }
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = 'node'
+    $startInfo.FileName = $nodeExecutablePath
     $startInfo.Arguments = '"' + $validatorPath.Replace('"', '\"') + '"'
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
@@ -5561,8 +5634,12 @@ try {
         throw "PowerPoint HWND process changed during ownership validation from PID $workerProcessId to PID $verifiedProcessId."
     }
     $hasProvisionalPowerPointProcess = $true
-    Invoke-TestFailpoint -Stage 'process-acquired'
     $ownsPowerPointProcess = $true
+    Write-OwnershipReceipt `
+        -ProcessId $workerProcessId `
+        -ProcessStart $workerProcessStart `
+        -ProcessPath $workerProcessPath
+    Invoke-TestFailpoint -Stage 'process-acquired'
     Invoke-TestFailpoint -Stage 'process-validated'
     Assert-NoPowerPointContamination -OwnedProcessId $workerProcessId -OwnedProcessStart $workerProcessStart
 

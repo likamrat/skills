@@ -6,6 +6,8 @@
 import { createHash, createPublicKey, verify } from "node:crypto";
 
 export const APPROVAL_ATTESTATION_DOMAIN = "fde-powerpoint-smoke-approval-v1";
+export const PRODUCTION_COORDINATOR_ID = "fde-powerpoint-native-coordinator/1.0";
+export const PRODUCTION_EXECUTION_PROFILE = "production";
 
 export const EXCLUDED_SMOKE_FAMILIES = Object.freeze([
   "cover",
@@ -96,6 +98,8 @@ const keyringEntryAllowedKeyLookup = new Set(["keyId", "algorithm", "publicKeyPe
 const reportAllowedKeyLookup = new Set([
   "schemaVersion",
   "status",
+  "coordinator",
+  "executionProfile",
   "selectionMode",
   "sourcePlanSha256",
   "selectedSlideIds",
@@ -323,22 +327,75 @@ export function densityScore(slide) {
   if (!isPlainObject(slide) || !hasOwn(slide, "family")) {
     throw new TypeError("slide must be a plain object with an own family property");
   }
-  const fields = FAMILY_DENSITY_FIELDS[slide.family];
-  if (!fields) return 0;
+  if (!FAMILY_DENSITY_FIELDS[slide.family]) return 0;
   if (!hasOwn(slide, "content") || !isPlainObject(slide.content)) {
     throw new TypeError("slide.content must be an own plain object");
   }
 
-  let score = 0;
-  for (const field of fields) {
-    if (!hasOwn(slide.content, field)) continue;
+  const length = (field) => {
+    if (!hasOwn(slide.content, field)) return 0;
     const value = slide.content[field];
     if (!isDenseArray(value)) {
       throw new TypeError(`slide.content.${field} must be a dense array`);
     }
-    score += value.length;
+    return value.length;
+  };
+  const claim = (field) => {
+    if (!hasOwn(slide.content, field)) return 0;
+    if (!isPlainObject(slide.content[field])) {
+      throw new TypeError(`slide.content.${field} must be a plain object`);
+    }
+    return 1;
+  };
+
+  switch (slide.family) {
+    case "profile":
+      return length("facts") + length("contexts");
+    case "metrics":
+      return length("metrics");
+    case "chart": {
+      const categories = length("categories");
+      const series = length("series");
+      const chartType = slide.content.chartType;
+      if (!["bar", "line"].includes(chartType)) {
+        throw new TypeError("slide.content.chartType must be bar or line");
+      }
+      const marks =
+        chartType === "line"
+          ? series * Math.max(0, 2 * categories - 1)
+          : series * categories;
+      const axes = 2;
+      const legend = series * 2;
+      const dataGrid = series * (categories + 1);
+      return (
+        marks +
+        categories +
+        series +
+        axes +
+        legend +
+        dataGrid +
+        claim("insight")
+      );
+    }
+    case "table": {
+      const columns = length("columns");
+      const rows = length("rows");
+      return rows * columns + columns + claim("insight");
+    }
+    case "workflow":
+      return length("nodes") + length("edges") * 2;
+    case "findings":
+    case "risks":
+      return length("items") * 3;
+    case "responsibility":
+      return length("steps") * 2;
+    case "evaluation":
+      return length("cases") * 3 + 3 + claim("releaseImplication");
+    case "timeline":
+      return length("milestones") * 2;
+    default:
+      return 0;
   }
-  return score;
 }
 
 export function selectSmokeSlides(plan) {
@@ -594,7 +651,14 @@ function parseJsonBytes(bytes, label, errors) {
   }
 }
 
-export function validateSmokeApproval({ planBytes, reportBytes, approval, trustedKeyring }) {
+export function validateSmokeApproval({
+  planBytes,
+  reportBytes,
+  approval,
+  trustedKeyring,
+  expectedCoordinator = PRODUCTION_COORDINATOR_ID,
+  expectedExecutionProfile = PRODUCTION_EXECUTION_PROFILE,
+}) {
   const errors = [];
   validateApprovalShape(approval, errors);
   const trustedKeys = validateTrustedKeyring(trustedKeyring, errors);
@@ -676,6 +740,20 @@ export function validateSmokeApproval({ planBytes, reportBytes, approval, truste
   }
   if (!hasOwn(report, "status") || report.status !== "PASS") {
     errors.push("report.status must equal PASS");
+  }
+  if (
+    !hasOwn(report, "coordinator") ||
+    report.coordinator !== expectedCoordinator
+  ) {
+    errors.push(`report.coordinator must equal ${expectedCoordinator}`);
+  }
+  if (
+    !hasOwn(report, "executionProfile") ||
+    report.executionProfile !== expectedExecutionProfile
+  ) {
+    errors.push(
+      `report.executionProfile must equal ${expectedExecutionProfile}`,
+    );
   }
   if (!hasOwn(report, "selectionMode") || report.selectionMode !== "smoke") {
     errors.push("report.selectionMode must equal smoke");
@@ -840,6 +918,10 @@ export function validateSmokeApproval({ planBytes, reportBytes, approval, truste
     authenticated: true,
     attestation: {
       keyId: approval.attestation.keyId,
+    },
+    provenance: {
+      coordinator: report.coordinator,
+      executionProfile: report.executionProfile,
     },
     approvedAt: approval.approvedAt,
     hashes: {

@@ -8,7 +8,9 @@ param(
 
     [string]$Seed,
 
-    [string[]]$SmokeSlideIds
+    [string[]]$SmokeSlideIds,
+
+    [string]$OwnershipReceipt
 )
 
 Set-StrictMode -Version Latest
@@ -28,6 +30,58 @@ function Get-Sha256 {
     finally {
         $algorithm.Dispose()
         $stream.Dispose()
+    }
+}
+
+function Write-OwnershipReceipt {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$ProcessId,
+
+        [Parameter(Mandatory = $true)]
+        [datetime]$ProcessStart,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ProcessPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($script:OwnershipReceipt)) {
+        return
+    }
+
+    $receiptPath = [IO.Path]::GetFullPath($script:OwnershipReceipt)
+    $receiptDirectory = Split-Path -Parent $receiptPath
+    if (-not (Test-Path -LiteralPath $receiptDirectory -PathType Container)) {
+        throw 'OwnershipReceipt parent directory must already exist.'
+    }
+    if (Test-Path -LiteralPath $receiptPath) {
+        throw 'OwnershipReceipt must not already exist.'
+    }
+
+    $receipt = [ordered]@{
+        schemaVersion = 1
+        owner = 'fde-powerpoint-skeleton/1.0'
+        status = 'owned'
+        processId = $ProcessId
+        processStartTimeUtc = $ProcessStart.ToUniversalTime().ToString(
+            'o',
+            [Globalization.CultureInfo]::InvariantCulture
+        )
+        processPath = [IO.Path]::GetFullPath($ProcessPath)
+    }
+    $temporaryPath = Join-Path $receiptDirectory ".$([IO.Path]::GetFileName($receiptPath)).$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [IO.File]::WriteAllText(
+            $temporaryPath,
+            ($receipt | ConvertTo-Json -Compress),
+            [Text.UTF8Encoding]::new($false)
+        )
+        [IO.FileInfo]::new($temporaryPath).MoveTo($receiptPath)
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force
+        }
     }
 }
 
@@ -127,6 +181,7 @@ $operationErrorMessage = $null
 $cleanupErrorMessage = $null
 $powerPointProcessId = 0
 $powerPointProcessStart = $null
+$powerPointProcessPath = $null
 $ownsPowerPointProcess = $false
 $powerPointCleanupMode = $null
 $powerPointGraceSeconds = 5
@@ -235,6 +290,9 @@ public static class FdePowerPointNativeMethods
         Get-Process -Name POWERPNT -ErrorAction SilentlyContinue |
             ForEach-Object { $_.Id }
     )
+    if ($baselinePowerPointIds.Count -ne 0) {
+        throw "PowerPoint skeleton requires a zero process baseline; observed PID(s): $($baselinePowerPointIds -join ', ')."
+    }
 
     $powerPoint = New-Object -ComObject PowerPoint.Application
     $windowHandle = [IntPtr][int64]$powerPoint.HWND
@@ -258,9 +316,24 @@ public static class FdePowerPointNativeMethods
     if ($resolvedProcess.ProcessName -ne 'POWERPNT') {
         throw "PowerPoint window resolved to unexpected process $($resolvedProcess.ProcessName) (PID $resolvedProcessId)."
     }
+    $powerPointProcessPath = $resolvedProcess.Path
+    if (
+        [string]::IsNullOrWhiteSpace($powerPointProcessPath) -or
+        -not [string]::Equals(
+            [IO.Path]::GetFileName($powerPointProcessPath),
+            'POWERPNT.EXE',
+            [StringComparison]::OrdinalIgnoreCase
+        )
+    ) {
+        throw "PowerPoint window process PID $resolvedProcessId has an unexpected executable path."
+    }
     $powerPointProcessId = [int]$resolvedProcessId
     $powerPointProcessStart = $resolvedProcess.StartTime
     $ownsPowerPointProcess = $true
+    Write-OwnershipReceipt `
+        -ProcessId $powerPointProcessId `
+        -ProcessStart $powerPointProcessStart `
+        -ProcessPath $powerPointProcessPath
 
     $presentation = $powerPoint.Presentations.Open(
         $outputPath,

@@ -473,6 +473,8 @@ if (hasWindowsPowerShell) {
           skeletonPath,
           "-OutputDirectory",
           outputPath,
+          "-NodeExecutable",
+          process.execPath,
         ],
         {
           encoding: "utf8",
@@ -543,6 +545,8 @@ if (!hasWindowsPowerShell) {
 }
 
 function runPowerShell(file, args, extraEnv = {}) {
+  const effectiveArgs =
+    file === worker ? [...args, "-NodeExecutable", process.execPath] : args;
   return spawnSync(
     "powershell",
     [
@@ -551,7 +555,7 @@ function runPowerShell(file, args, extraEnv = {}) {
       "Bypass",
       "-File",
       file,
-      ...args,
+      ...effectiveArgs,
     ],
     {
       encoding: "utf8",

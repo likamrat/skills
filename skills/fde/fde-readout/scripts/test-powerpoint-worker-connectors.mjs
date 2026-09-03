@@ -1088,6 +1088,8 @@ function workerInvocation(
       skeletonPath,
       "-OutputDirectory",
       outputPath,
+      "-NodeExecutable",
+      process.execPath,
       ...extraArguments,
     ],
     environment,

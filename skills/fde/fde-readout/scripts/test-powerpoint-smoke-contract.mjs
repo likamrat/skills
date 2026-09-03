@@ -15,6 +15,8 @@ import {
   BLOCKED_IDENTITY_TERMS,
   EXCLUDED_SMOKE_FAMILIES,
   FAMILY_DENSITY_FIELDS,
+  PRODUCTION_COORDINATOR_ID,
+  PRODUCTION_EXECUTION_PROFILE,
   canonicalizeJson,
   densityScore,
   isDenseArray,
@@ -126,6 +128,8 @@ function buildFixture(plan = buildPlan()) {
   const report = {
     schemaVersion: 1,
     status: "PASS",
+    coordinator: PRODUCTION_COORDINATOR_ID,
+    executionProfile: PRODUCTION_EXECUTION_PROFILE,
     selectionMode: "smoke",
     sourcePlanSha256: sha256(planBytes),
     selectedSlideIds: selection.map((slide) => slide.id),
@@ -221,6 +225,11 @@ function replaceReport(fixture, report) {
   const result = expectPass("baseline success");
   check(result.authenticated === true, "success must report authenticated true");
   check(result.attestation.keyId === hostKeyId, "success must return the attestation key ID");
+  check(
+    result.provenance.coordinator === PRODUCTION_COORDINATOR_ID &&
+      result.provenance.executionProfile === PRODUCTION_EXECUTION_PROFILE,
+    "success must return exact signed production provenance",
+  );
   check(result.approver.id === "employee:jane-doe", "success must return the host identity ID");
   check(result.approver.kind === "human", "success must return the human actor kind");
   check(result.approver.name === "Jane Doe", "success must return the approver name");
@@ -503,6 +512,70 @@ expectFail(
   check(
     tieSelection[2].id === "table-first",
     "tied density scores must keep the earlier slide (table-first)",
+  );
+
+  const tablePlan = buildPlan();
+  tablePlan.slides.splice(
+    2,
+    0,
+    {
+      id: "table-2x20",
+      family: "table",
+      content: { columns: Array(20).fill("c"), rows: Array(2).fill({}) },
+    },
+    {
+      id: "table-10x10",
+      family: "table",
+      content: { columns: Array(10).fill("c"), rows: Array(10).fill({}) },
+    },
+  );
+  check(
+    densityScore(tablePlan.slides[3]) > densityScore(tablePlan.slides[2]) &&
+      selectSmokeSlides(tablePlan)[2].id === "table-10x10",
+    "10x10 table complexity must outrank 2x20",
+  );
+
+  const chartPlan = buildPlan();
+  chartPlan.slides.splice(
+    2,
+    0,
+    {
+      id: "chart-lower",
+      family: "chart",
+      content: {
+        chartType: "line",
+        categories: Array(12).fill("c"),
+        series: Array(3).fill({}),
+        insight: {},
+      },
+    },
+    {
+      id: "chart-12x4",
+      family: "chart",
+      content: {
+        chartType: "bar",
+        categories: Array(12).fill("c"),
+        series: Array(4).fill({}),
+        insight: {},
+      },
+    },
+  );
+  check(
+    densityScore(chartPlan.slides[2]) === 132 &&
+      densityScore(chartPlan.slides[3]) === 127,
+    "chart density must count line segments and markers separately from bars",
+  );
+  check(
+    densityScore(chartPlan.slides[2]) > densityScore(chartPlan.slides[3]) &&
+      selectSmokeSlides(chartPlan)[2].id === "chart-lower",
+    "12x3 line complexity must outrank a 12x4 bar when it has more editable leaves",
+  );
+  check(
+    densityScore({
+      family: "workflow",
+      content: { nodes: [{}, {}, {}], edges: [{}, {}, {}] },
+    }) === 9,
+    "workflow density must continue to weight each routed edge twice",
   );
 }
 
@@ -870,6 +943,28 @@ expectFail(
     replaceReport(fixture, { ...fixture.report, trusted: true });
   },
   /report has unexpected keys/,
+);
+expectFail(
+  "signed report coordinator is test-only",
+  (fixture) => {
+    replaceReport(fixture, {
+      ...fixture.report,
+      coordinator: "fde-powerpoint-native-coordinator/test-only",
+    });
+    signApproval(fixture.approval);
+  },
+  /report\.coordinator must equal fde-powerpoint-native-coordinator\/1\.0/,
+);
+expectFail(
+  "signed report execution profile is test-only",
+  (fixture) => {
+    replaceReport(fixture, {
+      ...fixture.report,
+      executionProfile: "test-only",
+    });
+    signApproval(fixture.approval);
+  },
+  /report\.executionProfile must equal production/,
 );
 for (const field of [
   "slides",

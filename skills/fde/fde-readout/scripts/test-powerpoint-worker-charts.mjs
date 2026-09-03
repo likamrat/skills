@@ -567,6 +567,8 @@ async function assertNoWorkerStage(directory, label) {
 }
 
 function runPowerShell(script, args, extraEnv = {}) {
+  const effectiveArgs =
+    script === worker ? [...args, "-NodeExecutable", process.execPath] : args;
   return spawnSync(
     "powershell",
     [
@@ -575,7 +577,7 @@ function runPowerShell(script, args, extraEnv = {}) {
       "Bypass",
       "-File",
       script,
-      ...args,
+      ...effectiveArgs,
     ],
     {
       encoding: "utf8",

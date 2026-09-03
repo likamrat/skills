@@ -24,7 +24,12 @@ for (const [name, pattern] of [
   ["PowerPoint HWND lookup", /\$powerPoint\.HWND/],
   ["HWND-to-PID lookup", /GetWindowThreadProcessId/],
   ["baseline PowerPoint PID capture", /Get-Process\s+-Name\s+POWERPNT/i],
+  ["exclusive zero baseline", /\$baselinePowerPointIds\.Count -ne 0[\s\S]*zero process baseline/],
   ["process start-time identity", /\$powerPointProcessStart/],
+  ["process path identity", /\$powerPointProcessPath/],
+  ["optional ownership receipt", /\[string\]\$OwnershipReceipt/],
+  ["atomic ownership receipt", /\[IO\.FileInfo\]::new\(\$temporaryPath\)\.MoveTo\(\$receiptPath\)/],
+  ["ownership receipt owner", /fde-powerpoint-skeleton\/1\.0/],
   ["cross-process automation mutex", /FdeReadoutPowerPointAutomation/],
   ["exact PID cleanup", /Stop-Process\s+-Id\s+\$powerPointProcessId/i],
   ["cleanup result metadata", /powerPointCleanup/],
@@ -32,6 +37,24 @@ for (const [name, pattern] of [
 ]) {
   if (!pattern.test(helperSource)) {
     failures.push(`helper omits ${name}`);
+  }
+
+  const presentationOpenIndex = helperSource.indexOf(
+    "$presentation = $powerPoint.Presentations.Open",
+  );
+  const ownershipReceiptIndex = helperSource.lastIndexOf(
+    "Write-OwnershipReceipt",
+    presentationOpenIndex,
+  );
+  if (
+    ownershipReceiptIndex < 0 ||
+    ownershipReceiptIndex > presentationOpenIndex ||
+    ownershipReceiptIndex <
+      helperSource.indexOf("$powerPointProcessPath = $resolvedProcess.Path")
+  ) {
+    failures.push(
+      "helper must validate exact process path and persist ownership before opening the presentation",
+    );
   }
 }
 

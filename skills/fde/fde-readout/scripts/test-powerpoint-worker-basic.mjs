@@ -106,6 +106,8 @@ if (
 }
 for (const [name, pattern] of [
   ["raw spec hash contract", /ExpectedSpecSha256/],
+  ["absolute Node executable contract", /\[string\]\$NodeExecutable/],
+  ["absolute Node process launch", /\$startInfo\.FileName = \$nodeExecutablePath/],
   ["schema version gate", /fde-drawing-spec\/1\.0/],
   ["960x540 stage gate", /960.*540|540.*960/s],
   ["selected-slide count gate", /selectedSlideIds.*slidesSpec\.Count/s],
@@ -140,6 +142,9 @@ for (const [name, pattern] of [
   ],
   ["validated process-object cleanup", /\$ownedPowerPointProcess\.Kill\(\)/],
   ["process path identity", /workerProcessPath/],
+  ["optional ownership receipt", /\[string\]\$OwnershipReceipt/],
+  ["atomic ownership receipt", /\[IO\.FileInfo\]::new\(\$temporaryPath\)\.MoveTo\(\$receiptPath\)/],
+  ["ownership receipt owner", /fde-powerpoint-native-shapes\/2\.0/],
   ["pre-eligibility exited-process rejection", /\$ownedPowerPointProcess\.HasExited[\s\S]*ownership validation/],
   ["root lifetime retention", /\[GC\]::KeepAlive\(\$powerPoint\)/],
   ["dedicated worker exit", /\[Environment\]::Exit\(/],
@@ -213,7 +218,23 @@ for (const [name, pattern] of [
   if (!pattern.test(workerSource)) failures.push(`worker omits ${name}`);
 }
 
+const ownershipReceiptIndex = workerSource.lastIndexOf(
+  "Write-OwnershipReceipt",
+  workerSource.indexOf("Invoke-TestFailpoint -Stage 'process-validated'"),
+);
+if (
+  ownershipReceiptIndex < 0 ||
+  ownershipReceiptIndex >
+    workerSource.indexOf("Invoke-TestFailpoint -Stage 'process-validated'") ||
+  ownershipReceiptIndex < workerSource.indexOf("$workerProcessPath =")
+) {
+  failures.push(
+    "worker must persist exact ownership after path validation and before process-validated work",
+  );
+}
+
 for (const [name, pattern] of [
+  ["bare Node executable launch", /\$startInfo\.FileName = 'node'/],
   ["FinalReleaseComObject", /FinalReleaseComObject/i],
   [
     "root Application release",
@@ -507,6 +528,8 @@ if (hasWindowsPowerShell) {
           paths.skeleton,
           "-OutputDirectory",
           paths.outputDirectory,
+          "-NodeExecutable",
+          process.execPath,
         ],
         {
           encoding: "utf8",
@@ -702,6 +725,8 @@ if (nativeRequested && suiteBaseline.length > 0) {
 }
 
 function runPowerShell(file, args, extraEnv = {}) {
+  const effectiveArgs =
+    file === worker ? [...args, "-NodeExecutable", process.execPath] : args;
   return spawnSync(
     "powershell",
     [
@@ -710,7 +735,7 @@ function runPowerShell(file, args, extraEnv = {}) {
       "Bypass",
       "-File",
       file,
-      ...args,
+      ...effectiveArgs,
     ],
     {
       encoding: "utf8",
@@ -882,7 +907,9 @@ function runExclusiveBaselinePreservationCase({
     "        '-Skeleton',",
     `        ${quote(`"${skeletonPath}"`)},`,
     "        '-OutputDirectory',",
-    `        ${quote(`"${outputDirectory}"`)}`,
+    `        ${quote(`"${outputDirectory}"`)},`,
+    "        '-NodeExecutable',",
+    `        ${quote(`"${process.execPath}"`)}`,
     "    )",
     `    $workerProcess = Start-Process -FilePath $powerShellExecutable -ArgumentList $argumentList -RedirectStandardOutput ${quote(stdoutPath)} -RedirectStandardError ${quote(stderrPath)} -PassThru -NoNewWindow`,
     "    $workerProcessHandle = $workerProcess.Handle",

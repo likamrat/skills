@@ -213,6 +213,18 @@ const requiredAssets = [
     "dependency-free PPTX package QA CLI",
   ],
   [
+    join(skillRoot, "scripts", "powerpoint-native-coordinator.mjs"),
+    "native PowerPoint coordinator",
+  ],
+  [
+    join(skillRoot, "scripts", "powerpoint-owned-process-watchdog.ps1"),
+    "exact owned PowerPoint watchdog",
+  ],
+  [
+    join(skillRoot, "scripts", "inspect-trusted-keyring-protection.ps1"),
+    "trusted keyring ACL inspector",
+  ],
+  [
     join(skillRoot, "scripts", "render-powerpoint-worker.ps1"),
     "native PowerPoint worker",
   ],
@@ -380,6 +392,8 @@ for (const script of [
   "test-source-preflight.mjs",
   "test-powerpoint-skeleton.mjs",
   "test-powerpoint-smoke-contract.mjs",
+  "test-powerpoint-native-coordinator.mjs",
+  "test-powerpoint-worker-basic.mjs",
   "test-powerpoint-layout.mjs",
   "test-powerpoint-shape-families.mjs",
   "test-powerpoint-table-families.mjs",
