@@ -76,7 +76,7 @@ Use the repository's canonical [30-second setup](../../../README.md#installation
 
 The installed package must keep `SKILL.md`, `references/`, `assets/`, `scripts/`, and `evals/` together.
 
-Customer-authored sources pass through `scripts/preflight-sources.mjs` before the agent reads them. The manifest reports hashes, line numbers, and rule IDs without echoing source text.
+Customer-authored sources pass through `scripts/preflight-sources.mjs` before the agent reads them. The manifest reports hashes, line numbers, rule IDs, and active limits without echoing source text. The scanner rejects an input directory outside the approved root before traversal and stops after 32 directory levels or 1,000 discovered entries.
 
 ## Invoke
 

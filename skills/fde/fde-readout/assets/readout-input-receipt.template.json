@@ -1,0 +1,15 @@
+{
+  "kind": "fde-readout-input-receipt/v1",
+  "sourceInput": {
+    "sha256": "",
+    "manifestSha256": ""
+  },
+  "authorizationInput": {
+    "sha256": "",
+    "manifestSha256": ""
+  },
+  "approvedReviewEntries": [],
+  "authorizationDecision": "approve",
+  "authorizationScope": "compile-readout-plan-only",
+  "authoritySourceDescription": ""
+}

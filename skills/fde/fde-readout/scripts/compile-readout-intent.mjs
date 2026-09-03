@@ -1,14 +1,34 @@
 #!/usr/bin/env node
 
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { lstat, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  canonical,
+  findForbiddenIntentField,
+  matchManifestInput,
+  parseJsonBytes,
+  sha256,
+  validateReceipt,
+  verifyManifest,
+} from "./readout-input-provenance.mjs";
 
 const scriptRoot = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const validator = resolve(scriptRoot, "validate-readout-plan.mjs");
 const writingLint = resolve(scriptRoot, "lint-writing.mjs");
+const flags = [
+  "--source",
+  "--source-manifest",
+  "--authorization",
+  "--authorization-manifest",
+  "--receipt",
+  "--intent",
+  "--output",
+];
+const usage =
+  "Usage: node scripts/compile-readout-intent.mjs --source <source.json> --source-manifest <source-manifest.json> --authorization <authorization.json> --authorization-manifest <authorization-manifest.json> --receipt <readout-input-receipt.json> --intent <intent.json> --output <readout-plan.json>";
 
 function fail(message, status = 1) {
   console.error(message);
@@ -20,36 +40,24 @@ function parseArgs(values) {
   for (let index = 0; index < values.length; index += 2) {
     const flag = values[index];
     const value = values[index + 1];
-    if (!["--source", "--authorization", "--intent", "--output"].includes(flag) || !value) {
-      fail(
-        "Usage: node scripts/compile-readout-intent.mjs --source <preflighted-source.json> --authorization <preflighted-auth.json> --intent <intent.json> --output <readout-plan.json>",
-        2,
-      );
-    }
+    if (!flags.includes(flag) || !value) fail(usage, 2);
     if (parsed[flag]) fail(`Duplicate argument: ${flag}`, 2);
     parsed[flag] = value;
   }
-  if (
-    values.length !== 8 ||
-    !["--source", "--authorization", "--intent", "--output"].every(
-      (flag) => parsed[flag],
-    )
-  ) {
-    fail(
-      "Usage: node scripts/compile-readout-intent.mjs --source <preflighted-source.json> --authorization <preflighted-auth.json> --intent <intent.json> --output <readout-plan.json>",
-      2,
-    );
+  if (values.length !== flags.length * 2 || !flags.every((flag) => parsed[flag])) {
+    fail(usage, 2);
   }
   return parsed;
 }
 
-async function readJson(path, label) {
+async function readInput(path, label) {
   try {
-    const value = JSON.parse(await readFile(resolve(path), "utf8"));
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
-      fail(`${label} must be a JSON object`);
-    }
-    return value;
+    const bytes = await readFile(resolve(path));
+    return {
+      value: parseJsonBytes(bytes, label),
+      byteLength: bytes.byteLength,
+      sha256: sha256(bytes),
+    };
   } catch (error) {
     fail(`Cannot read ${label}: ${error.message}`, 2);
   }
@@ -101,17 +109,6 @@ function withoutAuthorization(value) {
   return copy;
 }
 
-function canonical(value) {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
 async function assertOutputBoundary(outputPath) {
   const workspace = await realpath(process.cwd());
   const output = resolve(outputPath);
@@ -161,13 +158,59 @@ function runGate(command, args, label) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const [source, authorization, intent] = await Promise.all([
-  readJson(args["--source"], "source"),
-  readJson(args["--authorization"], "authorization"),
-  readJson(args["--intent"], "intent"),
+const [
+  sourceInput,
+  sourceManifestInput,
+  authorizationInput,
+  authorizationManifestInput,
+  receiptInput,
+  intentInput,
+] = await Promise.all([
+  readInput(args["--source"], "source"),
+  readInput(args["--source-manifest"], "source manifest"),
+  readInput(args["--authorization"], "authorization"),
+  readInput(args["--authorization-manifest"], "authorization manifest"),
+  readInput(args["--receipt"], "receipt"),
+  readInput(args["--intent"], "intent"),
 ]);
 const output = await assertOutputBoundary(args["--output"]);
+const source = sourceInput.value;
+const authorization = authorizationInput.value;
+const intent = intentInput.value;
+let sourceManifest;
+let authorizationManifest;
+let sourceMatch;
+let authorizationMatch;
+try {
+  sourceManifest = verifyManifest(sourceManifestInput.value, "source");
+  authorizationManifest = verifyManifest(
+    authorizationManifestInput.value,
+    "authorization",
+  );
+  sourceMatch = matchManifestInput(sourceInput, sourceManifest, "source");
+  authorizationMatch = matchManifestInput(
+    authorizationInput,
+    authorizationManifest,
+    "authorization",
+  );
+  validateReceipt(receiptInput.value, {
+    sourceInput,
+    sourceManifest,
+    sourceMatch,
+    authorizationInput,
+    authorizationManifest,
+    authorizationMatch,
+  });
+} catch (error) {
+  fail(error.message);
+}
 
+const forbiddenIntentField = findForbiddenIntentField(intent);
+if (forbiddenIntentField) {
+  fail(
+    `Intent cannot contain provenance or receipt fields: ${forbiddenIntentField}`,
+  );
+}
 if ("evidence" in intent || "humanContext" in intent) {
   fail("Intent cannot contain materialized evidence or humanContext");
 }
@@ -307,8 +350,39 @@ try {
 
 console.log(
   JSON.stringify({
-    output,
-    sha256: createHash("sha256").update(text).digest("hex"),
+    kind: "fde-readout-compile-summary/v1",
+    inputs: {
+      source: {
+        bytes: sourceInput.byteLength,
+        sha256: sourceInput.sha256,
+        manifestSha256: sourceManifest.manifestSha256,
+        manifestFileSha256: sourceManifestInput.sha256,
+        sourceId: sourceMatch.sourceId,
+        status: sourceMatch.status,
+      },
+      authorization: {
+        bytes: authorizationInput.byteLength,
+        sha256: authorizationInput.sha256,
+        manifestSha256: authorizationManifest.manifestSha256,
+        manifestFileSha256: authorizationManifestInput.sha256,
+        sourceId: authorizationMatch.sourceId,
+        status: authorizationMatch.status,
+      },
+      intent: {
+        bytes: intentInput.byteLength,
+        sha256: intentInput.sha256,
+      },
+      receipt: {
+        bytes: receiptInput.byteLength,
+        sha256: receiptInput.sha256,
+        kind: receiptInput.value.kind,
+      },
+    },
+    output: {
+      path: output,
+      bytes: Buffer.byteLength(text),
+      sha256: sha256(text),
+    },
     selectedEvidenceIds: materializedEvidenceIds,
     selectedHumanContextIds,
     authorizationEvidenceIds: authorization.evidence.map((record) => record.id),

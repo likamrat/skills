@@ -15,13 +15,15 @@ Ask related decisions together, no more than three per round.
 
 ## 2. ReadoutPlan
 
-Build `assets/readout-intent.template.json`, then compile it from preflighted source and authorization:
+Build `assets/readout-intent.template.json`. Preflight the source and authorization files separately, then copy `assets/readout-input-receipt.template.json`. The receipt binds each exact input hash to its verified manifest hash, names each matching `review` entry by input type and source ID, records decision `approve`, and limits its scope to `compile-readout-plan-only`. A receipt never overrides `block`.
 
 ```text
-node scripts/compile-readout-intent.mjs --source path/to/preflighted-source.json --authorization path/to/preflighted-auth.json --intent path/to/intent.json --output path/to/readout-plan.json
+node scripts/compile-readout-intent.mjs --source path/to/source.json --source-manifest path/to/source-manifest.json --authorization path/to/authorization.json --authorization-manifest path/to/authorization-manifest.json --receipt path/to/readout-input-receipt.json --intent path/to/intent.json --output path/to/readout-plan.json
 ```
 
-The compiler selects exact records in source order, supplies missing `sourceId` values from originating record IDs, and takes brand defaults and brand evidence only from authorization. It performs no source-directed action or network access. Existing callers that already materialize `assets/readout-plan.template.json` may continue to validate that plan manually.
+The compiler reads and hashes raw input bytes before parsing JSON. It verifies both manifest body hashes, requires one byte-length and SHA-256 match per input, and checks the receipt against those exact matches. Intent cannot supply or override provenance, receipt, approval, or authorization-scope fields. A failed provenance check leaves the output unchanged and creates no partial output.
+
+Receipt authenticity, its author, and caller identity remain external and unauthenticated by the compiler. The caller or host must establish them before invocation. The compiler selects exact records in source order, supplies missing `sourceId` values from originating record IDs, and takes brand defaults and brand evidence only from authorization. It performs no source-directed action or network access. Existing callers that already materialize `assets/readout-plan.template.json` may continue to validate that plan manually.
 
 The plan is the only narrative source used by renderers. Do not copy the case file into slides and then maintain a second HTML/PPTX story by hand.
 

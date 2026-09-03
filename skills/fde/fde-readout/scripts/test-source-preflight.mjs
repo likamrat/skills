@@ -1,18 +1,30 @@
 #!/usr/bin/env node
 
 import {
+  mkdir,
   mkdtemp,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const directory = await mkdtemp(join(tmpdir(), "fde-source-preflight-"));
+const outsideDirectory = await mkdtemp(
+  join(tmpdir(), "fde-outside-source-preflight-"),
+);
 const script = fileURLToPath(new URL("./preflight-sources.mjs", import.meta.url));
+const skillRoot = resolve(dirname(script), "..");
+const counterpart = join(
+  dirname(skillRoot),
+  basename(skillRoot) === "fde-engagement" ? "fde-readout" : "fde-engagement",
+  "scripts",
+  "preflight-sources.mjs",
+);
 const failures = [];
 
 function check(condition, message) {
@@ -185,8 +197,119 @@ try {
     rerunManifest.sources.length === 3,
     "preflight must exclude its previous output manifest",
   );
+
+  await writeFile(
+    join(outsideDirectory, "must-not-be-traversed.txt"),
+    "This outside-root directory must be rejected before traversal.\n",
+  );
+  const outsideDirectoryResult = run(outsideDirectory);
+  check(
+    outsideDirectoryResult.status === 2,
+    "outside-root directory must block",
+  );
+  check(
+    outsideDirectoryResult.manifest?.sources?.length === 1 &&
+      outsideDirectoryResult.manifest.sources[0].bytes === 0 &&
+      outsideDirectoryResult.manifest.sources[0].sha256 === null &&
+      outsideDirectoryResult.manifest.sources[0].findings?.some(
+        (finding) => finding.rule === "outside-approved-root",
+      ),
+    "outside-root directory must be rejected before traversal",
+  );
+
+  const deepRoot = join(directory, "deep-root");
+  await mkdir(deepRoot);
+  let deepDirectory = deepRoot;
+  for (let depth = 1; depth <= 33; depth += 1) {
+    deepDirectory = join(deepDirectory, `level-${String(depth).padStart(2, "0")}`);
+    await mkdir(deepDirectory);
+  }
+  await writeFile(join(deepDirectory, "clear.txt"), "clear\n");
+  const depthLimit = run(deepRoot);
+  check(depthLimit.status === 2, "depth 33 must block");
+  check(
+    depthLimit.manifest?.sources?.some((source) =>
+      source.findings?.some(
+        (finding) => finding.rule === "traversal-depth-limit",
+      ),
+    ),
+    "depth 33 must record the traversal-depth-limit rule",
+  );
+
+  const entryRoot = join(directory, "entry-root");
+  await mkdir(entryRoot);
+  for (let index = 1; index <= 1001; index += 1) {
+    await writeFile(
+      join(entryRoot, `entry-${String(index).padStart(4, "0")}.txt`),
+      "",
+    );
+  }
+  const entryLimit = run(entryRoot);
+  check(entryLimit.status === 2, "entry 1001 must block");
+  check(
+    entryLimit.manifest?.sources?.some((source) =>
+      source.findings?.some(
+        (finding) => finding.rule === "discovered-entry-limit",
+      ),
+    ),
+    "entry 1001 must record the discovered-entry-limit rule",
+  );
+
+  const symlinkTarget = join(directory, "symlink-target");
+  const symlinkPath = join(directory, "symlink-source");
+  await mkdir(symlinkTarget);
+  await writeFile(join(symlinkTarget, "clear.txt"), "clear\n");
+  await symlink(symlinkTarget, symlinkPath, "junction");
+  const symlinkResult = run(symlinkPath);
+  check(symlinkResult.status === 2, "symlink source must block");
+  check(
+    symlinkResult.manifest?.sources?.[0]?.findings?.some(
+      (finding) => finding.rule === "symlink",
+    ),
+    "symlink source must retain the symlink rule",
+  );
+
+  const oversizedPath = join(directory, "oversized.txt");
+  await writeFile(oversizedPath, Buffer.alloc(2 * 1024 * 1024 + 1, 0x61));
+  const oversized = run(oversizedPath);
+  check(oversized.status === 2, "file over 2 MiB must block");
+  check(
+    oversized.manifest?.sources?.[0]?.findings?.some(
+      (finding) => finding.rule === "file-size-limit",
+    ),
+    "file over 2 MiB must retain the file-size-limit rule",
+  );
+
+  const totalRoot = join(directory, "total-root");
+  await mkdir(totalRoot);
+  for (let index = 1; index <= 6; index += 1) {
+    await writeFile(
+      join(totalRoot, `part-${index}.txt`),
+      Buffer.alloc(2 * 1024 * 1024, 0x61),
+    );
+  }
+  const totalLimit = run(totalRoot);
+  check(totalLimit.status === 2, "more than 10 MiB total must block");
+  check(
+    totalLimit.manifest?.sources?.some((source) =>
+      source.findings?.some((finding) => finding.rule === "total-size-limit"),
+    ),
+    "more than 10 MiB total must retain the total-size-limit rule",
+  );
+
+  const [localScript, counterpartScript] = await Promise.all([
+    readFile(script),
+    readFile(counterpart),
+  ]);
+  check(
+    localScript.equals(counterpartScript),
+    "installable preflight copies must be byte-identical",
+  );
 } finally {
-  await rm(directory, { recursive: true, force: true });
+  await Promise.all([
+    rm(directory, { recursive: true, force: true }),
+    rm(outsideDirectory, { recursive: true, force: true }),
+  ]);
 }
 
 if (failures.length > 0) {

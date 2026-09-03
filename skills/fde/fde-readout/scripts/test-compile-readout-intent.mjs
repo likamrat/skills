@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const skillRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const compiler = join(skillRoot, "scripts", "compile-readout-intent.mjs");
+const receiptKind = "fde-readout-input-receipt/v1";
+const authorizationDecision = "approve";
+const authorizationScope = "compile-readout-plan-only";
 const example = JSON.parse(
   await readFile(
     join(skillRoot, "assets", "examples", "lattice-harbor-readout-plan.json"),
@@ -36,32 +39,207 @@ const intent = {
   selectedHumanContextIds: compactSource.humanContext.map((record) => record.id),
 };
 
-function run(directory, overrides = {}, output = join(directory, "readout-plan.json")) {
-  const inputs = {
-    source: structuredClone(overrides.source ?? compactSource),
-    authorization: structuredClone(overrides.authorization ?? authorization),
-    intent: structuredClone(overrides.intent ?? intent),
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function serialize(value) {
+  return JSON.stringify(value);
+}
+
+function statusForFindings(findings) {
+  return findings.some((finding) => finding.severity === "block")
+    ? "block"
+    : findings.length > 0
+      ? "review"
+      : "clear";
+}
+
+function sealManifest(body) {
+  return {
+    ...body,
+    manifestSha256: sha256(JSON.stringify(body)),
   };
-  for (const [name, value] of Object.entries(inputs)) {
-    writeFileSync(join(directory, `${name}.json`), JSON.stringify(value));
+}
+
+function createManifest(
+  inputText,
+  sourceId,
+  findings = [],
+) {
+  const status = statusForFindings(findings);
+  return sealManifest({
+    version: 1,
+    generatedAt: "2026-09-03T18:00:00.000Z",
+    status,
+    limits: {
+      maxFileBytes: 2 * 1024 * 1024,
+      maxTotalBytes: 10 * 1024 * 1024,
+      maxTraversalDepth: 32,
+      maxDiscoveredEntries: 1000,
+    },
+    note:
+      "A clear result means no known pattern matched. It does not make source content trusted or authorize actions.",
+    sources: [
+      {
+        sourceId,
+        bytes: Buffer.byteLength(inputText),
+        sha256: sha256(inputText),
+        trust: "untrusted-data",
+        status,
+        findings,
+      },
+    ],
+  });
+}
+
+function resealManifest(manifest) {
+  const body = structuredClone(manifest);
+  delete body.manifestSha256;
+  return sealManifest(body);
+}
+
+function createReceipt({
+  sourceText,
+  authorizationText,
+  sourceManifest,
+  authorizationManifest,
+  sourceInputSha256 = sha256(sourceText),
+  authorizationInputSha256 = sha256(authorizationText),
+}) {
+  const approvedReviewEntries = [];
+  if (sourceManifest.sources[0].status === "review") {
+    approvedReviewEntries.push({
+      input: "source",
+      sourceId: sourceManifest.sources[0].sourceId,
+    });
+  }
+  if (authorizationManifest.sources[0].status === "review") {
+    approvedReviewEntries.push({
+      input: "authorization",
+      sourceId: authorizationManifest.sources[0].sourceId,
+    });
   }
   return {
-    result: spawnSync(
-      process.execPath,
-      [
-        compiler,
-        "--source",
-        join(directory, "source.json"),
-        "--authorization",
-        join(directory, "authorization.json"),
-        "--intent",
-        join(directory, "intent.json"),
-        "--output",
-        output,
-      ],
-      { encoding: "utf8" },
-    ),
-    output,
+    kind: receiptKind,
+    sourceInput: {
+      sha256: sourceInputSha256,
+      manifestSha256: sourceManifest.manifestSha256,
+    },
+    authorizationInput: {
+      sha256: authorizationInputSha256,
+      manifestSha256: authorizationManifest.manifestSha256,
+    },
+    approvedReviewEntries,
+    authorizationDecision,
+    authorizationScope,
+    authoritySourceDescription:
+      "Caller-supplied approval record; caller identity is established outside this compiler.",
+  };
+}
+
+let runNumber = 0;
+
+async function run(directory, overrides = {}, output) {
+  const source = structuredClone(overrides.source ?? compactSource);
+  const authorizationInput = structuredClone(
+    overrides.authorization ?? authorization,
+  );
+  const intentInput = structuredClone(overrides.intent ?? intent);
+  const sourceText = overrides.sourceText ?? serialize(source);
+  const authorizationText =
+    overrides.authorizationText ?? serialize(authorizationInput);
+  const intentText = overrides.intentText ?? serialize(intentInput);
+  let sourceManifest =
+    overrides.sourceManifest ??
+    createManifest(
+      overrides.preflightSourceText ?? sourceText,
+      "source-input-001",
+      overrides.sourceFindings,
+    );
+  let authorizationManifest =
+    overrides.authorizationManifest ??
+    createManifest(
+      overrides.preflightAuthorizationText ?? authorizationText,
+      "authorization-input-001",
+      overrides.authorizationFindings,
+    );
+  if (overrides.mutateSourceManifest) {
+    overrides.mutateSourceManifest(sourceManifest);
+    if (overrides.resealSourceManifest) {
+      sourceManifest = resealManifest(sourceManifest);
+    }
+  }
+  if (overrides.mutateAuthorizationManifest) {
+    overrides.mutateAuthorizationManifest(authorizationManifest);
+    if (overrides.resealAuthorizationManifest) {
+      authorizationManifest = resealManifest(authorizationManifest);
+    }
+  }
+  const receipt =
+    overrides.receipt ??
+    createReceipt({
+      sourceText,
+      authorizationText,
+      sourceManifest,
+      authorizationManifest,
+      sourceInputSha256: overrides.receiptSourceSha256,
+      authorizationInputSha256: overrides.receiptAuthorizationSha256,
+    });
+  if (overrides.mutateReceipt) overrides.mutateReceipt(receipt);
+
+  const paths = {
+    source: join(directory, "source.json"),
+    authorization: join(directory, "authorization.json"),
+    intent: join(directory, "intent.json"),
+    sourceManifest: join(directory, "source-manifest.json"),
+    authorizationManifest: join(directory, "authorization-manifest.json"),
+    receipt: join(directory, "receipt.json"),
+  };
+  const texts = {
+    source: sourceText,
+    authorization: authorizationText,
+    intent: intentText,
+    sourceManifest: serialize(sourceManifest),
+    authorizationManifest: serialize(authorizationManifest),
+    receipt: serialize(receipt),
+  };
+  await Promise.all(
+    Object.entries(paths).map(([name, path]) => writeFile(path, texts[name])),
+  );
+  const outputPath =
+    output ?? join(directory, `readout-plan-${(runNumber += 1)}.json`);
+  const result = spawnSync(
+    process.execPath,
+    [
+      compiler,
+      "--source",
+      paths.source,
+      "--source-manifest",
+      paths.sourceManifest,
+      "--authorization",
+      paths.authorization,
+      "--authorization-manifest",
+      paths.authorizationManifest,
+      "--receipt",
+      paths.receipt,
+      "--intent",
+      paths.intent,
+      "--output",
+      outputPath,
+    ],
+    { encoding: "utf8" },
+  );
+  return {
+    result,
+    output: outputPath,
+    fixture: {
+      paths,
+      texts,
+      sourceManifest,
+      authorizationManifest,
+      receipt,
+    },
   };
 }
 
@@ -82,30 +260,161 @@ function expect(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+async function expectAbsent(path) {
+  try {
+    await readFile(path);
+    throw new Error(`provenance failure left output: ${path}`);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+}
+
+async function expectFailure(execution, message) {
+  expect(execution.result.status !== 0, "compiler unexpectedly succeeded");
+  expect(
+    `${execution.result.stdout}${execution.result.stderr}`.includes(message),
+    `${execution.result.stdout}${execution.result.stderr}`,
+  );
+  await expectAbsent(execution.output);
+}
+
 try {
+  await test("compilation requires manifests and receipt", async () => {
+    const execution = await run(directory);
+    const output = join(directory, "missing-provenance-inputs.json");
+    const result = spawnSync(
+      process.execPath,
+      [
+        compiler,
+        "--source",
+        execution.fixture.paths.source,
+        "--authorization",
+        execution.fixture.paths.authorization,
+        "--intent",
+        execution.fixture.paths.intent,
+        "--output",
+        output,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result.status !== 0, "compiler accepted missing provenance inputs");
+    expect(
+      result.stderr.includes("--source-manifest") &&
+        result.stderr.includes("--authorization-manifest") &&
+        result.stderr.includes("--receipt"),
+      result.stderr,
+    );
+    await expectAbsent(output);
+  });
+
   await test("valid compile preserves source order and exact records", async () => {
     const source = structuredClone(compactSource);
     delete source.evidence[0].sourceId;
     const selected = source.evidence.map((record) => record.id).reverse();
-    const testIntent = { ...structuredClone(intent), selectedEvidenceIds: selected };
-    const { result, output } = run(directory, { source, intent: testIntent });
+    const testIntent = {
+      ...structuredClone(intent),
+      selectedEvidenceIds: selected,
+    };
+    const execution = await run(directory, { source, intent: testIntent });
+    const { result, output, fixture } = execution;
     expect(result.status === 0, `${result.stdout}${result.stderr}`);
-    const plan = JSON.parse(await readFile(output, "utf8"));
+    const planText = await readFile(output, "utf8");
+    const plan = JSON.parse(planText);
     expect(plan.evidence[0].id === source.evidence[0].id, "source order changed");
-    expect(plan.evidence[0].sourceId === source.evidence[0].id, "sourceId not derived");
+    expect(
+      plan.evidence[0].sourceId === source.evidence[0].id,
+      "sourceId not derived",
+    );
     expect(plan.evidence[0].class === source.evidence[0].class, "class changed");
-    const preserved = plan.evidence.find((record) => record.id === source.evidence[1].id);
+    const preserved = plan.evidence.find(
+      (record) => record.id === source.evidence[1].id,
+    );
     expect(
       JSON.stringify(preserved) === JSON.stringify(source.evidence[1]),
       "supplied evidence fields or sourceId changed",
     );
     expect(
-      JSON.stringify(plan.humanContext[0]) === JSON.stringify(source.humanContext[0]),
+      JSON.stringify(plan.humanContext[0]) ===
+        JSON.stringify(source.humanContext[0]),
       "human context fields or sourceId changed",
     );
     expect(!("selectedEvidenceIds" in plan), "selection field leaked");
-    expect(JSON.parse(result.stdout).sha256.length === 64, "missing SHA-256");
+
+    const summary = JSON.parse(result.stdout);
+    expect(
+      summary.inputs.source.sha256 === sha256(fixture.texts.source),
+      "summary source hash differs",
+    );
+    expect(
+      summary.inputs.authorization.sha256 ===
+        sha256(fixture.texts.authorization),
+      "summary authorization hash differs",
+    );
+    expect(
+      summary.inputs.source.manifestSha256 ===
+        fixture.sourceManifest.manifestSha256 &&
+        summary.inputs.authorization.manifestSha256 ===
+          fixture.authorizationManifest.manifestSha256,
+      "summary manifest hashes differ",
+    );
+    expect(
+      summary.inputs.source.manifestFileSha256 ===
+        sha256(fixture.texts.sourceManifest) &&
+        summary.inputs.authorization.manifestFileSha256 ===
+          sha256(fixture.texts.authorizationManifest),
+      "summary manifest file hashes differ",
+    );
+    expect(
+      summary.inputs.receipt.sha256 === sha256(fixture.texts.receipt),
+      "summary receipt hash differs",
+    );
+    expect(summary.output.sha256 === sha256(planText), "summary output hash differs");
+    expect(
+      !/\b(?:authenticated|identity|signature|signer)\b/i.test(result.stdout),
+      "summary claimed authenticated identity",
+    );
   });
+
+  await test("reviewed local input compiles with exact receipt approval", async () => {
+    const execution = await run(directory, {
+      sourceFindings: [
+        { rule: "external-url", severity: "review", line: 1 },
+      ],
+    });
+    expect(
+      execution.result.status === 0,
+      `${execution.result.stdout}${execution.result.stderr}`,
+    );
+    expect(
+      execution.fixture.receipt.approvedReviewEntries.some(
+        (entry) =>
+          entry.input === "source" && entry.sourceId === "source-input-001",
+      ),
+      "receipt omitted exact reviewed source ID",
+    );
+  });
+
+  await test(
+    "reviewed source and authorization require separate exact approvals",
+    async () => {
+      const execution = await run(directory, {
+        sourceFindings: [
+          { rule: "external-url", severity: "review", line: 1 },
+        ],
+        authorizationFindings: [
+          { rule: "external-url", severity: "review", line: 1 },
+        ],
+      });
+      expect(
+        execution.result.status === 0,
+        `${execution.result.stdout}${execution.result.stderr}`,
+      );
+      expect(
+        execution.fixture.receipt.approvedReviewEntries.length === 2,
+        "receipt did not keep source and authorization review approvals separate",
+      );
+    },
+  );
 
   await test("materializes evidence required by selected human context", async () => {
     const dependency = compactSource.humanContext[0].evidenceIds[0];
@@ -114,7 +423,7 @@ try {
       (id) => id !== dependency,
     );
     const output = join(directory, "human-context-evidence-closure.json");
-    const { result } = run(directory, { intent: testIntent }, output);
+    const { result } = await run(directory, { intent: testIntent }, output);
     expect(result.status === 0, `${result.stdout}${result.stderr}`);
     const plan = JSON.parse(await readFile(output, "utf8"));
     expect(
@@ -136,6 +445,228 @@ try {
     );
   });
 
+  await test("changed source bytes after preflight fail without output", async () => {
+    const preflightSourceText = serialize(compactSource);
+    const changedSource = structuredClone(compactSource);
+    changedSource.evidence[0].statement += " Changed after preflight.";
+    await expectFailure(
+      await run(directory, {
+        source: changedSource,
+        preflightSourceText,
+        receiptSourceSha256: sha256(preflightSourceText),
+      }),
+      "source does not match exactly one preflight manifest entry",
+    );
+  });
+
+  await test(
+    "changed authorization bytes after preflight fail without output",
+    async () => {
+      const preflightAuthorizationText = serialize(authorization);
+      const changedAuthorization = structuredClone(authorization);
+      changedAuthorization.brandDefaults.wordmark = "Changed";
+      await expectFailure(
+        await run(directory, {
+          authorization: changedAuthorization,
+          preflightAuthorizationText,
+          receiptAuthorizationSha256: sha256(preflightAuthorizationText),
+        }),
+        "authorization does not match exactly one preflight manifest entry",
+      );
+    },
+  );
+
+  await test("tampered manifest body fails without output", async () => {
+    await expectFailure(
+      await run(directory, {
+        mutateSourceManifest(manifest) {
+          manifest.generatedAt = "2026-09-03T18:00:01.000Z";
+        },
+      }),
+      "source manifestSha256 does not match its body",
+    );
+  });
+
+  await test("tampered manifestSha256 fails without output", async () => {
+    await expectFailure(
+      await run(directory, {
+        mutateSourceManifest(manifest) {
+          manifest.manifestSha256 = "0".repeat(64);
+        },
+      }),
+      "source manifestSha256 does not match its body",
+    );
+  });
+
+  await test("manifest with no matching source fails without output", async () => {
+    await expectFailure(
+      await run(directory, {
+        mutateSourceManifest(manifest) {
+          manifest.sources[0].sha256 = "0".repeat(64);
+        },
+        resealSourceManifest: true,
+      }),
+      "source does not match exactly one preflight manifest entry",
+    );
+  });
+
+  await test(
+    "manifest with duplicate matching entries fails without output",
+    async () => {
+      await expectFailure(
+        await run(directory, {
+          mutateSourceManifest(manifest) {
+            manifest.sources.push({
+              ...structuredClone(manifest.sources[0]),
+              sourceId: "source-input-duplicate",
+            });
+          },
+          resealSourceManifest: true,
+        }),
+        "source matches multiple preflight manifest entries",
+      );
+    },
+  );
+
+  await test("blocked input cannot be overridden by receipt", async () => {
+    await expectFailure(
+      await run(directory, {
+        sourceFindings: [
+          { rule: "instruction-override", severity: "block", line: 1 },
+        ],
+        mutateReceipt(receipt) {
+          receipt.approvedReviewEntries.push({
+            input: "source",
+            sourceId: "source-input-001",
+          });
+        },
+      }),
+      "source preflight status is block",
+    );
+  });
+
+  await test("reviewed input requires exact receipt approval", async () => {
+    await expectFailure(
+      await run(directory, {
+        sourceFindings: [
+          { rule: "external-url", severity: "review", line: 1 },
+        ],
+        mutateReceipt(receipt) {
+          receipt.approvedReviewEntries = [];
+        },
+      }),
+      "receipt approvedReviewEntries do not match reviewed inputs",
+    );
+  });
+
+  for (const [name, mutateReceipt, message] of [
+    [
+      "receipt bound to another source",
+      (receipt) => {
+        receipt.sourceInput.sha256 = "0".repeat(64);
+      },
+      "receipt source input SHA-256 differs",
+    ],
+    [
+      "receipt bound to another authorization",
+      (receipt) => {
+        receipt.authorizationInput.sha256 = "0".repeat(64);
+      },
+      "receipt authorization input SHA-256 differs",
+    ],
+    [
+      "receipt bound to another source manifest",
+      (receipt) => {
+        receipt.sourceInput.manifestSha256 = "0".repeat(64);
+      },
+      "receipt source manifest SHA-256 differs",
+    ],
+    [
+      "receipt bound to another authorization manifest",
+      (receipt) => {
+        receipt.authorizationInput.manifestSha256 = "0".repeat(64);
+      },
+      "receipt authorization manifest SHA-256 differs",
+    ],
+    [
+      "receipt bound to another review decision",
+      (receipt) => {
+        receipt.approvedReviewEntries = [
+          { input: "source", sourceId: "another-source" },
+        ];
+      },
+      "receipt approvedReviewEntries do not match reviewed inputs",
+    ],
+    [
+      "receipt bound to another authorization decision",
+      (receipt) => {
+        receipt.authorizationDecision = "deny";
+      },
+      "receipt authorizationDecision must be approve",
+    ],
+    [
+      "receipt bound to another authorization scope",
+      (receipt) => {
+        receipt.authorizationScope = "external-publication";
+      },
+      "receipt authorizationScope must be compile-readout-plan-only",
+    ],
+    [
+      "receipt kind differs",
+      (receipt) => {
+        receipt.kind = "fde-readout-input-receipt/v2";
+      },
+      "receipt kind must be fde-readout-input-receipt/v1",
+    ],
+    [
+      "receipt omits its authority source",
+      (receipt) => {
+        receipt.authoritySourceDescription = "";
+      },
+      "receipt authoritySourceDescription must be a non-empty string",
+    ],
+  ]) {
+    await test(name, async () => {
+      await expectFailure(
+        await run(directory, { mutateReceipt }),
+        message,
+      );
+    });
+  }
+
+  for (const [name, mutateIntent, message] of [
+    [
+      "intent manufactures receipt",
+      (value) => {
+        value.receipt = { authorizationDecision: "approve" };
+      },
+      "Intent cannot contain provenance or receipt fields: receipt",
+    ],
+    [
+      "intent manufactures authorization decision",
+      (value) => {
+        value.authorizationDecision = "approve";
+      },
+      "Intent cannot contain provenance or receipt fields: authorizationDecision",
+    ],
+    [
+      "intent manufactures manifest hash",
+      (value) => {
+        value.manifestSha256 = "0".repeat(64);
+      },
+      "Intent cannot contain provenance or receipt fields: manifestSha256",
+    ],
+  ]) {
+    await test(name, async () => {
+      const testIntent = structuredClone(intent);
+      mutateIntent(testIntent);
+      await expectFailure(
+        await run(directory, { intent: testIntent }),
+        message,
+      );
+    });
+  }
+
   for (const [name, mutate, text] of [
     [
       "missing selected ID",
@@ -144,12 +675,17 @@ try {
     ],
     [
       "duplicate selected ID",
-      (data) => data.intent.selectedEvidenceIds.push(data.intent.selectedEvidenceIds[0]),
+      (data) =>
+        data.intent.selectedEvidenceIds.push(data.intent.selectedEvidenceIds[0]),
       "contains duplicate IDs",
     ],
     [
       "conflicting source records",
-      (data) => data.source.evidence.push({ ...data.source.evidence[0], statement: "Conflict" }),
+      (data) =>
+        data.source.evidence.push({
+          ...data.source.evidence[0],
+          statement: "Conflict",
+        }),
       "duplicate or conflicting ID",
     ],
     [
@@ -190,24 +726,22 @@ try {
         intent: structuredClone(intent),
       };
       mutate(data);
-      const output = join(directory, `${name.replaceAll(" ", "-")}.json`);
-      const { result } = run(directory, data, output);
-      expect(result.status !== 0, "compiler unexpectedly succeeded");
-      expect(`${result.stdout}${result.stderr}`.includes(text), `${result.stdout}${result.stderr}`);
-      try {
-        await readFile(output);
-        throw new Error("partial output remained");
-      } catch (error) {
-        if (error.message === "partial output remained" || error.code !== "ENOENT") throw error;
-      }
+      await expectFailure(
+        await run(directory, data),
+        text,
+      );
     });
   }
 
   await test("output boundary rejects outside workspace", async () => {
     const output = join(tmpdir(), `outside-${Date.now()}.json`);
-    const { result } = run(directory, {}, output);
-    expect(result.status !== 0, "outside output unexpectedly succeeded");
-    expect(result.stderr.includes("inside the current workspace"), result.stderr);
+    const execution = await run(directory, {}, output);
+    expect(execution.result.status !== 0, "outside output unexpectedly succeeded");
+    expect(
+      execution.result.stderr.includes("inside the current workspace"),
+      execution.result.stderr,
+    );
+    await expectAbsent(output);
   });
 } finally {
   await rm(directory, { recursive: true, force: true });

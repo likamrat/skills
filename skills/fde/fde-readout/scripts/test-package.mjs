@@ -164,6 +164,10 @@ const requiredAssets = [
   [join(skillRoot, "assets", "readout-plan.template.json"), "plan template"],
   [join(skillRoot, "assets", "readout-intent.template.json"), "intent template"],
   [
+    join(skillRoot, "assets", "readout-input-receipt.template.json"),
+    "input receipt template",
+  ],
+  [
     join(skillRoot, "assets", "powerpoint-16x9-seed.pptx"),
     "PowerPoint seed",
   ],
@@ -195,6 +199,10 @@ const requiredAssets = [
   [
     join(skillRoot, "scripts", "create-powerpoint-skeleton.ps1"),
     "native PowerPoint skeleton helper",
+  ],
+  [
+    join(skillRoot, "scripts", "readout-input-provenance.mjs"),
+    "readout input provenance validator",
   ],
   [
     join(skillRoot, "scripts", "powerpoint-layout.mjs"),

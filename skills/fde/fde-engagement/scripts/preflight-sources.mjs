@@ -4,8 +4,8 @@ import { createHash } from "node:crypto";
 import {
   lstat,
   mkdir,
+  opendir,
   readFile,
-  readdir,
   writeFile,
 } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve } from "node:path";
@@ -48,6 +48,8 @@ const supported = new Set([
 ]);
 const maxFileBytes = 2 * 1024 * 1024;
 const maxTotalBytes = 10 * 1024 * 1024;
+const maxTraversalDepth = 32;
+const maxDiscoveredEntries = 1000;
 const rules = [
   {
     id: "instruction-override",
@@ -108,6 +110,8 @@ const inputRoots = args.map((path) => resolve(path));
 const sourceRoot = resolve(approvedRoot);
 const workspaceRoot = resolve(process.cwd());
 const resolvedOutput = output ? resolve(output) : null;
+let discoveredEntries = 0;
+let entryLimitReached = false;
 
 function insideRoot(root, path) {
   const candidate = relative(root, path);
@@ -121,39 +125,77 @@ function insideApprovedRoot(path) {
   return insideRoot(sourceRoot, path);
 }
 
-async function walk(path) {
-  if (resolvedOutput && resolve(path) === resolvedOutput) return;
-  const info = await lstat(path);
+function addTraversalFinding(path, rule, sortKey = path) {
+  files.push({
+    path,
+    sortKey,
+    symlink: false,
+    size: 0,
+    traversalFindings: [{ rule, severity: "block", line: null }],
+  });
+}
+
+function registerDiscoveredEntry(path) {
+  discoveredEntries += 1;
+  if (discoveredEntries <= maxDiscoveredEntries) return true;
+  entryLimitReached = true;
+  addTraversalFinding(
+    path,
+    "discovered-entry-limit",
+    "\uffff-discovered-entry-limit",
+  );
+  return false;
+}
+
+async function walk(path, depth) {
+  if (entryLimitReached) return;
+  const resolvedPath = resolve(path);
+  if (!registerDiscoveredEntry(resolvedPath)) return;
+  if (resolvedOutput && resolvedPath === resolvedOutput) return;
+  const info = await lstat(resolvedPath);
   if (info.isSymbolicLink()) {
-    files.push({ path, symlink: true, size: 0 });
+    files.push({ path: resolvedPath, symlink: true, size: 0 });
     return;
   }
   if (info.isDirectory()) {
-    for (const entry of await readdir(path)) {
-      await walk(join(path, entry));
+    if (depth > maxTraversalDepth) {
+      addTraversalFinding(resolvedPath, "traversal-depth-limit");
+      return;
+    }
+    const directory = await opendir(resolvedPath);
+    for await (const entry of directory) {
+      await walk(join(resolvedPath, entry.name), depth + 1);
+      if (entryLimitReached) break;
     }
     return;
   }
-  if (info.isFile()) files.push({ path, symlink: false, size: info.size });
+  if (info.isFile()) {
+    files.push({ path: resolvedPath, symlink: false, size: info.size });
+  }
 }
 
-for (const root of inputRoots) await walk(root);
-files.sort((left, right) => left.path.localeCompare(right.path));
+for (const root of inputRoots) {
+  if (!insideApprovedRoot(root)) {
+    addTraversalFinding(root, "outside-approved-root");
+    continue;
+  }
+  await walk(root, 0);
+  if (entryLimitReached) break;
+}
+files.sort((left, right) =>
+  (left.sortKey ?? left.path).localeCompare(right.sortKey ?? right.path),
+);
 
 let totalBytes = 0;
 const results = [];
 
 for (const [index, file] of files.entries()) {
   const sourceId = `source-${String(index + 1).padStart(3, "0")}`;
-  const findings = [];
+  const findings = structuredClone(file.traversalFindings ?? []);
   let sha256 = null;
 
-  if (!insideApprovedRoot(file.path)) {
-    findings.push({
-      rule: "outside-approved-root",
-      severity: "block",
-      line: null,
-    });
+  if (findings.length > 0) {
+    // Traversal findings stop before source bytes or directory entries are read.
   } else if (file.symlink) {
     findings.push({ rule: "symlink", severity: "block", line: null });
   } else if (!supported.has(extname(file.path).toLowerCase())) {
@@ -232,7 +274,12 @@ const manifestBody = {
   version: 1,
   generatedAt: new Date().toISOString(),
   status,
-  limits: { maxFileBytes, maxTotalBytes },
+  limits: {
+    maxFileBytes,
+    maxTotalBytes,
+    maxTraversalDepth,
+    maxDiscoveredEntries,
+  },
   note:
     "A clear result means no known pattern matched. It does not make source content trusted or authorize actions.",
   sources: results,

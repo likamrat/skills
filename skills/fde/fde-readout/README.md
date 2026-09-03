@@ -25,7 +25,7 @@ Use a human-first 25/50/25 editing loop: the FDE supplies rough source notes, th
 
 Use the repository's canonical [30-second setup](../../../README.md#installation-30-second-setup) and select `fde-readout`.
 
-Customer-authored sources pass through `scripts/preflight-sources.mjs` before the agent reads them. The manifest reports hashes, line numbers, and rule IDs without echoing source text.
+Customer-authored sources pass through `scripts/preflight-sources.mjs` before the agent reads them. The manifest reports hashes, line numbers, rule IDs, and active limits without echoing source text. The scanner rejects an input directory outside the approved root before traversal and stops after 32 directory levels or 1,000 discovered entries.
 
 ## Use
 
@@ -63,8 +63,12 @@ alignment, overflow, connector geometry, and HTML/PPTX drift.
 Compile a plan from preflighted source, authorization, and intent:
 
 ```text
-node scripts/compile-readout-intent.mjs --source path/to/preflighted-source.json --authorization path/to/preflighted-auth.json --intent path/to/intent.json --output path/to/readout-plan.json
+node scripts/compile-readout-intent.mjs --source path/to/source.json --source-manifest path/to/source-manifest.json --authorization path/to/authorization.json --authorization-manifest path/to/authorization-manifest.json --receipt path/to/readout-input-receipt.json --intent path/to/intent.json --output path/to/readout-plan.json
 ```
+
+Create the receipt from [`assets/readout-input-receipt.template.json`](assets/readout-input-receipt.template.json). It binds the exact source and authorization bytes to their verified preflight manifests, names every approved `review` entry, and limits the decision to `compile-readout-plan-only`. It never overrides `block`.
+
+The compiler verifies receipt structure and consistency. Receipt authenticity, its author, and caller identity remain external and unauthenticated by this tool. A caller or host must establish them before running the command. Intent cannot supply provenance, receipt, or authorization decisions.
 
 Validate a plan:
 
@@ -122,6 +126,7 @@ fde-readout/
 ├── SKILL.md
 ├── README.md
 ├── assets/
+│   ├── readout-input-receipt.template.json
 │   ├── readout-plan.template.json
 │   └── examples/
 │       ├── lattice-harbor-readout-plan.json
