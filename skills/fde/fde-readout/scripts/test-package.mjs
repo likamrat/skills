@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const skillRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const failures = [];
+const staticOnly = process.argv.slice(2).includes("--static-only");
 
 function check(condition, message) {
   if (!condition) failures.push(message);
@@ -163,6 +164,10 @@ const requiredAssets = [
   [join(skillRoot, "assets", "readout-plan.template.json"), "plan template"],
   [join(skillRoot, "assets", "readout-intent.template.json"), "intent template"],
   [
+    join(skillRoot, "assets", "powerpoint-smoke-approval.template.json"),
+    "PowerPoint smoke approval template",
+  ],
+  [
     join(skillRoot, "assets", "powerpoint-16x9-seed.pptx"),
     "PowerPoint seed",
   ],
@@ -194,6 +199,42 @@ const requiredAssets = [
   [
     join(skillRoot, "scripts", "create-powerpoint-skeleton.ps1"),
     "native PowerPoint skeleton helper",
+  ],
+  [
+    join(skillRoot, "scripts", "powerpoint-layout.mjs"),
+    "PowerPoint drawing-spec compiler",
+  ],
+  [
+    join(skillRoot, "scripts", "render-powerpoint-spec.mjs"),
+    "PowerPoint drawing-spec CLI",
+  ],
+  [
+    join(skillRoot, "scripts", "pptx-package-qa.mjs"),
+    "dependency-free PPTX package QA CLI",
+  ],
+  [
+    join(skillRoot, "scripts", "powerpoint-native-coordinator.mjs"),
+    "native PowerPoint coordinator",
+  ],
+  [
+    join(skillRoot, "scripts", "powerpoint-owned-process-watchdog.ps1"),
+    "exact owned PowerPoint watchdog",
+  ],
+  [
+    join(skillRoot, "scripts", "inspect-trusted-keyring-protection.ps1"),
+    "trusted keyring ACL inspector",
+  ],
+  [
+    join(skillRoot, "scripts", "render-powerpoint-worker.ps1"),
+    "native PowerPoint worker",
+  ],
+  [
+    join(skillRoot, "scripts", "validate-powerpoint-drawing-spec.mjs"),
+    "PowerPoint drawing-spec validator",
+  ],
+  [
+    join(skillRoot, "scripts", "powerpoint-workflow-connectors.psm1"),
+    "PowerPoint workflow connector validator",
   ],
 ];
 for (const [path, label] of requiredAssets) {
@@ -350,10 +391,34 @@ for (const script of [
   "test-writing.mjs",
   "test-source-preflight.mjs",
   "test-powerpoint-skeleton.mjs",
+  "test-powerpoint-smoke-contract.mjs",
+  "test-powerpoint-native-coordinator.mjs",
+  "test-powerpoint-worker-basic.mjs",
+  "test-powerpoint-layout.mjs",
+  "test-powerpoint-shape-families.mjs",
+  "test-powerpoint-table-families.mjs",
+  "test-powerpoint-worker-tables.mjs",
+  "test-powerpoint-chart-family.mjs",
+  "test-powerpoint-worker-charts.mjs",
+  "test-powerpoint-orthogonal-router.mjs",
+  "test-powerpoint-router-grid.mjs",
+  "test-powerpoint-router-interactions.mjs",
+  "test-powerpoint-workflow-family.mjs",
+  "test-pptx-package-qa.mjs",
+  "test-powerpoint-worker-connectors.mjs",
 ]) {
-  const result = spawnSync(process.execPath, [join(skillRoot, "scripts", script)], {
-    encoding: "utf8",
-  });
+  const result = spawnSync(
+    process.execPath,
+    [
+      join(skillRoot, "scripts", script),
+      ...(staticOnly && script === "test-powerpoint-skeleton.mjs"
+        ? ["--static-only"]
+        : []),
+    ],
+    {
+      encoding: "utf8",
+    },
+  );
   if (result.status !== 0) {
     failures.push(`${script} failed:\n${result.stdout}${result.stderr}`);
   }

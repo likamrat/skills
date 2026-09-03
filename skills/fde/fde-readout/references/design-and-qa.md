@@ -29,7 +29,7 @@ Connectors use shared anchors and one semantic direction. Compute each endpoint 
 - Use consistent margins and baseline rhythm.
 - Assertion titles state the slide's conclusion.
 - Keep body text readable in a room.
-- Use validated table slots for comparison, deterministic SVG charts for HTML, native charts for PowerPoint, and SVG for exact diagrams.
+- Use validated table slots for comparison, deterministic SVG charts for HTML, editable shape-based charts for PowerPoint, and native shapes and connectors for exact diagrams.
 - Do not use nested decorative cards as the composition.
 - Do not add stock imagery when evidence-bearing diagrams or tables can carry the decision.
 - Do not infer visual precision from template validity.

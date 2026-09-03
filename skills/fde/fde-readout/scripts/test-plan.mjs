@@ -434,6 +434,68 @@ const tests = [
     expectedText: "4.5:1 contrast",
   },
   {
+    name: "rejects font control characters",
+    mutate: (data) => {
+      data.brand.fontFamily = "Segoe\u0085UI";
+    },
+    expectedStatus: 1,
+    expectedText: "fontFamily must not contain control characters",
+  },
+  {
+    name: "rejects metric context control characters",
+    mutate: (data) => {
+      data.slides.splice(data.slides.length - 1, 0, {
+        ...slideBase,
+        id: "invalid-metrics",
+        family: "metrics",
+        title: "Invalid metric context",
+        evidenceIds: ["finding-001"],
+        content: {
+          metrics: [
+            {
+              label: "Metric A",
+              value: "1",
+              context: "bad\tcontext",
+              evidenceIds: ["finding-001"],
+            },
+            {
+              label: "Metric B",
+              value: "2",
+              evidenceIds: ["finding-001"],
+            },
+          ],
+          outcome: {
+            statement: "Keep evidence visible.",
+            evidenceIds: ["finding-001"],
+          },
+        },
+      });
+    },
+    expectedStatus: 1,
+    expectedText: "context must not contain control characters",
+  },
+  {
+    name: "rejects malformed metrics without crashing",
+    mutate: (data) => {
+      data.slides.splice(data.slides.length - 1, 0, {
+        ...slideBase,
+        id: "malformed-metrics",
+        family: "metrics",
+        title: "Malformed metrics",
+        evidenceIds: ["finding-001"],
+        content: {
+          metrics: {},
+          outcome: {
+            statement: "Keep evidence visible.",
+            evidenceIds: ["finding-001"],
+          },
+        },
+      });
+    },
+    expectedStatus: 1,
+    expectedText: "metrics requires 2-4 items",
+  },
+  {
     name: "rejects asset reuse in design-only scope",
     mutate: (data) => {
       data.brand.styleReference = {

@@ -8,7 +8,9 @@ param(
 
     [string]$Seed,
 
-    [string[]]$SmokeSlideIds
+    [string[]]$SmokeSlideIds,
+
+    [string]$OwnershipReceipt
 )
 
 Set-StrictMode -Version Latest
@@ -28,6 +30,58 @@ function Get-Sha256 {
     finally {
         $algorithm.Dispose()
         $stream.Dispose()
+    }
+}
+
+function Write-OwnershipReceipt {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$ProcessId,
+
+        [Parameter(Mandatory = $true)]
+        [datetime]$ProcessStart,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ProcessPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($script:OwnershipReceipt)) {
+        return
+    }
+
+    $receiptPath = [IO.Path]::GetFullPath($script:OwnershipReceipt)
+    $receiptDirectory = Split-Path -Parent $receiptPath
+    if (-not (Test-Path -LiteralPath $receiptDirectory -PathType Container)) {
+        throw 'OwnershipReceipt parent directory must already exist.'
+    }
+    if (Test-Path -LiteralPath $receiptPath) {
+        throw 'OwnershipReceipt must not already exist.'
+    }
+
+    $receipt = [ordered]@{
+        schemaVersion = 1
+        owner = 'fde-powerpoint-skeleton/1.0'
+        status = 'owned'
+        processId = $ProcessId
+        processStartTimeUtc = $ProcessStart.ToUniversalTime().ToString(
+            'o',
+            [Globalization.CultureInfo]::InvariantCulture
+        )
+        processPath = [IO.Path]::GetFullPath($ProcessPath)
+    }
+    $temporaryPath = Join-Path $receiptDirectory ".$([IO.Path]::GetFileName($receiptPath)).$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [IO.File]::WriteAllText(
+            $temporaryPath,
+            ($receipt | ConvertTo-Json -Compress),
+            [Text.UTF8Encoding]::new($false)
+        )
+        [IO.FileInfo]::new($temporaryPath).MoveTo($receiptPath)
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force
+        }
     }
 }
 
@@ -119,84 +173,168 @@ function Get-PackageFacts {
     }
 }
 
-$seedInput = if ([string]::IsNullOrWhiteSpace($Seed)) {
-    Join-Path $PSScriptRoot '..\assets\powerpoint-16x9-seed.pptx'
-}
-else {
-    $Seed
-}
-
-$planPath = (Resolve-Path -LiteralPath $Plan).Path
-$seedPath = (Resolve-Path -LiteralPath $seedInput).Path
-$outputPath = [System.IO.Path]::GetFullPath($Output)
-$outputDirectory = Split-Path -Parent $outputPath
-
-if (-not (Test-Path -LiteralPath $outputDirectory)) {
-    [void](New-Item -ItemType Directory -Path $outputDirectory)
-}
-
-$readout = Get-Content -Raw -LiteralPath $planPath | ConvertFrom-Json
-$planSlides = @($readout.slides)
-if ($planSlides.Count -lt 1) {
-    throw 'ReadoutPlan must contain at least one slide.'
-}
-
-$sourcePlanSha256 = Get-Sha256 -Path $planPath
-$selectedSlides = $planSlides
-$selectionMode = 'full'
-
-if ($PSBoundParameters.ContainsKey('SmokeSlideIds')) {
-    $requestedIds = @($SmokeSlideIds)
-    if ($requestedIds.Count -eq 1 -and $requestedIds[0].Contains(',')) {
-        $requestedIds = @($requestedIds[0].Split(','))
-    }
-    if ($requestedIds.Count -ne 3) {
-        throw 'SmokeSlideIds must contain exactly 3 slide IDs.'
-    }
-
-    $requestedIdSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
-    foreach ($slideId in $requestedIds) {
-        if ([string]::IsNullOrWhiteSpace($slideId)) {
-            throw 'SmokeSlideIds cannot contain an empty slide ID.'
-        }
-        if (-not $requestedIdSet.Add($slideId)) {
-            throw "SmokeSlideIds must contain 3 unique slide IDs; duplicate ID: $slideId."
-        }
-    }
-
-    if (-not $requestedIdSet.Contains([string]$planSlides[0].id)) {
-        throw "SmokeSlideIds must include the full plan's first cover slide ID: $($planSlides[0].id)."
-    }
-    if ($planSlides.Count -lt 2 -or -not $requestedIdSet.Contains([string]$planSlides[1].id)) {
-        $decisionId = if ($planSlides.Count -ge 2) { [string]$planSlides[1].id } else { '<missing>' }
-        throw "SmokeSlideIds must include the full plan's second decision slide ID: $decisionId."
-    }
-
-    $planIdSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
-    foreach ($planSlide in $planSlides) {
-        [void]$planIdSet.Add([string]$planSlide.id)
-    }
-    foreach ($slideId in $requestedIds) {
-        if (-not $planIdSet.Contains($slideId)) {
-            throw "SmokeSlideIds contains an ID that does not exist in the full plan: $slideId."
-        }
-    }
-
-    $selectedSlides = @($planSlides | Where-Object { $requestedIdSet.Contains([string]$_.id) })
-    if ($selectedSlides.Count -ne 3) {
-        throw 'SmokeSlideIds did not resolve to exactly 3 slides in the full plan.'
-    }
-    $selectionMode = 'smoke'
-}
-
-Copy-Item -LiteralPath $seedPath -Destination $outputPath -Force
-
 $powerPoint = $null
 $presentation = $null
 $reopened = $null
+$result = $null
+$operationErrorMessage = $null
+$cleanupErrorMessage = $null
+$powerPointProcessId = 0
+$powerPointProcessStart = $null
+$powerPointProcessPath = $null
+$ownsPowerPointProcess = $false
+$powerPointCleanupMode = $null
+$powerPointGraceSeconds = 5
+$powerPointMutex = $null
+$powerPointMutexHeld = $false
 
 try {
+    Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class FdePowerPointNativeMethods
+{
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+}
+'@
+
+    $seedInput = if ([string]::IsNullOrWhiteSpace($Seed)) {
+        Join-Path $PSScriptRoot '..\assets\powerpoint-16x9-seed.pptx'
+    }
+    else {
+        $Seed
+    }
+
+    $planPath = (Resolve-Path -LiteralPath $Plan).Path
+    $seedPath = (Resolve-Path -LiteralPath $seedInput).Path
+    $outputPath = [System.IO.Path]::GetFullPath($Output)
+    $outputDirectory = Split-Path -Parent $outputPath
+
+    if (-not (Test-Path -LiteralPath $outputDirectory)) {
+        [void](New-Item -ItemType Directory -Path $outputDirectory)
+    }
+
+    $readout = Get-Content -Raw -LiteralPath $planPath | ConvertFrom-Json
+    $planSlides = @($readout.slides)
+    if ($planSlides.Count -lt 1) {
+        throw 'ReadoutPlan must contain at least one slide.'
+    }
+
+    $sourcePlanSha256 = Get-Sha256 -Path $planPath
+    $selectedSlides = $planSlides
+    $selectionMode = 'full'
+
+    if ($PSBoundParameters.ContainsKey('SmokeSlideIds')) {
+        $requestedIds = @($SmokeSlideIds)
+        if ($requestedIds.Count -eq 1 -and $requestedIds[0].Contains(',')) {
+            $requestedIds = @($requestedIds[0].Split(','))
+        }
+        if ($requestedIds.Count -ne 3) {
+            throw 'SmokeSlideIds must contain exactly 3 slide IDs.'
+        }
+
+        $requestedIdSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+        foreach ($slideId in $requestedIds) {
+            if ([string]::IsNullOrWhiteSpace($slideId)) {
+                throw 'SmokeSlideIds cannot contain an empty slide ID.'
+            }
+            if (-not $requestedIdSet.Add($slideId)) {
+                throw "SmokeSlideIds must contain 3 unique slide IDs; duplicate ID: $slideId."
+            }
+        }
+
+        if (-not $requestedIdSet.Contains([string]$planSlides[0].id)) {
+            throw "SmokeSlideIds must include the full plan's first cover slide ID: $($planSlides[0].id)."
+        }
+        if ($planSlides.Count -lt 2 -or -not $requestedIdSet.Contains([string]$planSlides[1].id)) {
+            $decisionId = if ($planSlides.Count -ge 2) { [string]$planSlides[1].id } else { '<missing>' }
+            throw "SmokeSlideIds must include the full plan's second decision slide ID: $decisionId."
+        }
+
+        $planIdSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+        foreach ($planSlide in $planSlides) {
+            [void]$planIdSet.Add([string]$planSlide.id)
+        }
+        foreach ($slideId in $requestedIds) {
+            if (-not $planIdSet.Contains($slideId)) {
+                throw "SmokeSlideIds contains an ID that does not exist in the full plan: $slideId."
+            }
+        }
+
+        $selectedSlides = @($planSlides | Where-Object { $requestedIdSet.Contains([string]$_.id) })
+        if ($selectedSlides.Count -ne 3) {
+            throw 'SmokeSlideIds did not resolve to exactly 3 slides in the full plan.'
+        }
+        $selectionMode = 'smoke'
+    }
+
+    $powerPointMutex = [Threading.Mutex]::new(
+        $false,
+        'Local\FdeReadoutPowerPointAutomation'
+    )
+    try {
+        $powerPointMutexHeld = $powerPointMutex.WaitOne([TimeSpan]::FromSeconds(30))
+    }
+    catch [Threading.AbandonedMutexException] {
+        $powerPointMutexHeld = $true
+    }
+    if (-not $powerPointMutexHeld) {
+        throw 'Timed out waiting for exclusive PowerPoint automation access.'
+    }
+
+    Copy-Item -LiteralPath $seedPath -Destination $outputPath -Force
+
+    $baselinePowerPointIds = @(
+        Get-Process -Name POWERPNT -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.Id }
+    )
+    if ($baselinePowerPointIds.Count -ne 0) {
+        throw "PowerPoint skeleton requires a zero process baseline; observed PID(s): $($baselinePowerPointIds -join ', ')."
+    }
+
     $powerPoint = New-Object -ComObject PowerPoint.Application
+    $windowHandle = [IntPtr][int64]$powerPoint.HWND
+    if ($windowHandle -eq [IntPtr]::Zero) {
+        throw 'PowerPoint automation returned an invalid window handle.'
+    }
+
+    [uint32]$resolvedProcessId = 0
+    [void][FdePowerPointNativeMethods]::GetWindowThreadProcessId(
+        $windowHandle,
+        [ref]$resolvedProcessId
+    )
+    if ($resolvedProcessId -le 0) {
+        throw 'PowerPoint automation returned an invalid process ID.'
+    }
+    if ($baselinePowerPointIds -contains [int]$resolvedProcessId) {
+        throw "PowerPoint automation attached to a pre-existing process (PID $resolvedProcessId)."
+    }
+
+    $resolvedProcess = Get-Process -Id ([int]$resolvedProcessId) -ErrorAction Stop
+    if ($resolvedProcess.ProcessName -ne 'POWERPNT') {
+        throw "PowerPoint window resolved to unexpected process $($resolvedProcess.ProcessName) (PID $resolvedProcessId)."
+    }
+    $powerPointProcessPath = $resolvedProcess.Path
+    if (
+        [string]::IsNullOrWhiteSpace($powerPointProcessPath) -or
+        -not [string]::Equals(
+            [IO.Path]::GetFileName($powerPointProcessPath),
+            'POWERPNT.EXE',
+            [StringComparison]::OrdinalIgnoreCase
+        )
+    ) {
+        throw "PowerPoint window process PID $resolvedProcessId has an unexpected executable path."
+    }
+    $powerPointProcessId = [int]$resolvedProcessId
+    $powerPointProcessStart = $resolvedProcess.StartTime
+    $ownsPowerPointProcess = $true
+    Write-OwnershipReceipt `
+        -ProcessId $powerPointProcessId `
+        -ProcessStart $powerPointProcessStart `
+        -ProcessPath $powerPointProcessPath
+
     $presentation = $powerPoint.Presentations.Open(
         $outputPath,
         $false,
@@ -288,7 +426,7 @@ try {
         throw 'Expected a macro-free PowerPoint package.'
     }
 
-    [pscustomobject]@{
+    $result = [pscustomobject]@{
         output = $outputPath
         slides = $slideCount
         verifiedNotes = $verifiedNotes
@@ -303,21 +441,146 @@ try {
         uniqueNotesRelationships = $packageFacts.uniqueNotesRelationships
         macroFree = $packageFacts.macroFree
         sha256 = Get-Sha256 -Path $outputPath
-    } | ConvertTo-Json -Depth 4
+    }
+}
+catch {
+    $operationErrorMessage = $_.Exception.Message
 }
 finally {
     if ($null -ne $reopened) {
         try { $reopened.Close() } catch {}
-        [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($reopened)
+        try {
+            [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($reopened)
+        }
+        catch {
+            if ($null -eq $operationErrorMessage) {
+                $operationErrorMessage = $_.Exception.Message
+            }
+        }
+        $reopened = $null
     }
     if ($null -ne $presentation) {
         try { $presentation.Close() } catch {}
-        [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($presentation)
+        try {
+            [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($presentation)
+        }
+        catch {
+            if ($null -eq $operationErrorMessage) {
+                $operationErrorMessage = $_.Exception.Message
+            }
+        }
+        $presentation = $null
     }
     if ($null -ne $powerPoint) {
-        try { $powerPoint.Quit() } catch {}
-        [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($powerPoint)
+        if ($ownsPowerPointProcess) {
+            try { $powerPoint.Quit() } catch {}
+        }
+        $powerPoint = $null
     }
-    [GC]::Collect()
-    [GC]::WaitForPendingFinalizers()
+
+    if ($ownsPowerPointProcess) {
+        try {
+            $deadline = [DateTimeOffset]::UtcNow.AddSeconds($powerPointGraceSeconds)
+            $remainingProcess = Get-Process -Id $powerPointProcessId -ErrorAction SilentlyContinue
+            while (
+                $null -ne $remainingProcess -and
+                [DateTimeOffset]::UtcNow -lt $deadline
+            ) {
+                Start-Sleep -Milliseconds 100
+                $remainingProcess = Get-Process -Id $powerPointProcessId -ErrorAction SilentlyContinue
+            }
+
+            if ($null -eq $remainingProcess) {
+                $powerPointCleanupMode = 'graceful'
+            }
+            else {
+                if ($remainingProcess.StartTime -ne $powerPointProcessStart) {
+                    $cleanupErrorMessage = "PowerPoint process identity changed before cleanup for PID $powerPointProcessId."
+                }
+                else {
+                    try {
+                        Stop-Process -Id $powerPointProcessId -Force -ErrorAction Stop
+                    }
+                    catch {
+                        if (-not $remainingProcess.HasExited) {
+                            throw
+                        }
+                    }
+
+                    if (-not $remainingProcess.WaitForExit(5000)) {
+                        $cleanupErrorMessage = "PowerPoint process PID $powerPointProcessId survived forced termination."
+                    }
+                    else {
+                        $powerPointCleanupMode = 'forced'
+                    }
+                }
+            }
+        }
+        catch {
+            $cleanupErrorMessage = "Could not terminate PowerPoint process PID ${powerPointProcessId}: $($_.Exception.Message)"
+        }
+    }
+
+    if ($powerPointMutexHeld) {
+        try {
+            $powerPointMutex.ReleaseMutex()
+        }
+        catch {
+            if ($null -eq $operationErrorMessage -and $null -eq $cleanupErrorMessage) {
+                $operationErrorMessage = "Could not release the PowerPoint automation mutex: $($_.Exception.Message)"
+            }
+        }
+        $powerPointMutexHeld = $false
+    }
+    if ($null -ne $powerPointMutex) {
+        try {
+            $powerPointMutex.Dispose()
+        }
+        catch {
+            if ($null -eq $operationErrorMessage -and $null -eq $cleanupErrorMessage) {
+                $operationErrorMessage = "Could not dispose the PowerPoint automation mutex: $($_.Exception.Message)"
+            }
+        }
+        $powerPointMutex = $null
+    }
 }
+
+if ($null -ne $cleanupErrorMessage) {
+    $message = if ($null -ne $operationErrorMessage) {
+        "$operationErrorMessage Cleanup failed: $cleanupErrorMessage"
+    }
+    else {
+        "PowerPoint cleanup failed: $cleanupErrorMessage"
+    }
+    [Console]::Error.WriteLine($message)
+    [Console]::Error.Flush()
+    [Environment]::Exit(1)
+}
+
+if ($null -ne $operationErrorMessage) {
+    $cleanupSummary = if ($ownsPowerPointProcess -and $null -ne $powerPointCleanupMode) {
+        " PowerPoint cleanup: PID $powerPointProcessId exited via $powerPointCleanupMode."
+    }
+    else {
+        ''
+    }
+    [Console]::Error.WriteLine("PowerPoint skeleton creation failed: $operationErrorMessage$cleanupSummary")
+    [Console]::Error.Flush()
+    [Environment]::Exit(1)
+}
+
+[void]$result.PSObject.Properties.Add(
+    [Management.Automation.PSNoteProperty]::new(
+        'powerPointCleanup',
+        [pscustomobject]@{
+            ownedProcessId = $powerPointProcessId
+            exited = $true
+            mode = $powerPointCleanupMode
+            graceSeconds = $powerPointGraceSeconds
+        }
+    )
+)
+$resultJson = $result | ConvertTo-Json -Depth 4
+[Console]::Out.WriteLine($resultJson)
+[Console]::Out.Flush()
+[Environment]::Exit(0)
