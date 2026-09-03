@@ -25,6 +25,7 @@ const counterpart = join(
   "scripts",
   "preflight-sources.mjs",
 );
+const testOutputBuffer = 16 * 1024 * 1024;
 const failures = [];
 
 function check(condition, message) {
@@ -38,6 +39,7 @@ function run(path) {
     {
       cwd: directory,
       encoding: "utf8",
+      maxBuffer: testOutputBuffer,
     },
   );
   let manifest;
@@ -217,6 +219,46 @@ try {
     "outside-root directory must be rejected before traversal",
   );
 
+  const outsideLinkedRoot = join(outsideDirectory, "linked-root");
+  const outsideLinkedDirectory = join(outsideLinkedRoot, "nested");
+  await mkdir(outsideLinkedDirectory, { recursive: true });
+  await writeFile(join(outsideLinkedRoot, "clear.txt"), "clear\n");
+  await writeFile(join(outsideLinkedDirectory, "clear.txt"), "clear\n");
+  const intermediateLink = join(directory, "intermediate-outside");
+  await symlink(outsideLinkedRoot, intermediateLink, "junction");
+
+  const intermediateFile = run(join(intermediateLink, "clear.txt"));
+  check(
+    intermediateFile.status === 2,
+    "file below an intermediate outside junction must block",
+  );
+  check(
+    intermediateFile.manifest?.sources?.length === 1 &&
+      intermediateFile.manifest.sources[0].bytes === 0 &&
+      intermediateFile.manifest.sources[0].sha256 === null &&
+      intermediateFile.manifest.sources[0].findings?.some(
+        (finding) => finding.rule === "symlink",
+      ),
+    "file below an intermediate outside junction must stop before reading",
+  );
+
+  const intermediateDirectory = run(
+    join(intermediateLink, "nested"),
+  );
+  check(
+    intermediateDirectory.status === 2,
+    "directory below an intermediate outside junction must block",
+  );
+  check(
+    intermediateDirectory.manifest?.sources?.length === 1 &&
+      intermediateDirectory.manifest.sources[0].bytes === 0 &&
+      intermediateDirectory.manifest.sources[0].sha256 === null &&
+      intermediateDirectory.manifest.sources[0].findings?.some(
+        (finding) => finding.rule === "symlink",
+      ),
+    "directory below an intermediate outside junction must stop before traversal",
+  );
+
   const deepRoot = join(directory, "deep-root");
   await mkdir(deepRoot);
   let deepDirectory = deepRoot;
@@ -245,6 +287,14 @@ try {
     );
   }
   const entryLimit = run(entryRoot);
+  check(
+    entryLimit.error === undefined,
+    "entry 1001 manifest must fit the test helper output buffer",
+  );
+  check(
+    Buffer.byteLength(entryLimit.stdout ?? "") > 64 * 1024,
+    "entry 1001 fixture must exceed the historical helper output buffer",
+  );
   check(entryLimit.status === 2, "entry 1001 must block");
   check(
     entryLimit.manifest?.sources?.some((source) =>

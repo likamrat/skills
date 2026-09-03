@@ -6,9 +6,10 @@ import {
   mkdir,
   opendir,
   readFile,
+  realpath,
   writeFile,
 } from "node:fs/promises";
-import { dirname, extname, join, relative, resolve } from "node:path";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
 
 const args = process.argv.slice(2);
 const outputIndex = args.indexOf("--output");
@@ -108,6 +109,7 @@ const rules = [
 const files = [];
 const inputRoots = args.map((path) => resolve(path));
 const sourceRoot = resolve(approvedRoot);
+const canonicalSourceRoot = await realpath(sourceRoot);
 const workspaceRoot = resolve(process.cwd());
 const resolvedOutput = output ? resolve(output) : null;
 let discoveredEntries = 0;
@@ -152,9 +154,27 @@ async function walk(path, depth) {
   const resolvedPath = resolve(path);
   if (!registerDiscoveredEntry(resolvedPath)) return;
   if (resolvedOutput && resolvedPath === resolvedOutput) return;
+
+  const pathFromSourceRoot = relative(sourceRoot, resolvedPath);
+  const components = pathFromSourceRoot.split(sep).filter(Boolean);
+  let componentPath = sourceRoot;
+  for (const component of components.slice(0, -1)) {
+    componentPath = join(componentPath, component);
+    const componentInfo = await lstat(componentPath);
+    if (componentInfo.isSymbolicLink()) {
+      addTraversalFinding(resolvedPath, "symlink");
+      return;
+    }
+  }
+
   const info = await lstat(resolvedPath);
   if (info.isSymbolicLink()) {
     files.push({ path: resolvedPath, symlink: true, size: 0 });
+    return;
+  }
+  const canonicalPath = await realpath(resolvedPath);
+  if (!insideRoot(canonicalSourceRoot, canonicalPath)) {
+    addTraversalFinding(resolvedPath, "outside-approved-root");
     return;
   }
   if (info.isDirectory()) {
