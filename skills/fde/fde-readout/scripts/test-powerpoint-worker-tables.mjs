@@ -714,7 +714,8 @@ if (failures.length === 0) {
       ]);
       check(
         malformedResult.status !== 0 &&
-          /row 1 width does not match the headers/.test(malformedResult.stderr) &&
+          /row width must match headers/.test(malformedResult.stderr) &&
+          !/PowerPoint cleanup: PID/.test(malformedResult.stderr) &&
           !(await pathExists(malformedBundle)) &&
           powerPointProcesses().length === 0,
         `malformed table did not fail before COM activation: ${malformedResult.stdout}${malformedResult.stderr}`,

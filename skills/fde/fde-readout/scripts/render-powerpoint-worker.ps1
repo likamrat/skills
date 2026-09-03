@@ -3422,6 +3422,38 @@ function Assert-SlideShapeTree {
                     }
                 }
             }
+            elseif (
+                [string]$primitive.kind -eq 'line' -and
+                (Test-WorkflowConnectorPrimitive -Primitive $primitive)
+            ) {
+                Assert-WorkflowConnectorShape `
+                    -Shape $shape `
+                    -Primitive $primitive `
+                    -Theme $Theme `
+                    -SlideIndex $SlideIndex
+                $connectorLine = $null
+                $connectorColor = $null
+                try {
+                    $endpoints = Get-WorkflowConnectorEndpoints -Shape $shape
+                    $connectorLine = $shape.Line
+                    $connectorColor = $connectorLine.ForeColor
+                    $records.Add([pscustomobject][ordered]@{
+                        name = [string]$shape.Name
+                        geometry = @(
+                            Format-WorkerRecordNumber -Value ([double]$endpoints.x1)
+                            Format-WorkerRecordNumber -Value ([double]$endpoints.y1)
+                            Format-WorkerRecordNumber -Value ([double]$endpoints.x2)
+                            Format-WorkerRecordNumber -Value ([double]$endpoints.y2)
+                        ) -join ','
+                        content = ''
+                        style = "$([int]$connectorColor.RGB),$(Format-WorkerRecordNumber -Value ([double]$connectorLine.Transparency)),$(Format-WorkerRecordNumber -Value ([double]$connectorLine.Weight)),$([int]$connectorLine.DashStyle)"
+                    })
+                }
+                finally {
+                    Release-ComRef -Reference ([ref]$connectorColor) -Label 'shape-tree connector color'
+                    Release-ComRef -Reference ([ref]$connectorLine) -Label 'shape-tree connector line'
+                }
+            }
             elseif ([string]$primitive.kind -eq 'table') {
                 if (
                     [int]$shape.HasTable -ne -1 -or

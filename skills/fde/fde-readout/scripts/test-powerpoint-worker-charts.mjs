@@ -1603,6 +1603,7 @@ try {
           "contactSheetSha256",
           "selectedSlideIds",
           "selectedSlideFamilies",
+          "connectors",
           "slides",
           "nativeShapes",
           "cleanup",
@@ -1632,6 +1633,39 @@ try {
           "releaseErrors",
         ],
         "cleanup receipt",
+      );
+      const emptyArraySha256 = hash("[]");
+      const expectedConnectorSlides = spec.slides.map((slide, index) => ({
+        index: index + 1,
+        id: slide.id,
+        family: slide.family,
+        routeCount: 0,
+        segmentCount: 0,
+        connectorPrimitiveSha256: emptyArraySha256,
+        routeMetadataSha256: emptyArraySha256,
+        pointSequenceSha256: emptyArraySha256,
+        costStatus: "not-declared-by-fde-drawing-spec/1.0",
+        routes: [],
+      }));
+      const expectedConnectors = {
+        drawingNameCount: spec.slides.reduce(
+          (count, slide) => count + slide.primitives.length,
+          0,
+        ),
+        slideCount: spec.slides.length,
+        routeCount: 0,
+        segmentCount: 0,
+        primitiveSha256: emptyArraySha256,
+        routeMetadataSha256: emptyArraySha256,
+        pointSequenceSha256: emptyArraySha256,
+        costStatus: "not-declared-by-fde-drawing-spec/1.0",
+        reopenedExactVerification: true,
+        slides: expectedConnectorSlides,
+      };
+      exactValue(
+        stdoutReport.connectors,
+        expectedConnectors,
+        "exact zero-route connector receipt",
       );
 
       const expectedBundleFiles = [
@@ -1671,6 +1705,18 @@ try {
             recursiveShapeStyleSha256: projection.recursiveHashes.style,
             nativeChartShapeCount: projection.nativeChartRecords.length,
             nativeChartShapeNamesSha256: projection.nativeChartHashes.names,
+            nativeTableCount: 0,
+            nativeTableCellCount: 0,
+            connectorRouteCount: 0,
+            connectorSegmentCount: 0,
+            connectorPrimitiveSha256:
+              expectedConnectorSlides[index].connectorPrimitiveSha256,
+            connectorRouteMetadataSha256:
+              expectedConnectorSlides[index].routeMetadataSha256,
+            connectorPointSequenceSha256:
+              expectedConnectorSlides[index].pointSequenceSha256,
+            connectorCostStatus:
+              expectedConnectorSlides[index].costStatus,
             render,
             renderSha256: hash(await readFile(renderPath)),
             notesSha256: hash(slide.notesText.replace(/\r\n|\n/g, "\r")),
@@ -1697,6 +1743,14 @@ try {
             "recursiveShapeStyleSha256",
             "nativeChartShapeCount",
             "nativeChartShapeNamesSha256",
+            "nativeTableCount",
+            "nativeTableCellCount",
+            "connectorRouteCount",
+            "connectorSegmentCount",
+            "connectorPrimitiveSha256",
+            "connectorRouteMetadataSha256",
+            "connectorPointSequenceSha256",
+            "connectorCostStatus",
             "render",
             "renderSha256",
             "notesSha256",

@@ -1486,7 +1486,9 @@ async function runNativeConnectorSuite() {
       "malformed connector geometry unexpectedly succeeded",
     );
     check(
-      /must be nonzero and orthogonal/.test(combinedOutput(malformedResult)),
+      /must be nonzero and orthogonal|workflow connector segment must be orthogonal/.test(
+        combinedOutput(malformedResult),
+      ),
       "malformed connector geometry did not fail strict pre-COM validation",
     );
     assertNoCleanupReceipt(malformedResult, "malformed pre-COM connector");

@@ -217,6 +217,10 @@ const requiredAssets = [
     "native PowerPoint worker",
   ],
   [
+    join(skillRoot, "scripts", "validate-powerpoint-drawing-spec.mjs"),
+    "PowerPoint drawing-spec validator",
+  ],
+  [
     join(skillRoot, "scripts", "powerpoint-workflow-connectors.psm1"),
     "PowerPoint workflow connector validator",
   ],
