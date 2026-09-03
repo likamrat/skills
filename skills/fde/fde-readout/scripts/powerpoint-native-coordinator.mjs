@@ -37,7 +37,7 @@ import {
   densityScore,
   PRODUCTION_COORDINATOR_ID,
   selectSmokeSlides,
-  validateSmokeApproval,
+  validateSmokeReport,
 } from "./powerpoint-smoke-contract.mjs";
 
 const scriptDirectory = fileURLToPath(new URL(".", import.meta.url));
@@ -48,23 +48,12 @@ const OWNED_PROCESS_WATCHDOG = join(
   scriptDirectory,
   "powerpoint-owned-process-watchdog.ps1",
 );
-const KEYRING_ACL_HELPER = join(
-  scriptDirectory,
-  "inspect-trusted-keyring-protection.ps1",
-);
 const PACKAGE_QA = join(scriptDirectory, "pptx-package-qa.mjs");
 const TRUSTED_WINDOWS_ROOT = String.raw`C:\Windows`;
-const PRODUCTION_PROGRAM_DATA_PATH = String.raw`C:\ProgramData`;
-export const PRODUCTION_TRUSTED_KEYRING_PATH =
-  String.raw`C:\ProgramData\GitHub\Copilot\FdeReadout\trusted-ed25519-keyring.json`;
 const TEST_COORDINATOR_ID = "fde-powerpoint-native-coordinator/test-only";
 const WORKER_ID = "fde-powerpoint-native-shapes/2.0";
 const CONNECTOR_COST_STATUS = "not-declared-by-fde-drawing-spec/1.0";
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
-const TRUSTED_KEYRING_OWNER_SIDS = new Set([
-  "S-1-5-18",
-  "S-1-5-32-544",
-]);
 const RETAINED_ENVIRONMENT_KEYS = Object.freeze([
   "APPDATA",
   "COMPUTERNAME",
@@ -81,8 +70,10 @@ const RETAINED_ENVIRONMENT_KEYS = Object.freeze([
   "USERNAME",
   "USERPROFILE",
 ]);
-const USAGE =
-  "Usage: node powerpoint-native-coordinator.mjs --mode <smoke|full> --plan <json> --output <new-directory> [--approval <json> --smoke-bundle <directory>] [--diagnostic-output <new-directory>]";
+const USAGE = [
+  "Usage: node powerpoint-native-coordinator.mjs --mode smoke --plan <plan> --output <new-dir> [--diagnostic-output <new-dir>]",
+  "       node powerpoint-native-coordinator.mjs --mode full --plan <plan> --smoke-bundle <dir> --approve-smoke --output <new-dir> [--diagnostic-output <new-dir>]",
+].join("\n");
 
 const SPEC_REPORT_KEYS = [
   "mode",
@@ -342,120 +333,6 @@ function pathsEqual(left, right) {
   return normalizedPath(left) === normalizedPath(right);
 }
 
-function keyringHierarchy(programDataPath, keyringPath) {
-  const path = relative(resolve(programDataPath), resolve(keyringPath));
-  assert(
-    path !== "" &&
-      !path.startsWith(`..${sep}`) &&
-      path !== ".." &&
-      !isAbsolute(path),
-    "KEYRING_PROTECTION_INVALID",
-    "trusted keyring must be below the protected ProgramData root",
-    { stage: "trusted-keyring", details: { programDataPath, keyringPath } },
-  );
-  const segments = path.split(sep);
-  let current = resolve(programDataPath);
-  return segments.map((segment) => {
-    current = join(current, segment);
-    return current;
-  });
-}
-
-function validateKeyringProtectionReport(
-  report,
-  expectedProgramDataPath,
-  expectedKeyringPath,
-) {
-  const stage = "trusted-keyring";
-  exactKeys(
-    report,
-    [
-      "entries",
-      "invokingUserIsAdministrator",
-      "invokingUserSid",
-      "keyringPath",
-      "programDataPath",
-      "schemaVersion",
-      "status",
-    ],
-    "trusted keyring protection report",
-    stage,
-  );
-  const findings = [];
-  if (
-    report.schemaVersion !== 1 ||
-    report.status !== "PROTECTED" ||
-    !pathsEqual(report.programDataPath, expectedProgramDataPath) ||
-    !pathsEqual(report.keyringPath, expectedKeyringPath) ||
-    typeof report.invokingUserSid !== "string" ||
-    typeof report.invokingUserIsAdministrator !== "boolean"
-  ) {
-    findings.push("report identity or status is invalid");
-  }
-  const expectedPaths = keyringHierarchy(
-    expectedProgramDataPath,
-    expectedKeyringPath,
-  );
-  if (!Array.isArray(report.entries) || report.entries.length !== expectedPaths.length) {
-    findings.push("report does not cover every keyring ancestor below ProgramData");
-  } else {
-    report.entries.forEach((entry, index) => {
-      const label = `entries[${index}]`;
-      if (!isPlainObject(entry)) {
-        findings.push(`${label} is not an object`);
-        return;
-      }
-      const actualKeys = Object.keys(entry).sort();
-      const expectedKeys = [
-        "exists",
-        "inspectionError",
-        "ownerSid",
-        "ownerTrusted",
-        "path",
-        "reparsePoint",
-        "type",
-        "unsafeAclEntries",
-      ].sort();
-      if (!isDeepStrictEqual(actualKeys, expectedKeys)) {
-        findings.push(`${label} keys are invalid`);
-        return;
-      }
-      const expectedType = index === expectedPaths.length - 1 ? "file" : "directory";
-      if (!pathsEqual(entry.path, expectedPaths[index])) {
-        findings.push(`${label}.path is not the expected hierarchy entry`);
-      }
-      if (entry.exists !== true || entry.type !== expectedType) {
-        findings.push(`${label} is missing or has the wrong type`);
-      }
-      if (entry.reparsePoint !== false) {
-        findings.push(`${label} is a reparse point or could not be inspected`);
-      }
-      if (
-        entry.ownerTrusted !== true ||
-        !TRUSTED_KEYRING_OWNER_SIDS.has(entry.ownerSid)
-      ) {
-        findings.push(`${label} is not owned by SYSTEM or BUILTIN\\Administrators`);
-      }
-      if (
-        !Array.isArray(entry.unsafeAclEntries) ||
-        entry.unsafeAclEntries.length !== 0
-      ) {
-        findings.push(`${label} grants unsafe write, delete, or ACL rights`);
-      }
-      if (entry.inspectionError !== null) {
-        findings.push(`${label} ACL inspection failed`);
-      }
-    });
-  }
-  assert(
-    findings.length === 0,
-    "KEYRING_PROTECTION_INVALID",
-    "host-pinned trusted keyring hierarchy is not protected",
-    { stage, details: { findings } },
-  );
-  return report;
-}
-
 function pathContains(parent, child) {
   const path = relative(resolve(parent), resolve(child));
   return (
@@ -571,7 +448,7 @@ async function snapshotFiles(root, expectedFiles) {
     isDeepStrictEqual(actual, [...expectedFiles].sort()),
     "BUNDLE_FILES_INVALID",
     "bundle file set does not match the coordinator contract",
-    { stage: "smoke-approval", details: { actual, expected: [...expectedFiles].sort() } },
+    { stage: "smoke-bundle", details: { actual, expected: [...expectedFiles].sort() } },
   );
   const hashes = {};
   for (const file of actual) hashes[file] = sha256(await readFile(join(root, file)));
@@ -2235,37 +2112,31 @@ async function verifySmokeBundle({
   planBytes,
   plan,
   bundlePath,
-  approvalBytes,
-  keyringBytes,
 }) {
-  const stage = "smoke-approval";
+  const stage = "smoke-bundle";
   const selection = expectedSelection(plan, "smoke");
   const expectedFiles = finalFiles("smoke", selection.ids.length);
   const snapshot = await snapshotFiles(bundlePath, expectedFiles);
   const smokeReportBytes = await readFile(join(bundlePath, "smoke-report.json"));
   const smokeReport = parseJson(smokeReportBytes, "smoke report", stage);
-  const approval = parseJson(approvalBytes, "smoke approval", stage);
-  const trustedKeyring = parseJson(keyringBytes, "trusted keyring", stage);
-  const approvalResult = validateSmokeApproval({
+  const smokeReportResult = validateSmokeReport({
     planBytes,
     reportBytes: smokeReportBytes,
-    approval,
-    trustedKeyring,
     expectedCoordinator: dependencies.coordinatorId,
     expectedExecutionProfile: dependencies.executionProfile,
   });
   assert(
-    approvalResult.errors.length === 0 && approvalResult.authenticated === true,
-    "SMOKE_APPROVAL_REJECTED",
-    "smoke approval validation failed",
-    { stage, details: { errors: approvalResult.errors } },
+    smokeReportResult.errors.length === 0,
+    "SMOKE_BUNDLE_INVALID",
+    "smoke report validation failed",
+    { stage, details: { errors: smokeReportResult.errors } },
   );
 
   assert(
     snapshot["readout.pptx"] === smokeReport.pptxSha256 &&
       snapshot["native-render/contact-sheet.png"] === smokeReport.contactSheetSha256,
     "HASH_MISMATCH",
-    "smoke PPTX or contact-sheet bytes do not match the approved smoke report",
+    "smoke PPTX or contact-sheet bytes do not match the smoke report",
     { stage },
   );
   const workerReport = parseJson(
@@ -2289,7 +2160,7 @@ async function verifySmokeBundle({
       arraysEqual(workerReport.selectedSlideIds, selection.ids) &&
       arraysEqual(workerReport.selectedSlideFamilies, selection.families),
     "SMOKE_BUNDLE_INVALID",
-    "smoke worker report does not match approved smoke evidence",
+    "smoke worker report does not match smoke evidence",
     { stage },
   );
   const packageQa = parseJson(
@@ -2306,7 +2177,7 @@ async function verifySmokeBundle({
   assert(
     packageQa.package.sha256 === smokeReport.pptxSha256,
     "SMOKE_BUNDLE_INVALID",
-    "smoke package QA hash does not match the approved report",
+    "smoke package QA hash does not match the smoke report",
     { stage },
   );
   const rerunPackageQa = await runPackageQa({
@@ -2318,7 +2189,7 @@ async function verifySmokeBundle({
   assert(
     isDeepStrictEqual(rerunPackageQa.report, packageQa),
     "SMOKE_BUNDLE_INVALID",
-    "persisted smoke package QA differs from a fresh inspection of the approved PPTX",
+    "persisted smoke package QA differs from a fresh inspection of the reviewed smoke PPTX",
     { stage },
   );
   const coordinatorReport = parseJson(
@@ -2341,6 +2212,15 @@ async function verifySmokeBundle({
       coordinatorReport.mode === "smoke" &&
       coordinatorReport.source?.planSha256 === sha256(planBytes) &&
       arraysEqual(coordinatorReport.selection?.selectedSlideIds, selection.ids) &&
+      arraysEqual(
+        coordinatorReport.selection?.selectedSlideFamilies,
+        selection.families,
+      ) &&
+      isDeepStrictEqual(coordinatorReport.approval, {
+        requiredForFull: true,
+        approved: false,
+        method: "explicit-full-mode-flag",
+      }) &&
       coordinatorReport.artifacts?.presentation?.sha256 === smokeReport.pptxSha256 &&
       coordinatorReport.artifacts?.contactSheet?.sha256 === smokeReport.contactSheetSha256 &&
       coordinatorReport.artifacts?.workerReport?.sha256 ===
@@ -2362,7 +2242,6 @@ async function verifySmokeBundle({
     { stage },
   );
   return {
-    approvalResult,
     expectedFiles,
     selection,
     smokeReport,
@@ -2393,7 +2272,6 @@ function buildCoordinatorReport({
   packageQaBytes,
   artifacts,
   smokeReportBytes,
-  approvalResult,
   workerReportBytes,
   publicationPayload,
 }) {
@@ -2418,16 +2296,13 @@ function buildCoordinatorReport({
       mode === "smoke"
         ? {
             requiredForFull: true,
-            authenticated: false,
+            approved: false,
+            method: "explicit-full-mode-flag",
           }
         : {
             requiredForFull: true,
-            authenticated: true,
-            approvedAt: approvalResult.approvedAt,
-            approver: approvalResult.approver,
-            attestation: approvalResult.attestation,
-            hashes: approvalResult.hashes,
-            selectedSlideIds: approvalResult.selectedSlideIds,
+            approved: true,
+            method: "explicit-full-mode-flag",
           },
     artifacts: {
       presentation: {
@@ -2471,8 +2346,7 @@ function buildCoordinatorReport({
       payload: publicationPayload,
     },
     checks: {
-      approvalVerifiedBeforeSkeleton:
-        mode === "smoke" ? null : approvalResult.authenticated === true,
+      smokeBundleVerifiedBeforeSkeleton: mode === "smoke" ? null : true,
       freshSkeletonCreated: true,
       workerReportExact: true,
       cleanupExited: workerReport.cleanup.exited,
@@ -2490,50 +2364,35 @@ function buildCoordinatorReport({
   };
 }
 
-async function inspectTrustedKeyringProtection(
-  dependencies,
-  trustedKeyringPath,
-) {
-  let report;
-  try {
-    report = dependencies.keyringProtectionInspector
-      ? await dependencies.keyringProtectionInspector({
-          keyringPath: trustedKeyringPath,
-          programDataPath: dependencies.trustedProgramDataPath,
-        })
-      : await runJsonChild(
-          dependencies,
-          powerShellUtilityRequest(
-            "trusted-keyring-acl",
-            dependencies.keyringAclHelper,
-            [],
-            scriptDirectory,
-            dependencies.powerShellCommand,
-            dependencies.childEnvironment,
-          ),
-        );
-  } catch (error) {
-    if (error instanceof CoordinatorError) throw error;
-    fail(
-      "KEYRING_PROTECTION_INSPECTION_FAILED",
-      `trusted keyring protection inspection failed: ${error.message}`,
-      { stage: "trusted-keyring" },
+async function prepareInputs(options) {
+  assert(isPlainObject(options), "ARGUMENT_INVALID", "options must be a plain object", {
+    stage: "arguments",
+  });
+  const allowedOptionKeys = new Set([
+    "approveSmoke",
+    "diagnosticOutput",
+    "mode",
+    "output",
+    "plan",
+    "smokeBundle",
+  ]);
+  const unknownOptionKeys = Object.keys(options).filter(
+    (key) => !allowedOptionKeys.has(key),
+  );
+  assert(unknownOptionKeys.length === 0, "ARGUMENT_INVALID", "unknown coordinator options", {
+    stage: "arguments",
+    details: { errors: unknownOptionKeys.map((key) => `unknown option: ${key}`) },
+  });
+  for (const key of ["mode", "plan", "output"]) {
+    assert(
+      Object.hasOwn(options, key) &&
+        typeof options[key] === "string" &&
+        options[key].length > 0,
+      "ARGUMENT_INVALID",
+      `${key} is required`,
+      { stage: "arguments" },
     );
   }
-  return validateKeyringProtectionReport(
-    report,
-    dependencies.trustedProgramDataPath,
-    trustedKeyringPath,
-  );
-}
-
-async function prepareInputs(options, dependencies) {
-  assert(
-    options.trustedKeyring === undefined,
-    "ARGUMENT_INVALID",
-    "trustedKeyring is host-pinned and cannot be supplied by the caller",
-    { stage: "arguments" },
-  );
   const mode = options.mode;
   assert(["smoke", "full"].includes(mode), "ARGUMENT_INVALID", "mode must be smoke or full", {
     stage: "arguments",
@@ -2547,26 +2406,30 @@ async function prepareInputs(options, dependencies) {
 
   if (mode === "smoke") {
     assert(
-      options.approval === undefined && options.smokeBundle === undefined,
+      !Object.hasOwn(options, "approveSmoke") && !Object.hasOwn(options, "smokeBundle"),
       "ARGUMENT_INVALID",
-      "approval inputs are accepted only in full mode",
+      "--approve-smoke and --smoke-bundle are accepted only in full mode",
       { stage: "arguments" },
     );
   } else {
-    inputs.approvalPath = await existingPath(options.approval, "approval", "file");
+    assert(
+      Object.hasOwn(options, "approveSmoke") && options.approveSmoke === true,
+      "ARGUMENT_INVALID",
+      "full mode requires --approve-smoke",
+      { stage: "arguments" },
+    );
+    assert(
+      Object.hasOwn(options, "smokeBundle") &&
+        typeof options.smokeBundle === "string" &&
+        options.smokeBundle.length > 0,
+      "ARGUMENT_INVALID",
+      "full mode requires --smoke-bundle",
+      { stage: "arguments" },
+    );
     inputs.smokeBundlePath = await existingPath(
       options.smokeBundle,
       "smoke bundle",
       "directory",
-    );
-    await inspectTrustedKeyringProtection(
-      dependencies,
-      dependencies.trustedKeyringPath,
-    );
-    inputs.keyringPath = await existingPath(
-      dependencies.trustedKeyringPath,
-      "host-pinned trusted keyring",
-      "file",
     );
   }
 
@@ -2638,7 +2501,7 @@ async function runCoordinator(options, dependencies) {
     "native PowerPoint coordination requires Windows",
     { stage: "arguments" },
   );
-  const inputs = await prepareInputs(options, dependencies);
+  const inputs = await prepareInputs(options);
   if (dependencies.executionProfile === "test-only") {
     const temporaryRoot = await realpath(tmpdir());
     for (const [label, candidate] of [
@@ -2657,60 +2520,26 @@ async function runCoordinator(options, dependencies) {
   const planBytes = await readFile(inputs.planPath);
   const planHash = sha256(planBytes);
   const plan = parseJson(planBytes, "plan", "inputs");
-  let approvalContext;
+  let smokeContext;
 
   if (inputs.mode === "full") {
-    const approvalBytes = await readFile(inputs.approvalPath);
-    const approvalHash = sha256(approvalBytes);
-    const keyringBytes = await readFile(inputs.keyringPath);
-    const keyringHash = sha256(keyringBytes);
     const smoke = await verifySmokeBundle({
       dependencies,
       planBytes,
       plan,
       bundlePath: inputs.smokeBundlePath,
-      approvalBytes,
-      keyringBytes,
     });
-    await assertFileUnchanged(inputs.planPath, planHash, "plan", "smoke-approval");
-    await assertFileUnchanged(
-      inputs.approvalPath,
-      approvalHash,
-      "approval",
-      "smoke-approval",
-    );
-    await assertFileUnchanged(
-      inputs.keyringPath,
-      keyringHash,
-      "trusted keyring",
-      "smoke-approval",
-    );
-    approvalContext = {
-      ...smoke,
-      approvalHash,
-      keyringHash,
-    };
+    await assertFileUnchanged(inputs.planPath, planHash, "plan", "smoke-bundle");
+    smokeContext = smoke;
   }
 
   const assertExternalInputsUnchanged = async (stage) => {
     await assertFileUnchanged(inputs.planPath, planHash, "plan", stage);
-    if (!approvalContext) return;
-    await assertFileUnchanged(
-      inputs.approvalPath,
-      approvalContext.approvalHash,
-      "approval",
-      stage,
-    );
-    await assertFileUnchanged(
-      inputs.keyringPath,
-      approvalContext.keyringHash,
-      "trusted keyring",
-      stage,
-    );
+    if (!smokeContext) return;
     await assertSnapshotUnchanged(
       inputs.smokeBundlePath,
-      approvalContext.expectedFiles,
-      approvalContext.snapshot,
+      smokeContext.expectedFiles,
+      smokeContext.snapshot,
       stage,
     );
   };
@@ -2840,7 +2669,6 @@ async function runCoordinator(options, dependencies) {
       packageQaBytes: packageQa.reportBytes,
       artifacts: worker.artifacts,
       smokeReportBytes,
-      approvalResult: approvalContext?.approvalResult,
       workerReportBytes: bundledWorkerReportBytes,
       publicationPayload,
     });
@@ -3104,15 +2932,11 @@ export async function runPowerPointNativeCoordinator(options) {
     childRunner: defaultChildRunner,
     coordinatorId: PRODUCTION_COORDINATOR_ID,
     executionProfile: "production",
-    keyringAclHelper: KEYRING_ACL_HELPER,
-    keyringProtectionInspector: undefined,
     packageQa: PACKAGE_QA,
     powerShellCommand,
     removeDirectory: removeDirectoryWithRetry,
     skeletonHelper: SKELETON_HELPER,
     specCompiler: SPEC_COMPILER,
-    trustedKeyringPath: PRODUCTION_TRUSTED_KEYRING_PATH,
-    trustedProgramDataPath: PRODUCTION_PROGRAM_DATA_PATH,
     worker: WORKER,
   });
   return runCoordinator(options, dependencies);
@@ -3127,11 +2951,8 @@ export async function runPowerPointNativeCoordinatorForTest(options, harness) {
   );
   const allowedHarnessKeys = new Set([
     "childRunner",
-    "keyringProtectionInspector",
     "publicationHook",
     "removeDirectory",
-    "trustedKeyringPath",
-    "trustedProgramDataPath",
   ]);
   assert(
     Object.keys(harness).every((key) => allowedHarnessKeys.has(key)),
@@ -3145,16 +2966,6 @@ export async function runPowerPointNativeCoordinatorForTest(options, harness) {
     "test-only coordinator requires an injected stub child runner",
     { stage: "arguments" },
   );
-  if (options.mode === "full") {
-    assert(
-      typeof harness.keyringProtectionInspector === "function" &&
-        typeof harness.trustedKeyringPath === "string" &&
-        typeof harness.trustedProgramDataPath === "string",
-      "TEST_HARNESS_INVALID",
-      "test-only full mode requires an injected keyring protection inspection",
-      { stage: "arguments" },
-    );
-  }
   const testSystemRoot =
     environmentValue(process.env, "SystemRoot") ?? String.raw`C:\Windows`;
   const testPowerShellCommand = trustedPowerShellCandidate({
@@ -3170,16 +2981,12 @@ export async function runPowerPointNativeCoordinatorForTest(options, harness) {
     childRunner: harness.childRunner,
     coordinatorId: TEST_COORDINATOR_ID,
     executionProfile: "test-only",
-    keyringAclHelper: KEYRING_ACL_HELPER,
-    keyringProtectionInspector: harness.keyringProtectionInspector,
     packageQa: PACKAGE_QA,
     powerShellCommand: testPowerShellCommand,
     publicationHook: harness.publicationHook,
     removeDirectory: harness.removeDirectory ?? removeDirectoryWithRetry,
     skeletonHelper: SKELETON_HELPER,
     specCompiler: SPEC_COMPILER,
-    trustedKeyringPath: harness.trustedKeyringPath,
-    trustedProgramDataPath: harness.trustedProgramDataPath,
     worker: WORKER,
   });
   return runCoordinator(options, dependencies);
@@ -3189,13 +2996,14 @@ export function parseCoordinatorArgs(argv) {
   const values = {};
   const errors = [];
   const allowed = new Set([
-    "--approval",
+    "--approve-smoke",
     "--diagnostic-output",
     "--mode",
     "--output",
     "--plan",
     "--smoke-bundle",
   ]);
+  const booleanFlags = new Set(["--approve-smoke"]);
   if (argv.length === 1 && argv[0] === "--help") return { help: true };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -3204,6 +3012,10 @@ export function parseCoordinatorArgs(argv) {
       continue;
     }
     if (Object.hasOwn(values, flag)) errors.push(`duplicate argument: ${flag}`);
+    if (booleanFlags.has(flag)) {
+      values[flag] = true;
+      continue;
+    }
     const value = argv[index + 1];
     if (value === undefined || value.startsWith("--")) {
       errors.push(`missing value for ${flag}`);
@@ -3219,12 +3031,12 @@ export function parseCoordinatorArgs(argv) {
     errors.push("--mode must be smoke or full");
   }
   if (values["--mode"] === "full") {
-    for (const flag of ["--approval", "--smoke-bundle"]) {
+    for (const flag of ["--smoke-bundle", "--approve-smoke"]) {
       if (!Object.hasOwn(values, flag)) errors.push(`full mode requires ${flag}`);
     }
   }
   if (values["--mode"] === "smoke") {
-    for (const flag of ["--approval", "--smoke-bundle"]) {
+    for (const flag of ["--smoke-bundle", "--approve-smoke"]) {
       if (Object.hasOwn(values, flag)) errors.push(`smoke mode does not accept ${flag}`);
     }
   }
@@ -3237,12 +3049,16 @@ export function parseCoordinatorArgs(argv) {
   return {
     help: false,
     options: {
-      approval: values["--approval"],
-      diagnosticOutput: values["--diagnostic-output"],
+      ...(values["--approve-smoke"] ? { approveSmoke: true } : {}),
+      ...(values["--diagnostic-output"]
+        ? { diagnosticOutput: values["--diagnostic-output"] }
+        : {}),
       mode: values["--mode"],
       output: values["--output"],
       plan: values["--plan"],
-      smokeBundle: values["--smoke-bundle"],
+      ...(values["--smoke-bundle"]
+        ? { smokeBundle: values["--smoke-bundle"] }
+        : {}),
     },
   };
 }

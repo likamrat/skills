@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
   access,
@@ -28,7 +28,6 @@ import { PassThrough } from "node:stream";
 
 import {
   CoordinatorError,
-  PRODUCTION_TRUSTED_KEYRING_PATH,
   parseCoordinatorArgs,
   runChildWatchdogForTest,
   runPowerPointNativeCoordinator,
@@ -41,7 +40,6 @@ import {
 import {
   canonicalizeJson,
   selectSmokeSlides,
-  smokeApprovalSignaturePayload,
 } from "./powerpoint-smoke-contract.mjs";
 
 const scriptsDirectory = fileURLToPath(new URL(".", import.meta.url));
@@ -56,10 +54,6 @@ const coordinatorPath = join(scriptsDirectory, "powerpoint-native-coordinator.mj
 const ownedProcessWatchdogPath = join(
   scriptsDirectory,
   "powerpoint-owned-process-watchdog.ps1",
-);
-const keyringAclHelperPath = join(
-  scriptsDirectory,
-  "inspect-trusted-keyring-protection.ps1",
 );
 const smokeContractPath = join(
   scriptsDirectory,
@@ -429,7 +423,7 @@ function createStubRunner(options = {}) {
       if (options.mutateSmokeBundleDuringFull && mode === "full") {
         await writeFile(
           join(options.mutateSmokeBundleDuringFull, "native-render", "contact-sheet.png"),
-          "mutated-after-approval",
+          "mutated-after-review",
         );
       }
       return {
@@ -904,100 +898,6 @@ async function expectWatchdogTimeout(action, verify) {
   });
 }
 
-async function writeApproval(casePaths) {
-  const planBytes = await readFile(casePaths.planPath);
-  const smokeReportBytes = await readFile(
-    join(casePaths.smokeOutput, "smoke-report.json"),
-  );
-  const smokeReport = JSON.parse(smokeReportBytes);
-  const keyPair = generateKeyPairSync("ed25519");
-  const keyId = "host-pinned-test-key";
-  const keyring = {
-    schemaVersion: 1,
-    keys: [
-      {
-        keyId,
-        algorithm: "ed25519",
-        publicKeyPem: keyPair.publicKey.export({
-          type: "spki",
-          format: "pem",
-        }),
-      },
-    ],
-  };
-  const approval = {
-    schemaVersion: 1,
-    approved: true,
-    approver: {
-      id: "employee:jane-doe",
-      kind: "human",
-      name: "Jane Doe",
-      role: "Engagement Director",
-    },
-    approvedAt: "2026-01-15T09:30:00Z",
-    planSha256: sha256(planBytes),
-    smokeReportSha256: sha256(smokeReportBytes),
-    smokePptxSha256: smokeReport.pptxSha256,
-    contactSheetSha256: smokeReport.contactSheetSha256,
-    selectedSlideIds: smokeReport.selectedSlideIds,
-    attestation: {
-      version: 1,
-      domain: "fde-powerpoint-smoke-approval-v1",
-      algorithm: "ed25519",
-      keyId,
-      signature: "",
-    },
-  };
-  approval.attestation.signature = sign(
-    null,
-    smokeApprovalSignaturePayload(approval),
-    keyPair.privateKey,
-  ).toString("base64url");
-  const approvalPath = join(casePaths.root, "approval.json");
-  const keyringRoot = join(casePaths.root, "trusted-program-data");
-  const keyringPath = join(
-    keyringRoot,
-    "GitHub",
-    "Copilot",
-    "FdeReadout",
-    "trusted-ed25519-keyring.json",
-  );
-  await mkdir(dirname(keyringPath), { recursive: true });
-  await writeFile(approvalPath, jsonText(approval));
-  await writeFile(keyringPath, jsonText(keyring));
-  return { approval, approvalPath, keyringPath, keyringRoot };
-}
-
-function keyringProtectionReport(approvalContext, mutate) {
-  const paths = [
-    join(approvalContext.keyringRoot, "GitHub"),
-    join(approvalContext.keyringRoot, "GitHub", "Copilot"),
-    join(approvalContext.keyringRoot, "GitHub", "Copilot", "FdeReadout"),
-    approvalContext.keyringPath,
-  ];
-  const entries = paths.map((path, index) => ({
-    path,
-    type: index === paths.length - 1 ? "file" : "directory",
-    exists: true,
-    reparsePoint: false,
-    ownerSid: "S-1-5-32-544",
-    ownerTrusted: true,
-    unsafeAclEntries: [],
-    inspectionError: null,
-  }));
-  const report = {
-    schemaVersion: 1,
-    status: "PROTECTED",
-    programDataPath: approvalContext.keyringRoot,
-    keyringPath: approvalContext.keyringPath,
-    invokingUserSid: "S-1-5-21-1000",
-    invokingUserIsAdministrator: false,
-    entries,
-  };
-  if (mutate) mutate(report);
-  return report;
-}
-
 async function runSmoke(
   casePaths,
   stub = createStubRunner(),
@@ -1013,7 +913,6 @@ async function runSmoke(
     },
     {
       childRunner: stub.runner,
-      trustedKeyringPath: undefined,
       removeDirectory: undefined,
       publicationHook: undefined,
       ...harnessOverrides,
@@ -1024,24 +923,21 @@ async function runSmoke(
 
 async function runFull(
   casePaths,
-  approvalContext,
   stub = createStubRunner(),
   harnessOverrides = {},
+  optionOverrides = {},
 ) {
   const report = await runPowerPointNativeCoordinatorForTest(
     {
       mode: "full",
       plan: casePaths.planPath,
       output: casePaths.fullOutput,
-      approval: approvalContext.approvalPath,
+      approveSmoke: true,
       smokeBundle: casePaths.smokeOutput,
+      ...optionOverrides,
     },
     {
       childRunner: stub.runner,
-      keyringProtectionInspector: async () =>
-        keyringProtectionReport(approvalContext),
-      trustedKeyringPath: approvalContext.keyringPath,
-      trustedProgramDataPath: approvalContext.keyringRoot,
       removeDirectory: undefined,
       publicationHook: undefined,
       ...harnessOverrides,
@@ -1052,96 +948,75 @@ async function runFull(
 
 try {
   {
-    assert.equal(
-      PRODUCTION_TRUSTED_KEYRING_PATH,
-      String.raw`C:\ProgramData\GitHub\Copilot\FdeReadout\trusted-ed25519-keyring.json`,
-    );
     await expectCoordinatorError(
       () =>
         runPowerPointNativeCoordinator(
           { mode: "smoke", plan: "ignored", output: "ignored" },
-          { childRunner: createStubRunner().runner, trustedKeyringPath: "attacker.json" },
+          { childRunner: createStubRunner().runner },
         ),
       "ARGUMENT_INVALID",
     );
-    const parsed = parseCoordinatorArgs([
+    const smokeArgs = [
       "--mode",
       "smoke",
       "--plan",
       "plan.json",
       "--output",
       "bundle",
-    ]);
+    ];
+    const parsed = parseCoordinatorArgs(smokeArgs);
     assert.equal(parsed.options.mode, "smoke");
-    const parsedFull = parseCoordinatorArgs([
+    assert.equal(Object.hasOwn(parsed.options, "approveSmoke"), false);
+    const fullArgs = [
       "--mode",
       "full",
       "--plan",
       "plan.json",
-      "--output",
-      "bundle",
-      "--approval",
-      "approval.json",
       "--smoke-bundle",
       "smoke-bundle",
-    ]);
+      "--approve-smoke",
+      "--output",
+      "bundle",
+    ];
+    const parsedFull = parseCoordinatorArgs(fullArgs);
     assert.equal(parsedFull.options.mode, "full");
-    assert.equal(Object.hasOwn(parsedFull.options, "trustedKeyring"), false);
+    assert.equal(parsedFull.options.approveSmoke, true);
+    assert.equal(parsedFull.options.smokeBundle, "smoke-bundle");
     assert.throws(
-      () =>
-        parseCoordinatorArgs([
-          "--mode",
-          "full",
-          "--plan",
-          "plan.json",
-          "--output",
-          "bundle",
-          "--approval",
-          "approval.json",
-          "--smoke-bundle",
-          "smoke-bundle",
-          "--trusted-keyring",
-          "caller-keyring.json",
-        ]),
+      () => parseCoordinatorArgs(fullArgs.filter((value) => value !== "--approve-smoke")),
       (error) =>
         error instanceof CoordinatorError &&
         error.code === "ARGUMENT_INVALID" &&
-        error.details.errors.some((message) =>
-          /unknown argument: --trusted-keyring/.test(message),
-        ),
+        error.details.errors.some((message) => /full mode requires --approve-smoke/.test(message)),
     );
     assert.throws(
-      () =>
-        parseCoordinatorArgs([
-          "--mode",
-          "full",
-          "--plan",
-          "plan.json",
-          "--output",
-          "bundle",
-          "--private-key",
-          "signer.pem",
-        ]),
+      () => parseCoordinatorArgs([...smokeArgs, "--approve-smoke"]),
       (error) =>
         error instanceof CoordinatorError &&
         error.code === "ARGUMENT_INVALID" &&
-        error.details.errors.some((message) => /unknown argument: --private-key/.test(message)),
+        error.details.errors.some((message) => /smoke mode does not accept --approve-smoke/.test(message)),
     );
+    for (const [flag, value] of [
+      ["--approval", "approval.json"],
+      ["--trusted-keyring", "caller-keyring.json"],
+      ["--private-key", "signer.pem"],
+      ["--signer", "self"],
+    ]) {
+      assert.throws(
+        () => parseCoordinatorArgs([...fullArgs, flag, value]),
+        (error) =>
+          error instanceof CoordinatorError &&
+          error.code === "ARGUMENT_INVALID" &&
+          error.details.errors.some((message) =>
+            new RegExp(`unknown argument: ${flag}`).test(message),
+          ),
+      );
+    }
     assert.throws(
-      () =>
-        parseCoordinatorArgs([
-          "--mode",
-          "full",
-          "--plan",
-          "plan.json",
-          "--output",
-          "bundle",
-          "--signer",
-          "self",
-        ]),
+      () => parseCoordinatorArgs([...fullArgs, "--approve-smoke"]),
       (error) =>
         error instanceof CoordinatorError &&
-        error.details.errors.some((message) => /unknown argument: --signer/.test(message)),
+        error.details.errors.some((message) => /duplicate argument: --approve-smoke/.test(message)),
     );
     const cliFailure = spawnSync(
       process.execPath,
@@ -1172,33 +1047,16 @@ try {
     assert.equal(errorReceipt.status, "COORDINATOR_ERROR");
     assert.equal(errorReceipt.code, "ARGUMENT_INVALID");
     assert.equal(errorReceipt.stage, "arguments");
-    const callerKeyringFailure = spawnSync(
+    const help = spawnSync(
       process.execPath,
-      [
-        coordinatorPath,
-        "--mode",
-        "full",
-        "--plan",
-        "plan.json",
-        "--output",
-        "bundle",
-        "--approval",
-        "approval.json",
-        "--smoke-bundle",
-        "smoke-bundle",
-        "--trusted-keyring",
-        "caller-keyring.json",
-      ],
+      [coordinatorPath, "--help"],
       { encoding: "utf8" },
     );
-    assert.equal(callerKeyringFailure.status, 2);
-    assert.equal(callerKeyringFailure.stdout, "");
-    const callerKeyringReceipt = JSON.parse(callerKeyringFailure.stderr);
-    assert.equal(callerKeyringReceipt.code, "ARGUMENT_INVALID");
-    assert.ok(
-      callerKeyringReceipt.details.errors.some((message) =>
-        /unknown argument: --trusted-keyring/.test(message),
-      ),
+    assert.equal(help.status, 0);
+    assert.equal(help.stderr, "");
+    assert.match(
+      help.stdout,
+      /--mode full --plan <plan> --smoke-bundle <dir> --approve-smoke --output <new-dir>/,
     );
   }
 
@@ -1268,14 +1126,19 @@ try {
     assert.deepEqual(persistedSmokeCoordinator, smokeReport);
     assert.equal(smokeReport.coordinator, "fde-powerpoint-native-coordinator/test-only");
     assert.equal(smokeReport.executionProfile, "test-only");
-    const signedSmokeReport = JSON.parse(
+    const persistedSmokeReport = JSON.parse(
       await readFile(join(casePaths.smokeOutput, "smoke-report.json"), "utf8"),
     );
     assert.equal(
-      signedSmokeReport.coordinator,
+      persistedSmokeReport.coordinator,
       "fde-powerpoint-native-coordinator/test-only",
     );
-    assert.equal(signedSmokeReport.executionProfile, "test-only");
+    assert.equal(persistedSmokeReport.executionProfile, "test-only");
+    assert.deepEqual(smokeReport.approval, {
+      requiredForFull: true,
+      approved: false,
+      method: "explicit-full-mode-flag",
+    });
     await assertPublicationManifest(smokeReport, casePaths.smokeOutput);
     const persistedSmokeWorkerBytes = await readFile(
       join(casePaths.smokeOutput, "worker-report.json"),
@@ -1298,13 +1161,16 @@ try {
       smokeReport.artifacts.workerReport.normalizedForBundle,
       true,
     );
-    const approval = await writeApproval(casePaths);
     const fullStub = createStubRunner();
-    const { report: fullReport } = await runFull(casePaths, approval, fullStub);
+    const { report: fullReport } = await runFull(casePaths, fullStub);
     assert.equal(fullReport.status, "COORDINATOR_PASS");
     assert.equal(fullReport.mode, "full");
-    assert.equal(fullReport.approval.authenticated, true);
-    assert.equal(fullReport.approval.attestation.keyId, "host-pinned-test-key");
+    assert.deepEqual(fullReport.approval, {
+      requiredForFull: true,
+      approved: true,
+      method: "explicit-full-mode-flag",
+    });
+    assert.equal(fullReport.checks.smokeBundleVerifiedBeforeSkeleton, true);
     assert.equal(fullReport.selection.slideCount, plan.slides.length);
     assert.deepEqual(
       fullReport.selection.selectedSlideIds,
@@ -1331,63 +1197,9 @@ try {
     );
   }
 
-  for (const [name, mutateProtection] of [
-    [
-      "writable-keyring-ancestor",
-      (report) => {
-        report.status = "UNPROTECTED";
-        report.entries[1].unsafeAclEntries = [
-          {
-            sid: "S-1-5-11",
-            rights: "Modify",
-            inherited: true,
-          },
-        ];
-      },
-    ],
-    [
-      "reparse-keyring-ancestor",
-      (report) => {
-        report.status = "UNPROTECTED";
-        report.entries[0].reparsePoint = true;
-      },
-    ],
-    [
-      "wrong-keyring-owner",
-      (report) => {
-        report.status = "UNPROTECTED";
-        report.entries[2].ownerSid = "S-1-5-21-1000";
-        report.entries[2].ownerTrusted = false;
-      },
-    ],
-    [
-      "missing-keyring-hierarchy",
-      (report) => {
-        report.status = "UNPROTECTED";
-        report.entries.splice(1, 1);
-      },
-    ],
-  ]) {
-    const casePaths = await newCase(name);
-    await runSmoke(casePaths);
-    const approval = await writeApproval(casePaths);
-    const fullStub = createStubRunner();
-    await expectCoordinatorError(
-      () =>
-        runFull(casePaths, approval, fullStub, {
-          keyringProtectionInspector: async () =>
-            keyringProtectionReport(approval, mutateProtection),
-        }),
-      "KEYRING_PROTECTION_INVALID",
-    );
-    assert.equal(fullStub.state.calls.length, 0);
-    assert.equal(await exists(casePaths.fullOutput), false);
-  }
-
   {
     const casePaths = await newCase("coordinator-report-relabel");
     await runSmoke(casePaths);
-    const approval = await writeApproval(casePaths);
     const coordinatorReportPath = join(
       casePaths.smokeOutput,
       "coordinator-report.json",
@@ -1399,7 +1211,7 @@ try {
     coordinatorReport.executionProfile = "production";
     await writeFile(coordinatorReportPath, jsonText(coordinatorReport));
     await expectCoordinatorError(
-      () => runFull(casePaths, approval),
+      () => runFull(casePaths),
       "SMOKE_BUNDLE_INVALID",
     );
     assert.equal(await exists(casePaths.fullOutput), false);
@@ -1619,19 +1431,26 @@ try {
   }
 
   {
-    const casePaths = await newCase("approval-rejection");
+    const casePaths = await newCase("explicit-approval-required");
     await runSmoke(casePaths);
-    const approval = await writeApproval(casePaths);
-    const rejected = JSON.parse(await readFile(approval.approvalPath, "utf8"));
-    rejected.approved = false;
-    await writeFile(approval.approvalPath, jsonText(rejected));
     const fullStub = createStubRunner();
     await expectCoordinatorError(
-      () => runFull(casePaths, approval, fullStub),
-      "SMOKE_APPROVAL_REJECTED",
+      () => runFull(casePaths, fullStub, {}, { approveSmoke: undefined }),
+      "ARGUMENT_INVALID",
     );
     assert.equal(fullStub.state.calls.length, 0);
     assert.equal(await exists(casePaths.fullOutput), false);
+  }
+
+  {
+    const casePaths = await newCase("smoke-rejects-explicit-approval");
+    const smokeStub = createStubRunner();
+    await expectCoordinatorError(
+      () => runSmoke(casePaths, smokeStub, {}, { approveSmoke: true }),
+      "ARGUMENT_INVALID",
+    );
+    assert.equal(smokeStub.state.calls.length, 0);
+    assert.equal(await exists(casePaths.smokeOutput), false);
   }
 
   {
@@ -1936,12 +1755,11 @@ try {
   {
     const casePaths = await newCase("mutated-smoke");
     await runSmoke(casePaths);
-    const approval = await writeApproval(casePaths);
     const stub = createStubRunner({
       mutateSmokeBundleDuringFull: casePaths.smokeOutput,
     });
     await expectCoordinatorError(
-      () => runFull(casePaths, approval, stub),
+      () => runFull(casePaths, stub),
       "INPUT_MUTATED",
     );
     assert.equal(await exists(casePaths.fullOutput), false);
@@ -1950,13 +1768,12 @@ try {
   {
     const casePaths = await newCase("malformed-smoke-package");
     await runSmoke(casePaths);
-    const approval = await writeApproval(casePaths);
     const packageQaPath = join(casePaths.smokeOutput, "package-qa.json");
     const packageQa = JSON.parse(await readFile(packageQaPath, "utf8"));
     packageQa.schemaVersion = 2;
     await writeFile(packageQaPath, jsonText(packageQa));
     await expectCoordinatorError(
-      () => runFull(casePaths, approval),
+      () => runFull(casePaths),
       "PACKAGE_QA_INVALID",
     );
     assert.equal(await exists(casePaths.fullOutput), false);
@@ -1965,7 +1782,6 @@ try {
   {
     const casePaths = await newCase("forged-smoke-package");
     await runSmoke(casePaths);
-    const approval = await writeApproval(casePaths);
     const packageQaPath = join(casePaths.smokeOutput, "package-qa.json");
     const packageQa = JSON.parse(await readFile(packageQaPath, "utf8"));
     packageQa.parts[0].sha256 = sha256("forged-valid-looking-part-hash");
@@ -1983,7 +1799,7 @@ try {
     );
     await writeFile(coordinatorReportPath, jsonText(coordinatorReport));
     await expectCoordinatorError(
-      () => runFull(casePaths, approval),
+      () => runFull(casePaths),
       "SMOKE_BUNDLE_INVALID",
     );
     assert.equal(await exists(casePaths.fullOutput), false);
@@ -2014,23 +1830,18 @@ try {
   {
     const casePaths = await newCase("path-alias");
     await runSmoke(casePaths);
-    const approval = await writeApproval(casePaths);
     await expectCoordinatorError(
       () =>
         runPowerPointNativeCoordinatorForTest(
           {
             mode: "full",
             plan: casePaths.planPath,
-            output: casePaths.fullOutput,
-            approval: casePaths.planPath,
+            output: join(casePaths.smokeOutput, "nested-output"),
+            approveSmoke: true,
             smokeBundle: casePaths.smokeOutput,
           },
           {
             childRunner: createStubRunner().runner,
-            keyringProtectionInspector: async () =>
-              keyringProtectionReport(approval),
-            trustedKeyringPath: approval.keyringPath,
-            trustedProgramDataPath: approval.keyringRoot,
             removeDirectory: undefined,
             publicationHook: undefined,
           },
@@ -2044,16 +1855,12 @@ try {
             mode: "full",
             plan: casePaths.planPath,
             output: casePaths.fullOutput,
-            approval: approval.approvalPath,
+            approveSmoke: true,
             smokeBundle: casePaths.smokeOutput,
             diagnosticOutput: join(casePaths.smokeOutput, "diagnostics"),
           },
           {
             childRunner: createStubRunner().runner,
-            keyringProtectionInspector: async () =>
-              keyringProtectionReport(approval),
-            trustedKeyringPath: approval.keyringPath,
-            trustedProgramDataPath: approval.keyringRoot,
             removeDirectory: undefined,
             publicationHook: undefined,
           },
@@ -2077,7 +1884,6 @@ try {
           },
           {
             childRunner: stub.runner,
-            trustedKeyringPath: undefined,
             removeDirectory: undefined,
             publicationHook: undefined,
           },
@@ -2107,7 +1913,6 @@ try {
           },
           {
             childRunner: stub.runner,
-            trustedKeyringPath: undefined,
             removeDirectory: async () => {
               throw new Error("stub cleanup lock");
             },
@@ -2141,13 +1946,15 @@ try {
     ownedProcessWatchdogPath,
     "utf8",
   );
-  const keyringAclHelperSource = await readFile(keyringAclHelperPath, "utf8");
   const smokeContractSource = await readFile(smokeContractPath, "utf8");
   assert.doesNotMatch(coordinatorSource, /\bAbortController\b|\bAbortSignal\b/);
-  assert.doesNotMatch(coordinatorSource, /private[-_]?key|signer/i);
+  assert.doesNotMatch(
+    coordinatorSource,
+    /Ed25519|trusted-keyring|Get-Acl|attestation|authenticated|private[-_]?key|signer/i,
+  );
   assert.match(
     coordinatorSource,
-    /export async function runPowerPointNativeCoordinator\(options\)[\s\S]*arguments\.length !== 1[\s\S]*trustedKeyringPath: PRODUCTION_TRUSTED_KEYRING_PATH/,
+    /export async function runPowerPointNativeCoordinator\(options\)[\s\S]*arguments\.length !== 1/,
   );
   assert.match(
     smokeContractSource,
@@ -2161,6 +1968,12 @@ try {
     coordinatorSource,
     /coordinatorReport\.coordinator === dependencies\.coordinatorId[\s\S]*coordinatorReport\.executionProfile === dependencies\.executionProfile/,
   );
+  assert.match(coordinatorSource, /validateSmokeReport\(\{/);
+  assert.match(coordinatorSource, /"explicit-full-mode-flag"/);
+  assert.doesNotMatch(
+    smokeContractSource,
+    /validateSmokeApproval|smokeApprovalSignaturePayload|Ed25519|createPublicKey|verify\(/,
+  );
   const mainSource = coordinatorSource.slice(
     coordinatorSource.indexOf("export async function main("),
   );
@@ -2171,7 +1984,6 @@ try {
     /timeoutMilliseconds: name === "native-worker" \? 1_800_000 : 300_000/,
   );
   assert.match(coordinatorSource, /powerpoint-owned-process-watchdog\.ps1/);
-  assert.match(coordinatorSource, /inspect-trusted-keyring-protection\.ps1/);
   assert.match(
     coordinatorSource,
     /const powerShellCommand = await resolveTrustedWindowsPowerShell\(\);/,
@@ -2193,20 +2005,6 @@ try {
     /Stop-Process\s+-Name|Get-Process\s+-Name/i,
   );
   assert.match(
-    keyringAclHelperSource,
-    /C:\\ProgramData\\GitHub\\Copilot\\FdeReadout\\trusted-ed25519-keyring\.json/,
-  );
-  assert.match(keyringAclHelperSource, /Get-Acl -LiteralPath/);
-  assert.match(keyringAclHelperSource, /FileAttributes\]::ReparsePoint/);
-  assert.match(
-    keyringAclHelperSource,
-    /\[int64\]268435456[\s\S]*\[int64\]1073741824/,
-    "keyring ACL helper must reject GENERIC_ALL and GENERIC_WRITE allow rights",
-  );
-  for (const sid of ["S-1-1-0", "S-1-5-11", "S-1-5-32-545"]) {
-    assert.ok(keyringAclHelperSource.includes(sid));
-  }
-  assert.match(
     coordinatorSource,
     /cleanupSensitive:\s*true/,
     "PowerShell children must be marked cleanup-sensitive",
@@ -2214,7 +2012,7 @@ try {
   assert.ok(hashPattern.test(sha256(coordinatorSource)));
 
   console.log(
-    "PowerPoint native coordinator tests passed: fixed production dependencies, bounded ownership-aware timeouts, smoke/full isolation, exact receipts, publication resealing, mutations, collisions, diagnostics, and cleanup reporting.",
+    "PowerPoint native coordinator tests passed: explicit smoke approval, bounded ownership-aware timeouts, smoke/full isolation, exact receipts, publication resealing, mutations, collisions, diagnostics, and cleanup reporting.",
   );
 } finally {
   await rm(temporaryDirectory, { recursive: true, force: true });
