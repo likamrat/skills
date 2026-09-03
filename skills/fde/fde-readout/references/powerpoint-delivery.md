@@ -12,38 +12,13 @@ node scripts\powerpoint-native-coordinator.mjs --mode smoke --plan plan.json --o
 
 The smoke command canonical-validates the complete plan, selects the cover, decision, and densest requested family through the shared smoke contract, creates a native skeleton from the clean seed, runs the native-shape worker, runs package QA, and atomically publishes one smoke bundle. It does not create a derivative plan.
 
-Review `readout-smoke-bundle\native-render\contact-sheet.png`. An accountable human must then approve the exact `smoke-report.json`, `readout.pptx`, contact sheet, plan bytes, and ordered slide IDs. The signed smoke report includes the production coordinator ID and execution profile. Full mode rejects test-only provenance even when `coordinator-report.json` is relabeled. The host signer creates the approval outside this repository. The coordinator never accepts a signer, private key, or caller-selected public keyring.
-
-Before full mode is used, an administrator must provision the pinned Ed25519 public keyring at `C:\ProgramData\GitHub\Copilot\FdeReadout\trusted-ed25519-keyring.json`. Every path below `C:\ProgramData` in that hierarchy must exist, must not be a reparse point, and must be owned by `NT AUTHORITY\SYSTEM` or `BUILTIN\Administrators`. Remove inherited ACLs. Grant write, delete, ownership, and permission-change rights only to SYSTEM and Administrators; the invoking non-administrator may have read and traverse rights only. For example, run an administrator-owned provisioning script that applies equivalent ACLs to every directory and the file:
+Review `readout-smoke-bundle\native-render\contact-sheet.png` and the smoke deck. When a human is satisfied with that output, run full mode explicitly with `--approve-smoke`. The flag records only that the caller chose to proceed after review; it does not record an identity or provide an attestation. No administrator setup is required.
 
 ```powershell
-$directories = @(
-  'C:\ProgramData\GitHub',
-  'C:\ProgramData\GitHub\Copilot',
-  'C:\ProgramData\GitHub\Copilot\FdeReadout'
-)
-foreach ($directory in $directories) {
-  $null = New-Item -ItemType Directory -Path $directory -Force
-  & "$env:SystemRoot\System32\icacls.exe" $directory /inheritance:r /grant:r 'SYSTEM:(OI)(CI)F' 'BUILTIN\Administrators:(OI)(CI)F' 'BUILTIN\Users:(OI)(CI)RX'
-  $acl = Get-Acl -LiteralPath $directory
-  $acl.SetOwner([Security.Principal.NTAccount]::new('BUILTIN\Administrators'))
-  Set-Acl -LiteralPath $directory -AclObject $acl
-}
-# Write the reviewed public keyring here as administrator before applying its file ACL.
-$keyring = 'C:\ProgramData\GitHub\Copilot\FdeReadout\trusted-ed25519-keyring.json'
-& "$env:SystemRoot\System32\icacls.exe" $keyring /inheritance:r /grant:r 'SYSTEM:F' 'BUILTIN\Administrators:F' 'BUILTIN\Users:R'
-$acl = Get-Acl -LiteralPath $keyring
-$acl.SetOwner([Security.Principal.NTAccount]::new('BUILTIN\Administrators'))
-Set-Acl -LiteralPath $keyring -AclObject $acl
+node scripts\powerpoint-native-coordinator.mjs --mode full --plan plan.json --smoke-bundle readout-smoke-bundle --approve-smoke --output readout-final-bundle
 ```
 
-The coordinator inspects this hierarchy with the absolute System32 Windows PowerShell executable before reading the keyring and fails closed with `KEYRING_PROTECTION_INVALID` if ownership, ACL, type, existence, or reparse checks fail.
-
-```powershell
-node scripts\powerpoint-native-coordinator.mjs --mode full --plan plan.json --smoke-bundle readout-smoke-bundle --approval smoke-approval.json --output readout-final-bundle
-```
-
-Full mode verifies the approval and all approved smoke bytes before any native child starts. It then restarts from the bundled clean seed, creates a fresh full skeleton, invokes the worker, requires dependency-free package QA to pass, verifies exact slide and notes counts, and atomically publishes one final bundle. It never reuses the smoke skeleton or smoke deck.
+Full mode verifies the exact plan hash, production coordinator and profile, selected slide IDs and families, smoke report, PPTX and contact-sheet hashes, worker and package hashes, fresh package QA, and publication seal before any native child starts. It then restarts from the bundled clean seed, creates a fresh full skeleton, invokes the worker, verifies exact slide and notes counts, and atomically publishes one final bundle. It never reuses the smoke skeleton or smoke deck.
 
 Both native helpers run sequentially and retain their shared `Local\FdeReadoutPowerPointAutomation` mutex, zero-PowerPoint baseline, process ownership, cleanup, contamination, and COM release checks. Each native child has a bounded coordinator watchdog. Immediately after exact HWND-to-PID, start-time, and executable-path validation, the helper atomically persists an ownership receipt. At the deadline, the watchdog validates that exact receipt, cleans only that owned process, terminates the exact child, and waits for exit. If the first receipt read was absent, it rereads after exact child termination and cleans a newly published exact owner. It never kills by process name or baseline difference. A missing, ambiguous, mismatched, contaminated, or failed ownership cleanup preserves the receipt and staging evidence and fails closed with retained-path diagnostics. Any child exit, stderr on success, malformed report, hash mismatch, stale input, unsupported package part, release error, contamination, output collision, or unexpected bundle file fails closed. Production children use absolute Node and System32 Windows PowerShell executables with a minimal trusted environment; caller `PATH`, `FDE_*` hooks, and process-injection variables are not inherited.
 
@@ -53,7 +28,7 @@ Failed staging is deleted by default. To preserve local diagnostics, provide one
 node scripts\powerpoint-native-coordinator.mjs --mode smoke --plan plan.json --output readout-smoke-bundle --diagnostic-output local-diagnostics
 ```
 
-The diagnostic path must not exist and must not alias the output or any approval input. The coordinator performs no network access or customer external writes.
+The diagnostic path must not exist and must not alias the output, plan, or smoke bundle. The coordinator performs no network access or customer external writes.
 
 The seed establishes a clean package foundation. It does not prove that a full deck can be authored safely, so the smoke gate still applies.
 
@@ -98,11 +73,11 @@ Structural slide changes happen before content formatting. Template slot counts 
 
 The smoke bundle separates three receipts:
 
-- `smoke-report.json` is the signed approval target. It binds the production coordinator ID and execution profile, plan, candidate PPTX, contact sheet, ordered slide IDs and families, per-slide evidence and native-object counts, overflow and notes verification, package summary, legacy-content removal, and dense-slide readability.
+- `smoke-report.json` binds the production coordinator ID and execution profile, plan, candidate PPTX, contact sheet, ordered slide IDs and families, per-slide evidence and native-object counts, overflow and notes verification, package summary, legacy-content removal, and dense-slide readability.
 - `package-qa.json` records the package hash, exact slide and unique notes parts, relationships, all package parts, and zero findings.
-- `coordinator-report.json` records the plan/spec/skeleton and artifact hashes, ordered selection, worker cleanup state, package-QA result, unsupported-part count, atomic publication strategy, and the complete payload file/hash manifest. Full mode also records the authenticated approval receipt. Immediately before the same-parent rename, the coordinator recomputes the complete file set and SHA-256 seal; it recomputes the same seal at the destination before reporting success. A post-rename mismatch is quarantined only to the explicit diagnostic path or removed. If quarantine rename fails, verified recursive removal is the fallback; a failed fallback reports both `retainedPublishedPath` and `cleanupError`.
+- `coordinator-report.json` records the plan/spec/skeleton and artifact hashes, ordered selection, explicit approval state, worker cleanup state, package-QA result, unsupported-part count, atomic publication strategy, and the complete payload file/hash manifest. Smoke reports `{requiredForFull:true, approved:false, method:"explicit-full-mode-flag"}`; full reports the same fields with `approved:true`. Immediately before the same-parent rename, the coordinator recomputes the complete file set and SHA-256 seal; it recomputes the same seal at the destination before reporting success. A post-rename mismatch is quarantined only to the explicit diagnostic path or removed. If quarantine rename fails, verified recursive removal is the fallback; a failed fallback reports both `retainedPublishedPath` and `cleanupError`.
 
-The human contact-sheet decision is the separately signed approval consumed by full mode. Package facts come from the deterministic JSON emitted by `scripts/pptx-package-qa.mjs`; the package inspector is read-only and never edits ZIP, XML, OOXML, or OPC content. The published `worker-report.json` is normalized only after its stdout and staged copy match exactly: final artifact paths are bundle-relative, ephemeral spec and skeleton paths are null, and all verified hashes and cleanup facts are preserved. Failures emit one machine-readable `COORDINATOR_ERROR` JSON object on stderr and no success-shaped stdout.
+The human contact-sheet decision is expressed by adding `--approve-smoke` to the full-mode command. Package facts come from the deterministic JSON emitted by `scripts/pptx-package-qa.mjs`; the package inspector is read-only and never edits ZIP, XML, OOXML, or OPC content. The published `worker-report.json` is normalized only after its stdout and staged copy match exactly: final artifact paths are bundle-relative, ephemeral spec and skeleton paths are null, and all verified hashes and cleanup facts are preserved. Failures emit one machine-readable `COORDINATOR_ERROR` JSON object on stderr and no success-shaped stdout.
 
 ## Conversion boundary
 

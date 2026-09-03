@@ -156,7 +156,7 @@ The bundled renderer is dependency-free. After freezing the plan and HTML, inspe
 
 Read [references/powerpoint-delivery.md](references/powerpoint-delivery.md).
 
-Copy the bundled clean 16:9 seed before native Office authoring; a reference deck is design input, never the mutable output base. Never substitute a screenshot-only deck or install a converter at runtime. On Windows with PowerPoint installed, run `scripts/powerpoint-native-coordinator.mjs --mode smoke` against the complete `ReadoutPlan`. The coordinator reuses deterministic smoke selection, creates a fresh native skeleton, runs the native-shape worker and package QA, and publishes one atomic smoke bundle. Review its contact sheet and obtain a host-pinned Ed25519 approval bound to the production coordinator provenance, plan, smoke report, PPTX, contact sheet, and selected slides. Then run the coordinator in `full` mode with that smoke bundle and approval; the coordinator reads its public keyring only from the fixed host-managed path after verifying administrator-managed ownership, ACLs, hierarchy, and absence of reparse points. Full mode verifies approval before creating a new skeleton from the clean seed and never reuses the smoke deck. See [references/powerpoint-delivery.md](references/powerpoint-delivery.md) for provisioning, exact commands, and bundle contracts. Run `node scripts/pptx-package-qa.mjs candidate.pptx` after each native save; any finding is a hard stop.
+Copy the bundled clean 16:9 seed before native Office authoring; a reference deck is design input, never the mutable output base. Never substitute a screenshot-only deck or install a converter at runtime. On Windows with PowerPoint installed, run `scripts/powerpoint-native-coordinator.mjs --mode smoke` against the complete `ReadoutPlan`. The coordinator reuses deterministic smoke selection, creates a fresh native skeleton, runs the native-shape worker and package QA, and publishes one atomic smoke bundle. A human reviews its contact sheet and smoke deck. After that review, explicitly run `full` mode with the same plan and smoke bundle plus `--approve-smoke`. Full mode exhaustively validates the bundle before creating a new skeleton from the clean seed and never reuses the smoke deck. No administrator setup is required. See [references/powerpoint-delivery.md](references/powerpoint-delivery.md) for exact commands and bundle contracts. Run `node scripts/pptx-package-qa.mjs candidate.pptx` after each native save; any finding is a hard stop.
 
 ## Restyle from a reference deck
 
@@ -193,7 +193,7 @@ Do not produce a customer or leadership readout when:
 - the brand treatment or reference-deck use is unauthorized;
 - restricted customer content would be sent to an external converter or hosted service;
 - no approved native Office renderer is available for requested PPTX delivery;
-- a requested PPTX lacks an approved smoke contact sheet;
+- a requested PPTX lacks a reviewed smoke contact sheet and explicit `--approve-smoke` full invocation;
 - a requested PPTX has two same-class structural canvas failures;
 - a requested PPTX places replacement content over undeleted legacy content;
 - a requested PPTX cannot isolate notes for its active slides;

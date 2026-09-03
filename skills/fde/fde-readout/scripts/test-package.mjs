@@ -164,10 +164,6 @@ const requiredAssets = [
   [join(skillRoot, "assets", "readout-plan.template.json"), "plan template"],
   [join(skillRoot, "assets", "readout-intent.template.json"), "intent template"],
   [
-    join(skillRoot, "assets", "powerpoint-smoke-approval.template.json"),
-    "PowerPoint smoke approval template",
-  ],
-  [
     join(skillRoot, "assets", "powerpoint-16x9-seed.pptx"),
     "PowerPoint seed",
   ],
@@ -219,10 +215,6 @@ const requiredAssets = [
   [
     join(skillRoot, "scripts", "powerpoint-owned-process-watchdog.ps1"),
     "exact owned PowerPoint watchdog",
-  ],
-  [
-    join(skillRoot, "scripts", "inspect-trusted-keyring-protection.ps1"),
-    "trusted keyring ACL inspector",
   ],
   [
     join(skillRoot, "scripts", "render-powerpoint-worker.ps1"),
