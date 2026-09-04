@@ -9,7 +9,15 @@ import {
   realpath,
   writeFile,
 } from "node:fs/promises";
-import { dirname, extname, join, relative, resolve, sep } from "node:path";
+import {
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
 const args = process.argv.slice(2);
 const outputIndex = args.indexOf("--output");
@@ -119,7 +127,9 @@ function insideRoot(root, path) {
   const candidate = relative(root, path);
   return (
     candidate === "" ||
-    (!candidate.startsWith("..") && !candidate.startsWith("/") && !candidate.includes(":"))
+    (!isAbsolute(candidate) &&
+      candidate !== ".." &&
+      !candidate.startsWith(`..${sep}`))
   );
 }
 
@@ -319,7 +329,12 @@ if (output) {
   await writeFile(resolvedOutput, serialized);
   console.log(`Wrote ${resolvedOutput}`);
 } else {
-  process.stdout.write(serialized);
+  await new Promise((resolveWrite, rejectWrite) => {
+    process.stdout.write(serialized, (error) => {
+      if (error) rejectWrite(error);
+      else resolveWrite();
+    });
+  });
 }
 
-process.exit(status === "block" ? 2 : status === "review" ? 1 : 0);
+process.exitCode = status === "block" ? 2 : status === "review" ? 1 : 0;

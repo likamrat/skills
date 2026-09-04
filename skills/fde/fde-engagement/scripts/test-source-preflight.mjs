@@ -8,8 +8,8 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
-import { basename, dirname, join, resolve } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { basename, dirname, join, resolve, win32 } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -49,6 +49,83 @@ function run(path) {
     failures.push(`preflight returned invalid JSON:\n${result.stdout}${result.stderr}`);
   }
   return { ...result, manifest };
+}
+
+async function runAsync(path, { delayStdout = false } = {}) {
+  const childArgs = delayStdout
+    ? [
+        "--input-type=module",
+        "--eval",
+        `
+          import { pathToFileURL } from "node:url";
+          const originalWrite = process.stdout.write.bind(process.stdout);
+          process.stdout.write = (chunk, encoding, callback) => {
+            if (typeof encoding === "function") {
+              callback = encoding;
+              encoding = undefined;
+            }
+            setTimeout(() => originalWrite(chunk, encoding, callback), 25);
+            return false;
+          };
+          process.argv = [
+            process.execPath,
+            ${JSON.stringify(script)},
+            "--root",
+            ${JSON.stringify(directory)},
+            ${JSON.stringify(path)}
+          ];
+          await import(pathToFileURL(${JSON.stringify(script)}).href);
+        `,
+      ]
+    : [script, "--root", directory, path];
+  const child = spawn(
+    process.execPath,
+    childArgs,
+    { cwd: directory, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  const stdout = [];
+  const stderr = [];
+  let stdoutBytes = 0;
+  child.stdout.on("data", (chunk) => {
+    stdoutBytes += chunk.length;
+    stdout.push(chunk);
+  });
+  child.stderr.on("data", (chunk) => stderr.push(chunk));
+  const status = await new Promise((resolveStatus, reject) => {
+    child.once("error", reject);
+    child.once("close", resolveStatus);
+  });
+  const stdoutText = Buffer.concat(stdout).toString("utf8");
+  const stderrText = Buffer.concat(stderr).toString("utf8");
+  if (stdoutBytes > testOutputBuffer) {
+    failures.push(
+      `async preflight exceeded ${testOutputBuffer} stdout bytes`,
+    );
+  }
+  let manifest;
+  try {
+    manifest = JSON.parse(stdoutText);
+  } catch {
+    failures.push(
+      `async preflight returned invalid JSON after ${stdoutBytes} stdout bytes: ${stderrText}`,
+    );
+  }
+  return { status, stdout: stdoutText, stderr: stderrText, manifest };
+}
+
+function loadInsideRoot(scriptText) {
+  const normalized = scriptText.replaceAll("\r\n", "\n");
+  const start = normalized.indexOf("function insideRoot(");
+  const end = normalized.indexOf("\n\nfunction insideApprovedRoot", start);
+  check(start >= 0 && end > start, "preflight must define insideRoot");
+  if (start < 0 || end <= start) return () => false;
+  const source = normalized.slice(start, end);
+  return new Function(
+    "isAbsolute",
+    "relative",
+    "sep",
+    `"use strict"; return (${source});`,
+  )(win32.isAbsolute, win32.relative, win32.sep);
 }
 
 try {
@@ -286,11 +363,7 @@ try {
       "",
     );
   }
-  const entryLimit = run(entryRoot);
-  check(
-    entryLimit.error === undefined,
-    "entry 1001 manifest must fit the test helper output buffer",
-  );
+  const entryLimit = await runAsync(entryRoot, { delayStdout: true });
   check(
     Buffer.byteLength(entryLimit.stdout ?? "") > 64 * 1024,
     "entry 1001 fixture must exceed the historical helper output buffer",
@@ -351,6 +424,35 @@ try {
     readFile(script),
     readFile(counterpart),
   ]);
+  const insideRoot = loadInsideRoot(localScript.toString("utf8"));
+  check(
+    !insideRoot(
+      String.raw`C:\approved`,
+      String.raw`D:\outside\source.txt`,
+    ),
+    "Windows cross-drive paths must stay outside the approved root",
+  );
+  check(
+    !insideRoot(
+      String.raw`\\server-a\share\approved`,
+      String.raw`\\server-b\share\outside\source.txt`,
+    ),
+    "Windows cross-server UNC paths must stay outside the approved root",
+  );
+  check(
+    !insideRoot(
+      String.raw`\\server\share-a\approved`,
+      String.raw`\\server\share-b\outside\source.txt`,
+    ),
+    "Windows cross-share UNC paths must stay outside the approved root",
+  );
+  check(
+    insideRoot(
+      String.raw`C:\approved`,
+      String.raw`C:\approved\..safe\source.txt`,
+    ),
+    "Windows child names beginning with two dots must remain inside",
+  );
   check(
     localScript.equals(counterpartScript),
     "installable preflight copies must be byte-identical",

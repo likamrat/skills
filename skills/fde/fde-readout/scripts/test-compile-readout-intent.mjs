@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const skillRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -12,6 +12,7 @@ const compiler = join(skillRoot, "scripts", "compile-readout-intent.mjs");
 const receiptKind = "fde-readout-input-receipt/v1";
 const authorizationDecision = "approve";
 const authorizationScope = "compile-readout-plan-only";
+const provenance = await import("./readout-input-provenance.mjs");
 const example = JSON.parse(
   await readFile(
     join(skillRoot, "assets", "examples", "lattice-harbor-readout-plan.json"),
@@ -279,6 +280,45 @@ async function expectFailure(execution, message) {
 }
 
 try {
+  await test("Windows output containment rejects cross-root paths", async () => {
+    expect(
+      typeof provenance.insideRoot === "function",
+      "provenance helper must export insideRoot",
+    );
+    expect(
+      !provenance.insideRoot(
+        String.raw`C:\workspace`,
+        String.raw`D:\outside\readout.json`,
+        win32,
+      ),
+      "Windows cross-drive output was accepted",
+    );
+    expect(
+      !provenance.insideRoot(
+        String.raw`\\server-a\share\workspace`,
+        String.raw`\\server-b\share\outside\readout.json`,
+        win32,
+      ),
+      "Windows cross-server UNC output was accepted",
+    );
+    expect(
+      !provenance.insideRoot(
+        String.raw`\\server\share-a\workspace`,
+        String.raw`\\server\share-b\outside\readout.json`,
+        win32,
+      ),
+      "Windows cross-share UNC output was accepted",
+    );
+    expect(
+      provenance.insideRoot(
+        String.raw`C:\workspace`,
+        String.raw`C:\workspace\..safe\readout.json`,
+        win32,
+      ),
+      "valid Windows output child beginning with two dots was rejected",
+    );
+  });
+
   await test("compilation requires manifests and receipt", async () => {
     const execution = await run(directory);
     const output = join(directory, "missing-provenance-inputs.json");

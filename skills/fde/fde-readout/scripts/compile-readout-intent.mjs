@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   canonical,
   findForbiddenIntentField,
+  insideRoot,
   matchManifestInput,
   parseJsonBytes,
   sha256,
@@ -119,13 +120,10 @@ async function assertOutputBoundary(outputPath) {
     fail(`Output parent must already exist: ${error.message}`, 2);
   }
   const pathFromWorkspace = relative(workspace, output);
-  const parentFromWorkspace = relative(workspace, parent);
   if (
     pathFromWorkspace === "" ||
-    pathFromWorkspace.startsWith("..") ||
-    pathFromWorkspace.includes(":") ||
-    parentFromWorkspace.startsWith("..") ||
-    parentFromWorkspace.includes(":")
+    !insideRoot(workspace, output) ||
+    !insideRoot(workspace, parent)
   ) {
     fail("Output must be a file inside the current workspace", 2);
   }
