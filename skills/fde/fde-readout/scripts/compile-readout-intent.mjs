@@ -63,6 +63,12 @@ function inputSnapshot(info) {
   };
 }
 
+function isRegularFile(info) {
+  return typeof info.isFile === "function"
+    ? info.isFile()
+    : (Number(info.mode) & 0o170000) === 0o100000;
+}
+
 function sameInputSnapshot(left, right) {
   return (
     left.dev === right.dev &&
@@ -74,10 +80,22 @@ function sameInputSnapshot(left, right) {
   );
 }
 
-async function readBoundedInput(path, maxBytes, openFile = open) {
+async function readBoundedInput(
+  path,
+  maxBytes,
+  openFile = open,
+  inspectFile = lstat,
+) {
+  const inspected = await inspectFile(path, { bigint: true });
+  if (!isRegularFile(inspected)) {
+    throw new Error("must be a regular file");
+  }
   const handle = await openFile(path, "r");
   try {
     const before = inputSnapshot(await handle.stat({ bigint: true }));
+    if (!isRegularFile(before)) {
+      throw new Error("must be a regular file");
+    }
     const chunks = [];
     let total = 0;
     while (total <= maxBytes) {
@@ -99,7 +117,10 @@ async function readBoundedInput(path, maxBytes, openFile = open) {
     ) {
       throw new Error("changed while being read");
     }
-    return Buffer.concat(chunks, total);
+    return {
+      bytes: Buffer.concat(chunks, total),
+      snapshot: before,
+    };
   } finally {
     await handle.close();
   }
@@ -107,8 +128,13 @@ async function readBoundedInput(path, maxBytes, openFile = open) {
 
 async function readInput(path, label) {
   try {
-    const bytes = await readBoundedInput(resolve(path), maxInputBytes);
+    const resolvedPath = resolve(path);
+    const bounded = await readBoundedInput(resolvedPath, maxInputBytes);
+    const bytes = bounded.bytes;
     return {
+      path: resolvedPath,
+      canonicalPath: await realpath(resolvedPath),
+      snapshot: bounded.snapshot,
       value: parseJsonBytes(bytes, label),
       byteLength: bytes.byteLength,
       sha256: sha256(bytes),
@@ -168,10 +194,10 @@ function sameFileIdentity(left, right) {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
-async function assertOutputBoundary(outputPath, inputPaths) {
+async function assertOutputBoundary(outputPath, inputs) {
   const lexicalWorkspace = resolve(process.cwd());
   const output = resolve(outputPath);
-  const resolvedInputs = inputPaths.map((path) => resolve(path));
+  const resolvedInputs = inputs.map((input) => input.path);
   if (resolvedInputs.includes(output)) {
     fail("Output must not alias an input", 2);
   }
@@ -206,11 +232,10 @@ async function assertOutputBoundary(outputPath, inputPaths) {
     if (error.code !== "ENOENT") fail(`Cannot inspect output: ${error.message}`, 2);
   }
   if (outputInfo) {
-    for (const inputPath of resolvedInputs) {
-      const inputInfo = await lstat(inputPath, { bigint: true });
+    for (const input of inputs) {
       if (
-        canonicalOutput === (await realpath(inputPath)) ||
-        sameFileIdentity(outputInfo, inputInfo)
+        canonicalOutput === input.canonicalPath ||
+        sameFileIdentity(outputInfo, input.snapshot)
       ) {
         fail("Output must not alias an input", 2);
       }
@@ -255,12 +280,12 @@ const intentInput = await readInput(args["--intent"], "intent");
 const output = await assertOutputBoundary(
   args["--output"],
   [
-    args["--source"],
-    args["--source-manifest"],
-    args["--authorization"],
-    args["--authorization-manifest"],
-    args["--receipt"],
-    args["--intent"],
+    sourceInput,
+    sourceManifestInput,
+    authorizationInput,
+    authorizationManifestInput,
+    receiptInput,
+    intentInput,
   ],
 );
 const source = sourceInput.value;

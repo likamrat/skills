@@ -147,6 +147,21 @@ function insideApprovedRoot(path) {
   return insideRoot(sourceRoot, path);
 }
 
+function sameLexicalPath(
+  left,
+  right,
+  pathApi = {
+    resolve,
+    caseInsensitive: process.platform === "win32",
+  },
+) {
+  const resolvedLeft = pathApi.resolve(left);
+  const resolvedRight = pathApi.resolve(right);
+  return pathApi.caseInsensitive
+    ? resolvedLeft.toLowerCase() === resolvedRight.toLowerCase()
+    : resolvedLeft === resolvedRight;
+}
+
 function outputError(message) {
   console.error(message);
   process.exit(3);
@@ -154,7 +169,7 @@ function outputError(message) {
 
 async function outputDestination(path) {
   for (const inputRoot of inputRoots) {
-    if (path === inputRoot) {
+    if (sameLexicalPath(path, inputRoot)) {
       outputError("--output must not alias an input source");
     }
   }
@@ -202,9 +217,15 @@ async function outputDestination(path) {
   }
   if (destinationInfo) {
     for (const inputRoot of inputRoots) {
-      if (!insideApprovedRoot(inputRoot)) continue;
-      const inputInfo = await lstat(inputRoot, { bigint: true });
-      const canonicalInput = await realpath(inputRoot);
+      let inputInfo;
+      let canonicalInput;
+      try {
+        inputInfo = await lstat(inputRoot, { bigint: true });
+        canonicalInput = await realpath(inputRoot);
+      } catch (error) {
+        if (error.code === "ENOENT") continue;
+        throw error;
+      }
       if (
         canonicalDestination === canonicalInput ||
         (destinationInfo.dev === inputInfo.dev &&
@@ -487,7 +508,11 @@ if (await hasDuplicateInputRoot(inputRoots)) {
       addTraversalFinding(root, "outside-approved-root");
       continue;
     }
+    const resultStart = files.length;
     await walk(root, 0);
+    if (files.length === resultStart && !entryLimitReached) {
+      addTraversalFinding(root, "empty-input-root");
+    }
     if (entryLimitReached) break;
   }
 }

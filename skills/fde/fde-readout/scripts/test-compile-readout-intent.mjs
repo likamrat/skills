@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { link, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -486,6 +487,7 @@ try {
       "grown.json",
       4,
       async () => file.handle,
+      async () => initial,
     ).then(
       () => false,
       (error) => error.message.includes("exceeds 4-byte input limit"),
@@ -507,6 +509,84 @@ try {
       "compiler still reads all inputs concurrently",
     );
   });
+
+  await test("compiler rejects non-regular inputs before open", async () => {
+    const readBoundedInput = loadReadBoundedInput(compilerSource);
+    expect(readBoundedInput, "compiler must define a bounded input reader");
+    let opened = false;
+    const socketMode = 0o140000;
+    const rejected = await readBoundedInput(
+      "socket.json",
+      16,
+      async () => {
+        opened = true;
+        throw new Error("must not open");
+      },
+      async () => ({
+        dev: 1n,
+        ino: 2n,
+        mode: BigInt(socketMode),
+        size: 0n,
+        mtimeNs: 1n,
+        ctimeNs: 1n,
+      }),
+    ).then(
+      () => false,
+      (error) => error.message.includes("must be a regular file"),
+    );
+    expect(rejected, "non-regular compiler input was not rejected");
+    expect(!opened, "non-regular compiler input was opened");
+    expect(
+      compilerSource.indexOf("await inspectFile(path") <
+        compilerSource.indexOf("await openFile(path"),
+      "compiler must inspect input type before open",
+    );
+  });
+
+  if (process.platform !== "win32") {
+    await test("compiler rejects a Unix socket without hanging", async () => {
+      const fixture = await run(directory);
+      await rm(fixture.fixture.paths.source, { force: true });
+      const server = createServer();
+      await new Promise((resolveListen, rejectListen) => {
+        server.once("error", rejectListen);
+        server.listen(fixture.fixture.paths.source, resolveListen);
+      });
+      try {
+        const output = join(directory, "socket-input-output.json");
+        const result = spawnSync(
+          process.execPath,
+          [
+            compiler,
+            "--source",
+            fixture.fixture.paths.source,
+            "--source-manifest",
+            fixture.fixture.paths.sourceManifest,
+            "--authorization",
+            fixture.fixture.paths.authorization,
+            "--authorization-manifest",
+            fixture.fixture.paths.authorizationManifest,
+            "--receipt",
+            fixture.fixture.paths.receipt,
+            "--intent",
+            fixture.fixture.paths.intent,
+            "--output",
+            output,
+          ],
+          { encoding: "utf8", timeout: 2_000 },
+        );
+        expect(result.error?.code !== "ETIMEDOUT", "Unix socket input hung");
+        expect(
+          result.status === 2 &&
+            result.stderr.includes("must be a regular file"),
+          `${result.stdout}${result.stderr}`,
+        );
+        await expectAbsent(output);
+      } finally {
+        await new Promise((resolveClose) => server.close(resolveClose));
+      }
+    });
+  }
 
   await test("deep intent provenance fails without RangeError", async () => {
     const base = serialize(intent);

@@ -203,6 +203,16 @@ function loadInsideRoot(scriptText) {
   )(win32.isAbsolute, win32.relative, win32.resolve, win32.sep);
 }
 
+function loadSameLexicalPath(scriptText) {
+  const normalized = scriptText.replaceAll("\r\n", "\n");
+  const start = normalized.indexOf("function sameLexicalPath(");
+  const end = normalized.indexOf("\n\nfunction outputError", start);
+  check(start >= 0 && end > start, "preflight must define sameLexicalPath");
+  if (start < 0 || end <= start) return () => false;
+  const source = normalized.slice(start, end);
+  return new Function(`"use strict"; return (${source});`)();
+}
+
 function loadReadBoundedFile(scriptText) {
   const normalized = scriptText.replaceAll("\r\n", "\n");
   const start = normalized.indexOf("function fileSnapshot(");
@@ -281,6 +291,59 @@ try {
     !Object.hasOwn(clear.manifest?.sources?.[0] ?? {}, "path"),
     "manifest must not echo source paths",
   );
+
+  const emptyRoot = join(directory, "empty-root");
+  await mkdir(emptyRoot);
+  const emptyResult = run(emptyRoot);
+  check(emptyResult.status === 2, "named empty directory must block");
+  check(
+    emptyResult.manifest?.sources?.length === 1 &&
+      emptyResult.manifest.sources[0].findings?.some(
+        (finding) => finding.rule === "empty-input-root",
+      ),
+    "named empty directory must emit one explicit block",
+  );
+  await rm(emptyRoot, { recursive: true, force: true });
+
+  const outputOnlyRoot = join(directory, "output-only-root");
+  await mkdir(outputOnlyRoot);
+  const outputOnlyManifest = join(outputOnlyRoot, "manifest.json");
+  const outputOnlyResult = runWithOutput(
+    outputOnlyRoot,
+    outputOnlyManifest,
+  );
+  check(
+    outputOnlyResult.status === 2,
+    "directory containing only its output manifest must block",
+  );
+  const outputOnly = JSON.parse(await readFile(outputOnlyManifest, "utf8"));
+  check(
+    outputOnly.sources?.length === 1 &&
+      outputOnly.sources[0].findings?.some(
+        (finding) => finding.rule === "empty-input-root",
+      ),
+    "output-only directory must emit one explicit block",
+  );
+  await rm(outputOnlyRoot, { recursive: true, force: true });
+
+  if (process.platform === "win32") {
+    const caseAliasPath = join(directory, "Case-Alias-Source.txt");
+    const caseAliasText = "case alias source\n";
+    await writeFile(caseAliasPath, caseAliasText);
+    const caseAliasResult = runWithOutput(
+      caseAliasPath.toUpperCase(),
+      caseAliasPath,
+    );
+    check(
+      caseAliasResult.status === 3,
+      "Windows case-only input/output aliases must fail",
+    );
+    check(
+      (await readFile(caseAliasPath, "utf8")) === caseAliasText,
+      "Windows case-only alias rejection must preserve source bytes",
+    );
+    await rm(caseAliasPath, { force: true });
+  }
 
   const duplicateRoot = runMany([
     clearPath,
@@ -810,6 +873,23 @@ try {
     "walk must emit a block for every non-regular source type",
   );
   const insideRoot = loadInsideRoot(localScriptText);
+  const sameLexicalPath = loadSameLexicalPath(localScriptText);
+  check(
+    sameLexicalPath(
+      String.raw`C:\Approved\Source.txt`,
+      String.raw`c:\approved\source.TXT`,
+      { resolve: win32.resolve, caseInsensitive: true },
+    ),
+    "Windows drive case aliases must be detected without filesystem access",
+  );
+  check(
+    sameLexicalPath(
+      String.raw`\\Server\Share\Source.txt`,
+      String.raw`\\server\share\source.TXT`,
+      { resolve: win32.resolve, caseInsensitive: true },
+    ),
+    "Windows UNC case aliases must be detected without network access",
+  );
   check(
     !insideRoot(
       String.raw`C:\approved`,
