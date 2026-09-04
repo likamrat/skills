@@ -3,9 +3,11 @@
 import {
   access,
   link,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -20,7 +22,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { basename, dirname, join, resolve, sep, win32 } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const directory = await mkdtemp(join(tmpdir(), "fde-source-preflight-"));
 const outsideDirectory = await mkdtemp(
@@ -35,6 +37,13 @@ const counterpart = join(
   "preflight-sources.mjs",
 );
 const testOutputBuffer = 16 * 1024 * 1024;
+const linkUnavailableCodes = new Set([
+  "EACCES",
+  "EINVAL",
+  "ENOSYS",
+  "ENOTSUP",
+  "EPERM",
+]);
 const failures = [];
 
 function check(condition, message) {
@@ -86,6 +95,26 @@ function run(path, { expectManifest = true } = {}) {
   return { ...result, manifest };
 }
 
+function runWithRoot(
+  root,
+  path,
+  { output = null, nodeArgs = [], env = process.env } = {},
+) {
+  const preflightArgs = ["--root", root];
+  if (output) preflightArgs.push("--output", output);
+  preflightArgs.push(path);
+  return spawnSync(
+    process.execPath,
+    [...nodeArgs, script, ...preflightArgs],
+    {
+      cwd: directory,
+      encoding: "utf8",
+      maxBuffer: testOutputBuffer,
+      env,
+    },
+  );
+}
+
 function runWithOutput(path, output) {
   stabilizeSource(path);
   return spawnSync(
@@ -124,6 +153,16 @@ async function exists(path) {
     if (error.code === "ENOENT") return false;
     throw error;
   }
+}
+
+async function checkInputAccessFailure(result, manifestPath, label) {
+  check(result.status === 3, `${label} must use operational exit 3`);
+  check(
+    result.stderr === "Cannot access input source\n",
+    `${label} must emit the exact error with no path or stack`,
+  );
+  check(result.stdout === "", `${label} must leave stdout empty`);
+  check(!(await exists(manifestPath)), `${label} must not write a manifest`);
 }
 
 async function runAsync(path, { delayStdout = false } = {}) {
@@ -226,6 +265,34 @@ function loadInputAccess(scriptText) {
     "inputAccessCodes",
     `"use strict"; return (${source});`,
   )(new Set(["EACCES"]));
+}
+
+function loadAliasesOutput(
+  scriptText,
+  outputIdentity,
+  resolvePath = realpath,
+  inspectPath = lstat,
+) {
+  const normalized = scriptText.replaceAll("\r\n", "\n");
+  const start = normalized.indexOf("async function aliasesOutput(");
+  const end = normalized.indexOf("\n\nfunction inputAccessError", start);
+  check(start >= 0 && end > start, "preflight must define aliasesOutput");
+  if (start < 0 || end <= start) return async () => false;
+  const source = normalized.slice(start, end);
+  return new Function(
+    "realpath",
+    "lstat",
+    "sameFileIdentity",
+    "inputAccessCodes",
+    "outputIdentity",
+    `"use strict"; return (${source});`,
+  )(
+    resolvePath,
+    inspectPath,
+    (left, right) => left.dev === right.dev && left.ino === right.ino,
+    new Set(["EACCES", "ENOENT", "EPERM"]),
+    outputIdentity,
+  );
 }
 
 function loadReadBoundedFile(scriptText) {
@@ -424,6 +491,173 @@ try {
     !missing.stdout,
     "missing input operational failure must not emit a review manifest",
   );
+
+  const missingRoot = join(directory, "missing-root");
+  const missingRootManifest = join(directory, "missing-root-manifest.json");
+  const missingRootResult = runWithRoot(
+    missingRoot,
+    join(missingRoot, "source.txt"),
+    { output: missingRootManifest },
+  );
+  await checkInputAccessFailure(
+    missingRootResult,
+    missingRootManifest,
+    "missing approved root",
+  );
+
+  const inaccessibleRoot = join(directory, "inaccessible-root");
+  const inaccessibleSource = join(inaccessibleRoot, "source.txt");
+  const inaccessibleManifest = join(directory, "inaccessible-root-manifest.json");
+  await mkdir(inaccessibleRoot);
+  await writeFile(inaccessibleSource, "inaccessible root fixture\n");
+  const inaccessibleFsModule = `
+    import fs from "node:fs";
+    const { promises } = fs;
+    export const { lstat, mkdir, open, opendir, rename, rm, writeFile } =
+      promises;
+    export async function realpath(path) {
+      if (String(path) === process.env.FDE_PREFLIGHT_INACCESSIBLE_ROOT) {
+        const error = new Error("injected inaccessible root");
+        error.code = "EACCES";
+        throw error;
+      }
+      return promises.realpath(path);
+    }
+  `;
+  const inaccessibleLoader = join(directory, "inaccessible-root-loader.mjs");
+  await writeFile(
+    inaccessibleLoader,
+    `
+      const replacement = "data:text/javascript," +
+        encodeURIComponent(${JSON.stringify(inaccessibleFsModule)});
+      export async function resolve(specifier, context, nextResolve) {
+        if (specifier === "node:fs/promises") {
+          return { url: replacement, shortCircuit: true };
+        }
+        return nextResolve(specifier, context);
+      }
+    `,
+  );
+  const inaccessibleRootResult = runWithRoot(
+    inaccessibleRoot,
+    inaccessibleSource,
+    {
+      output: inaccessibleManifest,
+      nodeArgs: ["--no-warnings", "--experimental-loader", pathToFileURL(inaccessibleLoader).href],
+      env: {
+        ...process.env,
+        FDE_PREFLIGHT_INACCESSIBLE_ROOT: inaccessibleRoot,
+      },
+    },
+  );
+  await checkInputAccessFailure(
+    inaccessibleRootResult,
+    inaccessibleManifest,
+    "inaccessible approved root",
+  );
+  await Promise.all([
+    rm(inaccessibleRoot, { recursive: true, force: true }),
+    rm(inaccessibleLoader, { force: true }),
+    rm(inaccessibleManifest, { force: true }),
+  ]);
+
+  const linkAliasRoot = join(directory, "link-output-alias-root");
+  await mkdir(linkAliasRoot);
+  const linkOutputTarget = join(directory, "link-output-target.json");
+  await writeFile(linkOutputTarget, "previous output\n");
+  const directOutputAlias = join(linkAliasRoot, "output-alias.json");
+  let directAliasCreated = true;
+  try {
+    await symlink(linkOutputTarget, directOutputAlias, "file");
+  } catch (error) {
+    if (!linkUnavailableCodes.has(error.code)) throw error;
+    directAliasCreated = false;
+    console.log(
+      `SKIP direct file symlink output alias: ${error.code} prevents link creation`,
+    );
+  }
+  if (directAliasCreated) {
+    const directLinkResult = runWithOutput(
+      linkAliasRoot,
+      linkOutputTarget,
+    );
+    check(
+      directLinkResult.status === 2,
+      "direct symlink to existing output must remain excluded",
+    );
+    const directLinkManifest = JSON.parse(
+      await readFile(linkOutputTarget, "utf8"),
+    );
+    check(
+      directLinkManifest.sources?.length === 1 &&
+        directLinkManifest.sources[0].findings?.some(
+          (finding) => finding.rule === "empty-input-root",
+        ),
+      "direct output symlink alias must preserve empty-input-root",
+    );
+    await rm(directOutputAlias, { force: true });
+  }
+
+  const junctionTarget = join(directory, "junction-output-target");
+  await mkdir(junctionTarget);
+  const junctionOutput = join(junctionTarget, "manifest.json");
+  await writeFile(junctionOutput, "previous junction output\n");
+  const junctionAlias = join(linkAliasRoot, "junction-alias");
+  let junctionAliasCreated = true;
+  try {
+    await symlink(
+      junctionTarget,
+      junctionAlias,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+  } catch (error) {
+    if (!linkUnavailableCodes.has(error.code)) throw error;
+    junctionAliasCreated = false;
+    console.log(
+      `FALLBACK ancestor directory output alias: ${error.code} prevents link creation`,
+    );
+  }
+  const outputAliasScriptText = await readFile(script, "utf8");
+  const junctionInfo = await lstat(junctionOutput, { bigint: true });
+  const junctionIdentity = {
+    canonicalPath: await realpath(junctionOutput),
+    snapshot: { dev: junctionInfo.dev, ino: junctionInfo.ino },
+  };
+  const junctionAliasPath = join(junctionAlias, "manifest.json");
+  const aliasesOutput = junctionAliasCreated
+    ? loadAliasesOutput(outputAliasScriptText, junctionIdentity)
+    : loadAliasesOutput(
+        outputAliasScriptText,
+        junctionIdentity,
+        async () => junctionIdentity.canonicalPath,
+        async () => {
+          throw new Error("canonical output equality must not inspect the target");
+        },
+      );
+  check(
+    await aliasesOutput(junctionAliasPath),
+    "ancestor directory alias must resolve to the existing output identity",
+  );
+  if (junctionAliasCreated) {
+    const junctionLinkResult = runWithOutput(
+      junctionAliasPath,
+      junctionOutput,
+    );
+    check(
+      junctionLinkResult.status === 3,
+      "ancestor junction alias to existing output must be rejected safely",
+    );
+    check(
+      (await readFile(junctionOutput, "utf8")) ===
+        "previous junction output\n",
+      "ancestor output junction rejection must preserve target bytes",
+    );
+  }
+  await Promise.all([
+    rm(linkAliasRoot, { recursive: true, force: true }),
+    rm(linkOutputTarget, { force: true }),
+    rm(junctionTarget, { recursive: true, force: true }),
+  ]);
 
   const duplicateRoot = runMany([
     clearPath,
@@ -935,6 +1169,18 @@ try {
   const walkSource = localScriptText.slice(
     walkStart,
     localScriptText.indexOf("\n\nfor (const root", walkStart),
+  );
+  const outputAliasCheck = walkSource.indexOf(
+    "if (await aliasesOutput(resolvedPath)) return;",
+  );
+  const ancestorSymlinkCheck = walkSource.indexOf(
+    "const pathFromSourceRoot = relative(sourceRoot, resolvedPath);",
+  );
+  check(
+    outputAliasCheck >= 0 &&
+      ancestorSymlinkCheck >= 0 &&
+      outputAliasCheck < ancestorSymlinkCheck,
+    "walk must exclude exact output aliases before generic symlink handling",
   );
   check(
     walkSource.includes(

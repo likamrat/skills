@@ -132,7 +132,7 @@ const rules = [
 const files = [];
 const inputRoots = args.map((path) => resolve(path));
 const sourceRoot = resolve(approvedRoot);
-const canonicalSourceRoot = await realpath(sourceRoot);
+const canonicalSourceRoot = await inputAccess(() => realpath(sourceRoot));
 const workspaceRoot = resolve(process.cwd());
 const canonicalWorkspaceRoot = await realpath(workspaceRoot);
 const resolvedOutput = output ? resolve(output) : null;
@@ -196,6 +196,19 @@ async function captureOutputIdentity(path) {
     };
   } catch (error) {
     if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function aliasesOutput(path) {
+  if (!outputIdentity) return false;
+  try {
+    const canonicalPath = await realpath(path);
+    if (canonicalPath === outputIdentity.canonicalPath) return true;
+    const info = await lstat(canonicalPath, { bigint: true });
+    return sameFileIdentity(info, outputIdentity.snapshot);
+  } catch (error) {
+    if (inputAccessCodes.has(error?.code)) return false;
     throw error;
   }
 }
@@ -459,6 +472,7 @@ async function walk(path, depth) {
   const resolvedPath = resolve(path);
   if (!registerDiscoveredEntry(resolvedPath)) return;
   if (resolvedOutput && sameLexicalPath(resolvedPath, resolvedOutput)) return;
+  if (await aliasesOutput(resolvedPath)) return;
 
   const pathFromSourceRoot = relative(sourceRoot, resolvedPath);
   const components = pathFromSourceRoot.split(sep).filter(Boolean);
