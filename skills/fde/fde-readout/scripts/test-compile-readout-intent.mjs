@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { link, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve, win32 } from "node:path";
@@ -212,6 +212,10 @@ async function run(directory, overrides = {}, output) {
   );
   const outputPath =
     output ?? join(directory, `readout-plan-${(runNumber += 1)}.json`);
+  if (overrides.hardLinkOutputFrom) {
+    await rm(outputPath, { force: true });
+    await link(paths[overrides.hardLinkOutputFrom], outputPath);
+  }
   const result = spawnSync(
     process.execPath,
     [
@@ -399,6 +403,57 @@ try {
       );
     },
   );
+
+  await test("output cannot alias any compiler input", async () => {
+    for (const inputName of [
+      "source",
+      "sourceManifest",
+      "authorization",
+      "authorizationManifest",
+      "receipt",
+      "intent",
+    ]) {
+      const output = join(
+        directory,
+        {
+          source: "source.json",
+          sourceManifest: "source-manifest.json",
+          authorization: "authorization.json",
+          authorizationManifest: "authorization-manifest.json",
+          receipt: "receipt.json",
+          intent: "intent.json",
+        }[inputName],
+      );
+      const execution = await run(directory, {}, output);
+      expect(
+        execution.result.status !== 0 &&
+          execution.result.stderr.includes("must not alias an input"),
+        `${inputName}: ${execution.result.stdout}${execution.result.stderr}`,
+      );
+      expect(
+        (await readFile(output, "utf8")) === execution.fixture.texts[inputName],
+        `${inputName} was overwritten`,
+      );
+    }
+  });
+
+  await test("output cannot hard-link to a compiler input", async () => {
+    const output = join(directory, "hard-linked-output.json");
+    const execution = await run(
+      directory,
+      { hardLinkOutputFrom: "receipt" },
+      output,
+    );
+    expect(
+      execution.result.status !== 0 &&
+        execution.result.stderr.includes("must not alias an input"),
+      `${execution.result.stdout}${execution.result.stderr}`,
+    );
+    expect(
+      (await readFile(output, "utf8")) === execution.fixture.texts.receipt,
+      "hard-linked receipt input was overwritten",
+    );
+  });
 
   await test("oversized compiler input fails before JSON parsing", async () => {
     const sourceJson = serialize(compactSource);

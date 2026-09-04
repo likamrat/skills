@@ -2,6 +2,7 @@
 
 import {
   access,
+  link,
   mkdir,
   mkdtemp,
   readFile,
@@ -16,6 +17,7 @@ import {
   readdirSync,
 } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:net";
 import { basename, dirname, join, resolve, sep, win32 } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -96,6 +98,11 @@ function runWithOutput(path, output) {
 }
 
 function runMany(paths) {
+  for (const path of paths) {
+    if (resolve(path).startsWith(`${resolve(directory)}${sep}`)) {
+      stabilizeSource(path);
+    }
+  }
   return spawnSync(
     process.execPath,
     [script, "--root", directory, ...paths],
@@ -275,6 +282,49 @@ try {
     "manifest must not echo source paths",
   );
 
+  const duplicateRoot = runMany([
+    clearPath,
+    join(directory, ".", "clear.txt"),
+  ]);
+  check(duplicateRoot.status === 2, "duplicate input roots must block");
+  const duplicateRootManifest = JSON.parse(duplicateRoot.stdout);
+  check(
+    duplicateRootManifest.sources.length === 1 &&
+      duplicateRootManifest.sources[0].findings?.some(
+        (finding) => finding.rule === "duplicate-source-path",
+      ),
+    "duplicate roots must stop before scanning with one explicit block",
+  );
+
+  const identicalLeft = join(directory, "identical-left.txt");
+  const identicalRight = join(directory, "identical-right.txt");
+  await Promise.all([
+    writeFile(identicalLeft, "identical\n"),
+    writeFile(identicalRight, "identical\n"),
+  ]);
+  const identical = runMany([identicalLeft, identicalRight]);
+  check(identical.status === 2, "byte-identical sources must block");
+  const identicalManifest = JSON.parse(identical.stdout);
+  check(
+    identicalManifest.sources.length === 1 &&
+      identicalManifest.sources[0].sha256 &&
+      identicalManifest.sources[0].findings?.some(
+        (finding) => finding.rule === "duplicate-source-bytes",
+      ),
+    "byte-identical sources must collapse into one matching block",
+  );
+  const fingerprints = identicalManifest.sources
+    .filter((source) => source.sha256)
+    .map((source) => `${source.bytes}:${source.sha256}`);
+  check(
+    new Set(fingerprints).size === fingerprints.length,
+    "manifest must not contain ambiguous byte fingerprints",
+  );
+  await Promise.all([
+    rm(identicalLeft, { force: true }),
+    rm(identicalRight, { force: true }),
+  ]);
+
   const reviewPath = join(directory, "review.txt");
   await writeFile(
     reviewPath,
@@ -406,6 +456,34 @@ try {
     "preflight must exclude its previous output manifest",
   );
 
+  const directAliasSource = join(directory, "direct-alias-source.txt");
+  const directAliasText = "direct alias source\n";
+  await writeFile(directAliasSource, directAliasText);
+  const directAlias = runWithOutput(
+    directAliasSource,
+    join(directory, ".", "direct-alias-source.txt"),
+  );
+  check(directAlias.status === 3, "output matching an input path must fail");
+  check(
+    (await readFile(directAliasSource, "utf8")) === directAliasText,
+    "output matching an input path must not overwrite the source",
+  );
+
+  const hardLinkSource = join(directory, "hard-link-source.txt");
+  const hardLinkOutput = join(directory, "hard-link-output.json");
+  const hardLinkText = "hard link source\n";
+  await writeFile(hardLinkSource, hardLinkText);
+  await link(hardLinkSource, hardLinkOutput);
+  const hardLinkAlias = runWithOutput(hardLinkSource, hardLinkOutput);
+  check(
+    hardLinkAlias.status === 3,
+    "output file-identical to an input must fail",
+  );
+  check(
+    (await readFile(hardLinkSource, "utf8")) === hardLinkText,
+    "file-identical output must not modify its input",
+  );
+
   const outsideOutputTarget = join(outsideDirectory, "outside-output.json");
   await writeFile(outsideOutputTarget, "sentinel\n");
   const outputSymlink = join(directory, "output-symlink.json");
@@ -467,7 +545,7 @@ try {
 
   const outsideArguments = Array.from(
     { length: 1_500 },
-    () => `..${sep}x`,
+    (_, index) => `..${sep}x${index}`,
   );
   const outsideArgumentResult = runMany(outsideArguments);
   check(
@@ -564,7 +642,7 @@ try {
   for (let index = 1; index <= 1001; index += 1) {
     await writeFile(
       join(entryRoot, `entry-${String(index).padStart(4, "0")}.txt`),
-      "",
+      `${index}\n`,
     );
   }
   const entryLimit = await runAsync(entryRoot, { delayStdout: true });
@@ -596,6 +674,30 @@ try {
     "symlink source must retain the symlink rule",
   );
 
+  if (process.platform !== "win32") {
+    const socketPath = join(directory, "non-regular.sock");
+    const server = createServer();
+    await new Promise((resolveListen, rejectListen) => {
+      server.once("error", rejectListen);
+      server.listen(socketPath, resolveListen);
+    });
+    try {
+      const socketResult = run(socketPath);
+      check(socketResult.status === 2, "socket source must block");
+      check(
+        socketResult.manifest?.sources?.length === 1 &&
+          socketResult.manifest.sources[0].bytes === 0 &&
+          socketResult.manifest.sources[0].sha256 === null &&
+          socketResult.manifest.sources[0].findings?.some(
+            (finding) => finding.rule === "non-regular-source",
+          ),
+        "socket source must emit an explicit non-regular block without reading",
+      );
+    } finally {
+      await new Promise((resolveClose) => server.close(resolveClose));
+    }
+  }
+
   const oversizedPath = join(directory, "oversized.txt");
   await writeFile(oversizedPath, Buffer.alloc(2 * 1024 * 1024 + 1, 0x61));
   const oversized = run(oversizedPath);
@@ -607,9 +709,58 @@ try {
     "file over 2 MiB must retain the file-size-limit rule",
   );
 
+  const oversizedUnsupportedPath = join(
+    directory,
+    "oversized-unsupported.bin",
+  );
+  await writeFile(
+    oversizedUnsupportedPath,
+    Buffer.alloc(2 * 1024 * 1024 + 1, 0x61),
+  );
+  const oversizedUnsupported = run(oversizedUnsupportedPath);
+  check(
+    oversizedUnsupported.status === 2,
+    "unsupported file over 2 MiB must block",
+  );
+  check(
+    oversizedUnsupported.manifest?.sources?.[0]?.findings?.some(
+      (finding) => finding.rule === "file-size-limit",
+    ) &&
+      !oversizedUnsupported.manifest.sources[0].findings.some(
+        (finding) => finding.rule === "unsupported-or-binary-format",
+      ) &&
+      oversizedUnsupported.manifest.sources[0].sha256 === null,
+    "unsupported oversize must apply size block before format review without reading",
+  );
+
+  const unsupportedTotalRoot = join(directory, "unsupported-total-root");
+  await mkdir(unsupportedTotalRoot);
+  for (let index = 1; index <= 7; index += 1) {
+    await writeFile(
+      join(unsupportedTotalRoot, `part-${index}.bin`),
+      Buffer.alloc(2 * 1024 * 1024, 0x61),
+    );
+  }
+  const unsupportedTotal = run(unsupportedTotalRoot);
+  check(
+    unsupportedTotal.status === 2 &&
+      unsupportedTotal.manifest?.sources?.some((source) =>
+        source.findings?.some(
+          (finding) => finding.rule === "total-size-limit",
+        ),
+      ),
+    "unsupported files must count toward the aggregate byte limit",
+  );
+  check(
+    unsupportedTotal.manifest?.sources?.every(
+      (source) => source.sha256 === null,
+    ),
+    "unsupported aggregate inputs must remain unread",
+  );
+
   const totalRoot = join(directory, "total-root");
   await mkdir(totalRoot);
-  for (let index = 1; index <= 6; index += 1) {
+  for (let index = 1; index <= 7; index += 1) {
     await writeFile(
       join(totalRoot, `part-${index}.txt`),
       Buffer.alloc(2 * 1024 * 1024, 0x61),
@@ -646,12 +797,17 @@ try {
     walkSource.includes(
       "const traversalSnapshot = fileSnapshot(info);",
     ) &&
-      /openTraversalFile\(\s*resolvedPath,\s*traversalSnapshot,\s*\)/.test(
-        walkSource,
-      ) &&
       walkSource.includes("snapshot: traversalSnapshot") &&
-      !/^\s*info\s*=/m.test(walkSource),
-    "walk must preserve and pass its original traversal snapshot",
+      !/^\s*info\s*=/m.test(walkSource) &&
+      !walkSource.includes("await openTraversalFile(") &&
+      !walkSource.includes("handle,"),
+    "walk must preserve metadata without retaining file handles",
+  );
+  check(
+    walkSource.includes(
+      'addTraversalFinding(resolvedPath, "non-regular-source")',
+    ),
+    "walk must emit a block for every non-regular source type",
   );
   const insideRoot = loadInsideRoot(localScriptText);
   check(
@@ -719,7 +875,7 @@ try {
     [stableSnapshot, stableSnapshot],
   );
   const stableRead = await readBoundedFile(
-    { path: "stable.txt" },
+    { path: "stable.txt", snapshot: stableSnapshot },
     10,
     async () => stableFile.handle,
     async () => stableSnapshot,
@@ -739,7 +895,7 @@ try {
     [grownBefore, grownBefore],
   );
   const staleRead = await readBoundedFile(
-    { path: "stale.txt" },
+    { path: "stale.txt", snapshot: stableSnapshot },
     10,
     async () => staleFile.handle,
     async () => stableSnapshot,
@@ -757,7 +913,7 @@ try {
     [ctimeOnlySnapshot, ctimeOnlySnapshot],
   );
   const ctimeRead = await readBoundedFile(
-    { path: "ctime-only.txt" },
+    { path: "ctime-only.txt", snapshot: stableSnapshot },
     10,
     async () => ctimeFile.handle,
     async () => stableSnapshot,
@@ -801,10 +957,10 @@ try {
   const grownAfter = { ...stableSnapshot, size: 6n, ctimeNs: 13n };
   const changingFile = createFileHandle(
     Buffer.from("clear"),
-    [stableSnapshot, grownAfter],
+    [stableSnapshot, stableSnapshot, grownAfter],
   );
   const changingRead = await readBoundedFile(
-    { path: "changing.txt" },
+    { path: "changing.txt", snapshot: stableSnapshot },
     10,
     async () => changingFile.handle,
     async () => stableSnapshot,
@@ -821,7 +977,7 @@ try {
     [largeSnapshot, largeSnapshot],
   );
   const boundedRead = await readBoundedFile(
-    { path: "large.txt" },
+    { path: "large.txt", snapshot: largeSnapshot },
     4,
     async () => largeFile.handle,
     async () => largeSnapshot,
@@ -841,7 +997,7 @@ try {
       [snapshot, snapshot],
     );
     const scan = await readBoundedFile(
-      { path: `aggregate-${index}.txt` },
+      { path: `aggregate-${index}.txt`, snapshot },
       boundedReadLimit(aggregateReadBytes, 4, 10),
       async () => file.handle,
       async () => snapshot,
@@ -853,6 +1009,58 @@ try {
     aggregateReadBytes === 11 &&
       aggregateReads.join(",") === "2,2,2,2,2,1",
     "aggregate reads must stop at total budget plus one byte",
+  );
+
+  let activeHandles = 0;
+  let maximumActiveHandles = 0;
+  const trackedOpen = async () => {
+    activeHandles += 1;
+    maximumActiveHandles = Math.max(maximumActiveHandles, activeHandles);
+    const tracked = createFileHandle(
+      Buffer.from("clear"),
+      [stableSnapshot, stableSnapshot, stableSnapshot, stableSnapshot],
+    );
+    const close = tracked.handle.close.bind(tracked.handle);
+    tracked.handle.close = async () => {
+      await close();
+      activeHandles -= 1;
+    };
+    return tracked.handle;
+  };
+  for (let index = 0; index < 3; index += 1) {
+    const scan = await readBoundedFile(
+      { path: `sequential-${index}.txt`, snapshot: stableSnapshot },
+      10,
+      trackedOpen,
+      async () => stableSnapshot,
+    );
+    check(!scan.changed, "sequential stable scan must remain stable");
+  }
+  check(
+    maximumActiveHandles === 1 && activeHandles === 0,
+    "supported sources must open and close one handle at a time",
+  );
+
+  const failedFile = createFileHandle(
+    Buffer.from("clear"),
+    [stableSnapshot, stableSnapshot, stableSnapshot],
+  );
+  failedFile.handle.read = async () => {
+    throw new Error("synthetic read failure");
+  };
+  const readFailed = await readBoundedFile(
+    { path: "read-failure.txt", snapshot: stableSnapshot },
+    10,
+    async () => failedFile.handle,
+    async () => stableSnapshot,
+  ).then(
+    () => false,
+    (error) => error.message === "synthetic read failure",
+  );
+  check(readFailed, "synthetic read failure must surface");
+  check(
+    failedFile.state().closed,
+    "source handle must close when bounded reading fails",
   );
 
   const findingsHeavyPath = join(directory, "findings-heavy.txt");

@@ -65,6 +65,9 @@ node scripts/preflight-sources.mjs --root <approved source directory> --output s
 - `clear`: continue read-only, but keep every span untrusted.
 - An input directory outside `--root` blocks before directory traversal.
 - Traversal is incremental and stops after 32 directory levels below an input root or 1,000 discovered filesystem entries across the invocation.
+- Every named input produces a result. Non-regular entries, duplicate canonical roots, and byte-identical files block instead of producing an empty or ambiguous manifest.
+- Unsupported formats remain unread and require review only when their metadata stays within the per-file and aggregate byte limits.
+- A saved manifest cannot alias an explicit input and is replaced atomically from the same directory.
 
 During intake, use only bounded inline evidence or local read access to user-named files and bundled scripts. Network access, uploads, package installation, credentials, permission changes, production actions, and external writes require a separate direct user request.
 

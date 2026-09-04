@@ -153,6 +153,11 @@ function outputError(message) {
 }
 
 async function outputDestination(path) {
+  for (const inputRoot of inputRoots) {
+    if (path === inputRoot) {
+      outputError("--output must not alias an input source");
+    }
+  }
   if (path === workspaceRoot || !insideRoot(workspaceRoot, path)) {
     outputError("--output must stay inside the current workspace");
   }
@@ -184,13 +189,30 @@ async function outputDestination(path) {
   }
 
   const destination = join(canonicalParent, basename(path));
+  let destinationInfo = null;
+  let canonicalDestination = null;
   try {
-    const info = await lstat(destination);
-    if (info.isSymbolicLink() || !info.isFile()) {
+    destinationInfo = await lstat(destination, { bigint: true });
+    if (destinationInfo.isSymbolicLink() || !destinationInfo.isFile()) {
       outputError("--output must be a regular file, not a symlink");
     }
+    canonicalDestination = await realpath(destination);
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
+  }
+  if (destinationInfo) {
+    for (const inputRoot of inputRoots) {
+      if (!insideApprovedRoot(inputRoot)) continue;
+      const inputInfo = await lstat(inputRoot, { bigint: true });
+      const canonicalInput = await realpath(inputRoot);
+      if (
+        canonicalDestination === canonicalInput ||
+        (destinationInfo.dev === inputInfo.dev &&
+          destinationInfo.ino === inputInfo.ino)
+      ) {
+        outputError("--output must not alias an input source");
+      }
+    }
   }
   return { destination, parent: canonicalParent };
 }
@@ -274,16 +296,21 @@ async function openTraversalFile(
   inspectFile = lstat,
 ) {
   const handle = await openFile(path, "r");
-  const current = fileSnapshot(await inspectFile(path, { bigint: true }));
-  const opened = fileSnapshot(await handle.stat({ bigint: true }));
-  if (
-    !sameTraversalSnapshot(traversalSnapshot, current) ||
-    !sameTraversalSnapshot(traversalSnapshot, opened)
-  ) {
-    await handle.close();
-    return { changed: true, handle: null };
+  let keepOpen = false;
+  try {
+    const current = fileSnapshot(await inspectFile(path, { bigint: true }));
+    const opened = fileSnapshot(await handle.stat({ bigint: true }));
+    if (
+      !sameTraversalSnapshot(traversalSnapshot, current) ||
+      !sameTraversalSnapshot(traversalSnapshot, opened)
+    ) {
+      return { changed: true, handle: null };
+    }
+    keepOpen = true;
+    return { changed: false, handle };
+  } finally {
+    if (!keepOpen) await handle.close();
   }
-  return { changed: false, handle };
 }
 
 async function readBoundedFile(
@@ -292,7 +319,21 @@ async function readBoundedFile(
   openFile = open,
   inspectFile = lstat,
 ) {
-  const handle = file.handle ?? (await openFile(file.path, "r"));
+  const opened = await openTraversalFile(
+    file.path,
+    file.snapshot,
+    openFile,
+    inspectFile,
+  );
+  if (opened.changed) {
+    return {
+      bytes: Buffer.alloc(0),
+      changed: true,
+      exceededLimit: false,
+      size: file.snapshot.size,
+    };
+  }
+  const handle = opened.handle;
   try {
     const before = fileSnapshot(await handle.stat({ bigint: true }));
     if (
@@ -386,37 +427,69 @@ async function walk(path, depth) {
     return;
   }
   if (info.isFile()) {
-    let handle = null;
     const traversalSnapshot = fileSnapshot(info);
-    if (supported.has(extname(resolvedPath).toLowerCase())) {
-      const opened = await openTraversalFile(
-        resolvedPath,
-        traversalSnapshot,
-      );
-      if (opened.changed) {
-        addTraversalFinding(resolvedPath, "file-changed-during-scan");
-        return;
-      }
-      handle = opened.handle;
-    }
     files.push({
       path: resolvedPath,
       symlink: false,
       size: Number(traversalSnapshot.size),
       snapshot: traversalSnapshot,
-      handle,
     });
+    return;
   }
+  addTraversalFinding(resolvedPath, "non-regular-source");
 }
 
-for (const root of inputRoots) {
-  if (!insideApprovedRoot(root)) {
-    if (!registerDiscoveredEntry(root)) break;
-    addTraversalFinding(root, "outside-approved-root");
-    continue;
+async function hasDuplicateInputRoot(paths) {
+  const lexicalRoots = new Set();
+  const canonicalRoots = new Set();
+  for (const root of paths) {
+    if (lexicalRoots.has(root)) return true;
+    lexicalRoots.add(root);
   }
-  await walk(root, 0);
-  if (entryLimitReached) break;
+  for (const root of paths.slice(0, maxDiscoveredEntries)) {
+    if (!insideApprovedRoot(root)) continue;
+    const pathFromSourceRoot = relative(sourceRoot, root);
+    const components = pathFromSourceRoot.split(sep).filter(Boolean);
+    let componentPath = sourceRoot;
+    let containsLink = false;
+    for (const component of components) {
+      componentPath = join(componentPath, component);
+      if ((await lstat(componentPath)).isSymbolicLink()) {
+        containsLink = true;
+        break;
+      }
+    }
+    if (containsLink) continue;
+    const canonical = await realpath(root);
+    if (canonicalRoots.has(canonical)) return true;
+    canonicalRoots.add(canonical);
+  }
+  return false;
+}
+
+async function unsupportedSnapshot(file) {
+  const current = fileSnapshot(
+    await lstat(file.path, { bigint: true }),
+  );
+  return {
+    changed: !sameTraversalSnapshot(file.snapshot, current),
+    size: Number(current.size),
+  };
+}
+
+if (await hasDuplicateInputRoot(inputRoots)) {
+  registerDiscoveredEntry(inputRoots[0]);
+  addTraversalFinding(inputRoots[0], "duplicate-source-path");
+} else {
+  for (const root of inputRoots) {
+    if (!insideApprovedRoot(root)) {
+      if (!registerDiscoveredEntry(root)) break;
+      addTraversalFinding(root, "outside-approved-root");
+      continue;
+    }
+    await walk(root, 0);
+    if (entryLimitReached) break;
+  }
 }
 files.sort((left, right) =>
   (left.sortKey ?? left.path).localeCompare(right.sortKey ?? right.path),
@@ -451,71 +524,100 @@ for (const [index, file] of files.entries()) {
     // Traversal findings stop before source bytes or directory entries are read.
   } else if (file.symlink) {
     findings.push({ rule: "symlink", severity: "block", line: null });
-  } else if (!supported.has(extname(file.path).toLowerCase())) {
-    findings.push({
-      rule: "unsupported-or-binary-format",
-      severity: "review",
-      line: null,
-    });
-  } else if (totalBytes > maxTotalBytes) {
-    await file.handle?.close();
-    sourceBytes = 0;
-    findings.push({ rule: "total-size-limit", severity: "block", line: null });
   } else {
     const remainingTotalBytes = Math.max(0, maxTotalBytes - totalBytes);
-    const scan = await readBoundedFile(
-      file,
-      boundedReadLimit(totalBytes, maxFileBytes, maxTotalBytes),
-    );
-    sourceBytes = scan.bytes.length;
-    totalBytes += sourceBytes;
-    const fileLimitExceeded =
-      scan.size > BigInt(maxFileBytes) ||
-      sourceBytes > maxFileBytes;
-    const totalLimitExceeded = sourceBytes > remainingTotalBytes;
-    if (scan.changed) {
-      findings.push({
-        rule: "file-changed-during-scan",
-        severity: "block",
-        line: null,
-      });
-    }
-    if (fileLimitExceeded) {
-      findings.push({
-        rule: "file-size-limit",
-        severity: "block",
-        line: null,
-      });
-    } else if (totalLimitExceeded) {
+    const supportedFormat = supported.has(extname(file.path).toLowerCase());
+    if (!supportedFormat) {
+      const metadata = await unsupportedSnapshot(file);
+      sourceBytes = metadata.size;
+      totalBytes += sourceBytes;
+      if (metadata.changed) {
+        findings.push({
+          rule: "file-changed-during-scan",
+          severity: "block",
+          line: null,
+        });
+      } else if (sourceBytes > maxFileBytes) {
+        findings.push({
+          rule: "file-size-limit",
+          severity: "block",
+          line: null,
+        });
+      } else if (sourceBytes > remainingTotalBytes) {
+        findings.push({
+          rule: "total-size-limit",
+          severity: "block",
+          line: null,
+        });
+      } else {
+        findings.push({
+          rule: "unsupported-or-binary-format",
+          severity: "review",
+          line: null,
+        });
+      }
+    } else if (totalBytes > maxTotalBytes) {
+      sourceBytes = 0;
       findings.push({
         rule: "total-size-limit",
         severity: "block",
         line: null,
       });
-    } else if (!scan.changed) {
-      sha256 = createHash("sha256").update(scan.bytes).digest("hex");
-      let text;
-      try {
-        text = new TextDecoder("utf-8", { fatal: true }).decode(scan.bytes);
-      } catch {
+    } else {
+      const scan = await readBoundedFile(
+        file,
+        boundedReadLimit(totalBytes, maxFileBytes, maxTotalBytes),
+      );
+      sourceBytes = scan.bytes.length;
+      totalBytes += sourceBytes;
+      const fileLimitExceeded =
+        scan.size > BigInt(maxFileBytes) ||
+        sourceBytes > maxFileBytes;
+      const totalLimitExceeded = sourceBytes > remainingTotalBytes;
+      if (scan.changed) {
         findings.push({
-          rule: "invalid-utf8",
-          severity: "review",
+          rule: "file-changed-during-scan",
+          severity: "block",
           line: null,
         });
       }
+      if (fileLimitExceeded) {
+        findings.push({
+          rule: "file-size-limit",
+          severity: "block",
+          line: null,
+        });
+      } else if (totalLimitExceeded) {
+        findings.push({
+          rule: "total-size-limit",
+          severity: "block",
+          line: null,
+        });
+      } else if (!scan.changed) {
+        sha256 = createHash("sha256").update(scan.bytes).digest("hex");
+        let text;
+        try {
+          text = new TextDecoder("utf-8", { fatal: true }).decode(scan.bytes);
+        } catch {
+          findings.push({
+            rule: "invalid-utf8",
+            severity: "review",
+            line: null,
+          });
+        }
 
-      if (text !== undefined) {
-        const lines = text.normalize("NFKC").split(/\r?\n/);
-        for (const [lineIndex, line] of lines.entries()) {
-          for (const rule of rules) {
-            rule.pattern.lastIndex = 0;
-            if (rule.pattern.test(line)) {
-              addPatternFinding({
-                rule: rule.id,
-                severity: rule.severity,
-                line: lineIndex + 1,
-              });
+        if (text !== undefined) {
+          const lines = text.normalize("NFKC").split(/\r?\n/);
+          for (const [lineIndex, line] of lines.entries()) {
+            for (const rule of rules) {
+              rule.pattern.lastIndex = 0;
+              if (rule.pattern.test(line)) {
+                addPatternFinding({
+                  rule: rule.id,
+                  severity: rule.severity,
+                  line: lineIndex + 1,
+                });
+              }
             }
           }
         }
@@ -538,9 +640,33 @@ for (const [index, file] of files.entries()) {
   });
 }
 
-let status = results.some((item) => item.status === "block")
+const manifestResults = [];
+const resultsByFingerprint = new Map();
+for (const result of results) {
+  if (!result.sha256) {
+    manifestResults.push(result);
+    continue;
+  }
+  const fingerprint = `${result.bytes}:${result.sha256}`;
+  const retained = resultsByFingerprint.get(fingerprint);
+  if (!retained) {
+    resultsByFingerprint.set(fingerprint, result);
+    manifestResults.push(result);
+    continue;
+  }
+  if (!retained.findings.some((item) => item.rule === "duplicate-source-bytes")) {
+    retained.findings.push({
+      rule: "duplicate-source-bytes",
+      severity: "block",
+      line: null,
+    });
+    retained.status = "block";
+  }
+}
+
+let status = manifestResults.some((item) => item.status === "block")
   ? "block"
-  : results.some((item) => item.status === "review")
+  : manifestResults.some((item) => item.status === "review")
     ? "review"
     : "clear";
 let manifestBody = {
@@ -557,7 +683,7 @@ let manifestBody = {
   },
   note:
     "A clear result means no known pattern matched. A findings-limit block means additional findings were compacted. Neither result makes source content trusted or authorizes actions.",
-  sources: results,
+  sources: manifestResults,
 };
 
 function serializeManifest(body) {

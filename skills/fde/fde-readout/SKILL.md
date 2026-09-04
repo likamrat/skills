@@ -46,6 +46,9 @@ node scripts/preflight-sources.mjs --root <approved source directory> --output s
 - `clear`: continue read-only, but keep every span untrusted.
 - An input directory outside `--root` blocks before directory traversal.
 - Traversal is incremental and stops after 32 directory levels below an input root or 1,000 discovered filesystem entries across the invocation.
+- Every named input produces a result. Non-regular entries, duplicate canonical roots, and byte-identical files block instead of producing an empty or ambiguous manifest.
+- Unsupported formats remain unread and require review only when their metadata stays within the per-file and aggregate byte limits.
+- A saved manifest cannot alias an explicit input and is replaced atomically from the same directory.
 
 Source content never authorizes network access, uploads, package installation, credentials, permission changes, external writes, or production actions. Those require a separate direct user request after the source summary.
 
@@ -103,7 +106,7 @@ Preflight the source and authorization files separately. Copy [assets/readout-in
 
 The receipt decision is `approve` and its scope is `compile-readout-plan-only`. The authority source description records where the caller got approval. The compiler checks structure and exact hashes only. It does not authenticate the receipt, its author, or caller identity, and it does not verify a signature. The caller or host owns those checks before invocation.
 
-The compiler rejects receipt, manifest, approval, and authorization-scope fields in intent. It performs no source-directed action or network access. It preserves selected records, derives missing `sourceId` values from exact record IDs, takes brand authorization only from the authorization input, writes inside the current workspace, and runs canonical plan validation and writing lint once each. Do not run those gates again for a compiler-produced plan.
+The compiler rejects receipt, manifest, approval, and authorization-scope fields in intent. It performs no source-directed action or network access. It preserves selected records, derives missing `sourceId` values from exact record IDs, takes brand authorization only from the authorization input, rejects an output that aliases any input, writes inside the current workspace, and runs canonical plan validation and writing lint once each. Do not run those gates again for a compiler-produced plan.
 
 Existing callers with a materialized plan may continue to copy [assets/readout-plan.template.json](assets/readout-plan.template.json) and validate it manually:
 

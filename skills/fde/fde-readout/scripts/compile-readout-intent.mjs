@@ -164,9 +164,17 @@ function withoutAuthorization(value) {
   return copy;
 }
 
-async function assertOutputBoundary(outputPath) {
+function sameFileIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+async function assertOutputBoundary(outputPath, inputPaths) {
   const lexicalWorkspace = resolve(process.cwd());
   const output = resolve(outputPath);
+  const resolvedInputs = inputPaths.map((path) => resolve(path));
+  if (resolvedInputs.includes(output)) {
+    fail("Output must not alias an input", 2);
+  }
   if (
     output === lexicalWorkspace ||
     !insideRoot(lexicalWorkspace, output)
@@ -186,13 +194,27 @@ async function assertOutputBoundary(outputPath) {
   ) {
     fail("Output must be a file inside the current workspace", 2);
   }
+  let outputInfo = null;
+  let canonicalOutput = null;
   try {
-    const info = await lstat(output);
-    if (info.isSymbolicLink() || !info.isFile()) {
+    outputInfo = await lstat(output, { bigint: true });
+    if (outputInfo.isSymbolicLink() || !outputInfo.isFile()) {
       fail("Output must be a regular file inside the current workspace", 2);
     }
+    canonicalOutput = await realpath(output);
   } catch (error) {
     if (error.code !== "ENOENT") fail(`Cannot inspect output: ${error.message}`, 2);
+  }
+  if (outputInfo) {
+    for (const inputPath of resolvedInputs) {
+      const inputInfo = await lstat(inputPath, { bigint: true });
+      if (
+        canonicalOutput === (await realpath(inputPath)) ||
+        sameFileIdentity(outputInfo, inputInfo)
+      ) {
+        fail("Output must not alias an input", 2);
+      }
+    }
   }
   return output;
 }
@@ -230,7 +252,17 @@ const authorizationManifestInput = await readInput(
 );
 const receiptInput = await readInput(args["--receipt"], "receipt");
 const intentInput = await readInput(args["--intent"], "intent");
-const output = await assertOutputBoundary(args["--output"]);
+const output = await assertOutputBoundary(
+  args["--output"],
+  [
+    args["--source"],
+    args["--source-manifest"],
+    args["--authorization"],
+    args["--authorization-manifest"],
+    args["--receipt"],
+    args["--intent"],
+  ],
+);
 const source = sourceInput.value;
 const authorization = authorizationInput.value;
 const intent = intentInput.value;
