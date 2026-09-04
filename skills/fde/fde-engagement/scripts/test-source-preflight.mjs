@@ -372,6 +372,15 @@ function createFileHandle(content, snapshots) {
   };
 }
 
+function createSnapshotInspector(snapshots) {
+  let index = 0;
+  return async () => {
+    const snapshot = snapshots[Math.min(index, snapshots.length - 1)];
+    index += 1;
+    return snapshot;
+  };
+}
+
 try {
   const clearPath = join(directory, "clear.txt");
   await writeFile(
@@ -1384,31 +1393,48 @@ try {
     !windowsTraversalSnapshot(ctimeOnlySnapshot, stableSnapshot),
     "Windows backward ctime changes must remain rejected",
   );
-  const ctimeFile = createFileHandle(
+  const forwardCtimeFile = createFileHandle(
     Buffer.from("clear"),
-    [ctimeOnlySnapshot, ctimeOnlySnapshot],
+    [stableSnapshot, stableSnapshot, stableSnapshot],
   );
-  const ctimeRead = await readBoundedFile(
-    { path: "ctime-only.txt", snapshot: stableSnapshot },
+  const forwardCtimeRead = await readBoundedFile(
+    { path: "forward-ctime.txt", snapshot: stableSnapshot },
     10,
-    async () => ctimeFile.handle,
-    async () => stableSnapshot,
+    async () => forwardCtimeFile.handle,
+    createSnapshotInspector([stableSnapshot, ctimeOnlySnapshot]),
   );
   if (process.platform === "win32") {
     check(
-      !ctimeRead.changed &&
-        ctimeRead.bytes.toString("utf8") === "clear" &&
-        ctimeFile.state().readCalls > 0,
-      "Windows ctime-only settlement must not false-block a stable file",
+      !forwardCtimeRead.changed &&
+        forwardCtimeRead.bytes.toString("utf8") === "clear" &&
+        forwardCtimeFile.state().readCalls > 0,
+      "forward Windows ctime settlement after before-stat must remain stable",
     );
   } else {
     check(
-      ctimeRead.changed &&
-        ctimeRead.bytes.length === 0 &&
-        ctimeFile.state().readCalls === 0,
+      forwardCtimeRead.changed &&
+        forwardCtimeRead.bytes.length === 0 &&
+        forwardCtimeFile.state().readCalls === 0,
       "non-Windows ctime-only changes must stop before reading",
     );
   }
+
+  const backwardCtimeFile = createFileHandle(
+    Buffer.from("clear"),
+    [ctimeOnlySnapshot, ctimeOnlySnapshot, ctimeOnlySnapshot],
+  );
+  const backwardCtimeRead = await readBoundedFile(
+    { path: "backward-ctime.txt", snapshot: stableSnapshot },
+    10,
+    async () => backwardCtimeFile.handle,
+    createSnapshotInspector([stableSnapshot, stableSnapshot]),
+  );
+  check(
+    backwardCtimeRead.changed &&
+      backwardCtimeRead.bytes.length === 0 &&
+      backwardCtimeFile.state().readCalls === 0,
+    "backward ctime after before-stat must stop before reading",
+  );
 
   const replacementSnapshot = {
     ...stableSnapshot,

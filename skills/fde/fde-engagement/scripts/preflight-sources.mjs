@@ -429,7 +429,7 @@ async function readBoundedFile(
     const current = fileSnapshot(
       await inspectFile(file.path, { bigint: true }),
     );
-    if (!sameTraversalSnapshot(current, before)) {
+    if (!sameTraversalSnapshot(before, current)) {
       return {
         bytes: Buffer.alloc(0),
         changed: true,
