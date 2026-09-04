@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { isAbsolute, relative, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 export const RECEIPT_KIND = "fde-readout-input-receipt/v1";
 export const RECEIPT_AUTHORIZATION_DECISION = "approve";
@@ -35,7 +35,7 @@ const forbiddenIntentFields = new Set([
   "sourceInput",
   "sourceManifest",
 ]);
-const nativePath = { isAbsolute, relative, sep };
+const nativePath = { isAbsolute, relative, resolve, sep };
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -69,12 +69,15 @@ export function sha256(value) {
 }
 
 export function insideRoot(root, path, pathApi = nativePath) {
-  const candidate = pathApi.relative(root, path);
+  const resolvedRoot = pathApi.resolve(root);
+  const resolvedPath = pathApi.resolve(path);
+  const candidate = pathApi.relative(resolvedRoot, resolvedPath);
   return (
-    candidate === "" ||
+    (candidate === "" && resolvedRoot === resolvedPath) ||
     (!pathApi.isAbsolute(candidate) &&
       candidate !== ".." &&
-      !candidate.startsWith(`..${pathApi.sep}`))
+      !candidate.startsWith(`..${pathApi.sep}`) &&
+      pathApi.resolve(resolvedRoot, candidate) === resolvedPath)
   );
 }
 

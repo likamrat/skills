@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const skillRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const compiler = join(skillRoot, "scripts", "compile-readout-intent.mjs");
+const compilerSource = await readFile(compiler, "utf8");
 const receiptKind = "fde-readout-input-receipt/v1";
 const authorizationDecision = "approve";
 const authorizationScope = "compile-readout-plan-only";
@@ -317,7 +318,47 @@ try {
       ),
       "valid Windows output child beginning with two dots was rejected",
     );
+    expect(
+      !provenance.insideRoot(
+        String.raw`C:\Workspace`,
+        String.raw`c:\Workspace\readout.json`,
+        win32,
+      ),
+      "Windows case-only drive-root output was accepted",
+    );
+    expect(
+      !provenance.insideRoot(
+        String.raw`\\Server\Share\Workspace`,
+        String.raw`\\server\share\Workspace\readout.json`,
+        win32,
+      ),
+      "Windows case-only UNC-root output was accepted",
+    );
+    expect(
+      provenance.insideRoot(
+        String.raw`C:\Workspace`,
+        String.raw`C:\Workspace\readout.json`,
+        win32,
+      ),
+      "valid exact-case Windows output was rejected",
+    );
   });
+
+  await test(
+    "lexically outside output fails before parent filesystem access",
+    async () => {
+      const lexicalCheck = compilerSource.indexOf(
+        "!insideRoot(lexicalWorkspace, output)",
+      );
+      const parentAccess = compilerSource.indexOf(
+        "await realpath(dirname(output))",
+      );
+      expect(
+        lexicalCheck >= 0 && parentAccess >= 0 && lexicalCheck < parentAccess,
+        "compiler accesses the output parent before lexical containment",
+      );
+    },
+  );
 
   await test("compilation requires manifests and receipt", async () => {
     const execution = await run(directory);

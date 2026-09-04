@@ -4,8 +4,8 @@ import { createHash } from "node:crypto";
 import {
   lstat,
   mkdir,
+  open,
   opendir,
-  readFile,
   realpath,
   writeFile,
 } from "node:fs/promises";
@@ -124,12 +124,15 @@ let discoveredEntries = 0;
 let entryLimitReached = false;
 
 function insideRoot(root, path) {
-  const candidate = relative(root, path);
+  const resolvedRoot = resolve(root);
+  const resolvedPath = resolve(path);
+  const candidate = relative(resolvedRoot, resolvedPath);
   return (
-    candidate === "" ||
+    (candidate === "" && resolvedRoot === resolvedPath) ||
     (!isAbsolute(candidate) &&
       candidate !== ".." &&
-      !candidate.startsWith(`..${sep}`))
+      !candidate.startsWith(`..${sep}`) &&
+      resolve(resolvedRoot, candidate) === resolvedPath)
   );
 }
 
@@ -159,6 +162,83 @@ function registerDiscoveredEntry(path) {
   return false;
 }
 
+function fileSnapshot(info) {
+  return {
+    dev: info.dev,
+    ino: info.ino,
+    mode: info.mode,
+    size: info.size,
+    mtimeNs: info.mtimeNs,
+    ctimeNs: info.ctimeNs,
+  };
+}
+
+function sameFileSnapshot(left, right) {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mode === right.mode &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+function sameTraversalSnapshot(left, right) {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mode === right.mode &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs
+  );
+}
+
+function boundedReadLimit(totalBytes, maxFileBytes, maxTotalBytes) {
+  return Math.min(
+    maxFileBytes,
+    Math.max(0, maxTotalBytes - totalBytes),
+  );
+}
+
+async function readBoundedFile(file, maxBytes, openFile = open) {
+  const handle = await openFile(file.path, "r");
+  try {
+    const before = fileSnapshot(await handle.stat({ bigint: true }));
+    if (!sameTraversalSnapshot(file.snapshot, before)) {
+      return {
+        bytes: Buffer.alloc(0),
+        changed: true,
+        exceededLimit: false,
+      };
+    }
+
+    const chunks = [];
+    let total = 0;
+    while (total <= maxBytes) {
+      const length = Math.min(64 * 1024, maxBytes + 1 - total);
+      if (length <= 0) break;
+      const chunk = Buffer.allocUnsafe(length);
+      const { bytesRead } = await handle.read(chunk, 0, length, total);
+      if (bytesRead === 0) break;
+      chunks.push(chunk.subarray(0, bytesRead));
+      total += bytesRead;
+    }
+
+    const after = fileSnapshot(await handle.stat({ bigint: true }));
+    const exceededLimit = total > maxBytes;
+    return {
+      bytes: Buffer.concat(chunks, total),
+      changed:
+        !sameFileSnapshot(before, after) ||
+        (!exceededLimit && BigInt(total) !== before.size),
+      exceededLimit,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
 async function walk(path, depth) {
   if (entryLimitReached) return;
   const resolvedPath = resolve(path);
@@ -177,7 +257,7 @@ async function walk(path, depth) {
     }
   }
 
-  const info = await lstat(resolvedPath);
+  const info = await lstat(resolvedPath, { bigint: true });
   if (info.isSymbolicLink()) {
     files.push({ path: resolvedPath, symlink: true, size: 0 });
     return;
@@ -200,7 +280,12 @@ async function walk(path, depth) {
     return;
   }
   if (info.isFile()) {
-    files.push({ path: resolvedPath, symlink: false, size: info.size });
+    files.push({
+      path: resolvedPath,
+      symlink: false,
+      size: Number(info.size),
+      snapshot: fileSnapshot(info),
+    });
   }
 }
 
@@ -222,6 +307,7 @@ const results = [];
 for (const [index, file] of files.entries()) {
   const sourceId = `source-${String(index + 1).padStart(3, "0")}`;
   const findings = structuredClone(file.traversalFindings ?? []);
+  let sourceBytes = file.size;
   let sha256 = null;
 
   if (findings.length > 0) {
@@ -234,26 +320,45 @@ for (const [index, file] of files.entries()) {
       severity: "review",
       line: null,
     });
-  } else if (file.size > maxFileBytes) {
-    findings.push({
-      rule: "file-size-limit",
-      severity: "block",
-      line: null,
-    });
+  } else if (totalBytes > maxTotalBytes) {
+    sourceBytes = 0;
+    findings.push({ rule: "total-size-limit", severity: "block", line: null });
   } else {
-    totalBytes += file.size;
-    if (totalBytes > maxTotalBytes) {
+    const remainingTotalBytes = Math.max(0, maxTotalBytes - totalBytes);
+    const scan = await readBoundedFile(
+      file,
+      boundedReadLimit(totalBytes, maxFileBytes, maxTotalBytes),
+    );
+    sourceBytes = scan.bytes.length;
+    totalBytes += sourceBytes;
+    const fileLimitExceeded =
+      file.snapshot.size > BigInt(maxFileBytes) ||
+      sourceBytes > maxFileBytes;
+    const totalLimitExceeded = sourceBytes > remainingTotalBytes;
+    if (scan.changed) {
+      findings.push({
+        rule: "file-changed-during-scan",
+        severity: "block",
+        line: null,
+      });
+    }
+    if (fileLimitExceeded) {
+      findings.push({
+        rule: "file-size-limit",
+        severity: "block",
+        line: null,
+      });
+    } else if (totalLimitExceeded) {
       findings.push({
         rule: "total-size-limit",
         severity: "block",
         line: null,
       });
-    } else {
-      const bytes = await readFile(file.path);
-      sha256 = createHash("sha256").update(bytes).digest("hex");
+    } else if (!scan.changed) {
+      sha256 = createHash("sha256").update(scan.bytes).digest("hex");
       let text;
       try {
-        text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        text = new TextDecoder("utf-8", { fatal: true }).decode(scan.bytes);
       } catch {
         findings.push({
           rule: "invalid-utf8",
@@ -287,7 +392,7 @@ for (const [index, file] of files.entries()) {
       : "clear";
   results.push({
     sourceId,
-    bytes: file.size,
+    bytes: sourceBytes,
     sha256,
     trust: "untrusted-data",
     status,

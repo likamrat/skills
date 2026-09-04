@@ -123,9 +123,70 @@ function loadInsideRoot(scriptText) {
   return new Function(
     "isAbsolute",
     "relative",
+    "resolve",
     "sep",
     `"use strict"; return (${source});`,
-  )(win32.isAbsolute, win32.relative, win32.sep);
+  )(win32.isAbsolute, win32.relative, win32.resolve, win32.sep);
+}
+
+function loadReadBoundedFile(scriptText) {
+  const normalized = scriptText.replaceAll("\r\n", "\n");
+  const start = normalized.indexOf("function fileSnapshot(");
+  const end = normalized.indexOf("\n\nasync function walk", start);
+  check(
+    start >= 0 && end > start,
+    "preflight must define its bounded single-handle reader",
+  );
+  if (start < 0 || end <= start) {
+    return {
+      boundedReadLimit: (_totalBytes, maxFileBytes) => maxFileBytes,
+      readBoundedFile: async () => ({
+        bytes: Buffer.alloc(0),
+        changed: false,
+        exceededLimit: false,
+      }),
+    };
+  }
+  const source = normalized.slice(start, end);
+  return new Function(
+    "Buffer",
+    `"use strict"; ${source}; return {
+      boundedReadLimit:
+        typeof boundedReadLimit === "function"
+          ? boundedReadLimit
+          : (_totalBytes, maxFileBytes) => maxFileBytes,
+      readBoundedFile
+    };`,
+  )(Buffer);
+}
+
+function createFileHandle(content, snapshots) {
+  let statIndex = 0;
+  let closed = false;
+  let readCalls = 0;
+  let largestRead = 0;
+  return {
+    handle: {
+      async stat() {
+        const snapshot = snapshots[Math.min(statIndex, snapshots.length - 1)];
+        statIndex += 1;
+        return snapshot;
+      },
+      async read(buffer, offset, length, position) {
+        readCalls += 1;
+        largestRead = Math.max(largestRead, length);
+        const bytesRead = Math.min(length, Math.max(0, content.length - position));
+        content.copy(buffer, offset, position, position + bytesRead);
+        return { bytesRead };
+      },
+      async close() {
+        closed = true;
+      },
+    },
+    state() {
+      return { closed, readCalls, largestRead };
+    },
+  };
 }
 
 try {
@@ -419,12 +480,21 @@ try {
     ),
     "more than 10 MiB total must retain the total-size-limit rule",
   );
+  check(
+    totalLimit.manifest?.sources?.reduce(
+      (total, source) => total + source.bytes,
+      0,
+    ) <=
+      10 * 1024 * 1024 + 1,
+    "total readable bytes must stop at the remaining budget plus one",
+  );
 
   const [localScript, counterpartScript] = await Promise.all([
     readFile(script),
     readFile(counterpart),
   ]);
-  const insideRoot = loadInsideRoot(localScript.toString("utf8"));
+  const localScriptText = localScript.toString("utf8");
+  const insideRoot = loadInsideRoot(localScriptText);
   check(
     !insideRoot(
       String.raw`C:\approved`,
@@ -452,6 +522,126 @@ try {
       String.raw`C:\approved\..safe\source.txt`,
     ),
     "Windows child names beginning with two dots must remain inside",
+  );
+  check(
+    !insideRoot(
+      String.raw`C:\Approved`,
+      String.raw`c:\Approved\source.txt`,
+    ),
+    "Windows case-only drive-root aliases must fail closed",
+  );
+  check(
+    !insideRoot(
+      String.raw`\\Server\Share\Approved`,
+      String.raw`\\server\share\Approved\source.txt`,
+    ),
+    "Windows case-only UNC-root aliases must fail closed",
+  );
+  check(
+    insideRoot(
+      String.raw`C:\Approved`,
+      String.raw`C:\Approved\source.txt`,
+    ),
+    "Windows exact-case children must remain inside",
+  );
+
+  const { boundedReadLimit, readBoundedFile } =
+    loadReadBoundedFile(localScriptText);
+  const stableSnapshot = {
+    dev: 1n,
+    ino: 2n,
+    mode: 33188n,
+    size: 5n,
+    mtimeNs: 10n,
+    ctimeNs: 11n,
+  };
+  const stableFile = createFileHandle(
+    Buffer.from("clear"),
+    [stableSnapshot, stableSnapshot],
+  );
+  const stableRead = await readBoundedFile(
+    { path: "stable.txt", snapshot: stableSnapshot },
+    10,
+    async () => stableFile.handle,
+  );
+  check(!stableRead.changed, "stable file must not be marked changed");
+  check(!stableRead.exceededLimit, "stable bounded file must fit its limit");
+  check(
+    stableRead.bytes.toString("utf8") === "clear" &&
+      stableRead.bytes.length === Number(stableSnapshot.size),
+    "stable manifest bytes must equal bytes read from one handle",
+  );
+  check(stableFile.state().closed, "stable file handle must close");
+
+  const grownBefore = { ...stableSnapshot, size: 6n, mtimeNs: 12n };
+  const staleFile = createFileHandle(
+    Buffer.from("larger"),
+    [grownBefore, grownBefore],
+  );
+  const staleRead = await readBoundedFile(
+    { path: "stale.txt", snapshot: stableSnapshot },
+    10,
+    async () => staleFile.handle,
+  );
+  check(staleRead.changed, "file changed after traversal must be rejected");
+  check(
+    staleRead.bytes.length === 0 && staleFile.state().readCalls === 0,
+    "file changed before scanning must not be read",
+  );
+  check(staleFile.state().closed, "changed file handle must close");
+
+  const grownAfter = { ...stableSnapshot, size: 6n, ctimeNs: 13n };
+  const changingFile = createFileHandle(
+    Buffer.from("clear"),
+    [stableSnapshot, grownAfter],
+  );
+  const changingRead = await readBoundedFile(
+    { path: "changing.txt", snapshot: stableSnapshot },
+    10,
+    async () => changingFile.handle,
+  );
+  check(changingRead.changed, "file changed during scanning must be rejected");
+  check(
+    changingRead.bytes.length === 5,
+    "changed-file result must report the exact bounded bytes read",
+  );
+
+  const largeSnapshot = { ...stableSnapshot, size: 8n };
+  const largeFile = createFileHandle(
+    Buffer.from("12345678"),
+    [largeSnapshot, largeSnapshot],
+  );
+  const boundedRead = await readBoundedFile(
+    { path: "large.txt", snapshot: largeSnapshot },
+    4,
+    async () => largeFile.handle,
+  );
+  check(boundedRead.exceededLimit, "bounded reader must detect byte limit");
+  check(
+    boundedRead.bytes.length === 5 && largeFile.state().largestRead <= 5,
+    "bounded reader must read at most limit plus one byte",
+  );
+
+  let aggregateReadBytes = 0;
+  const aggregateReads = [];
+  for (let index = 0; index < 6; index += 1) {
+    const snapshot = { ...stableSnapshot, ino: BigInt(index + 10), size: 2n };
+    const file = createFileHandle(
+      Buffer.from("12"),
+      [snapshot, snapshot],
+    );
+    const scan = await readBoundedFile(
+      { path: `aggregate-${index}.txt`, snapshot },
+      boundedReadLimit(aggregateReadBytes, 4, 10),
+      async () => file.handle,
+    );
+    aggregateReadBytes += scan.bytes.length;
+    aggregateReads.push(scan.bytes.length);
+  }
+  check(
+    aggregateReadBytes === 11 &&
+      aggregateReads.join(",") === "2,2,2,2,2,1",
+    "aggregate reads must stop at total budget plus one byte",
   );
   check(
     localScript.equals(counterpartScript),

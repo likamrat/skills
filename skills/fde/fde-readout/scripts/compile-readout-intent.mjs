@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { lstat, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   canonical,
@@ -111,18 +111,23 @@ function withoutAuthorization(value) {
 }
 
 async function assertOutputBoundary(outputPath) {
-  const workspace = await realpath(process.cwd());
+  const lexicalWorkspace = resolve(process.cwd());
   const output = resolve(outputPath);
+  if (
+    output === lexicalWorkspace ||
+    !insideRoot(lexicalWorkspace, output)
+  ) {
+    fail("Output must be a file inside the current workspace", 2);
+  }
+
+  const workspace = await realpath(lexicalWorkspace);
   let parent;
   try {
     parent = await realpath(dirname(output));
   } catch (error) {
     fail(`Output parent must already exist: ${error.message}`, 2);
   }
-  const pathFromWorkspace = relative(workspace, output);
   if (
-    pathFromWorkspace === "" ||
-    !insideRoot(workspace, output) ||
     !insideRoot(workspace, parent)
   ) {
     fail("Output must be a file inside the current workspace", 2);
