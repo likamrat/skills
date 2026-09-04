@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import {
+  access,
   mkdir,
   mkdtemp,
   readFile,
@@ -49,6 +50,28 @@ function run(path) {
     failures.push(`preflight returned invalid JSON:\n${result.stdout}${result.stderr}`);
   }
   return { ...result, manifest };
+}
+
+function runWithOutput(path, output) {
+  return spawnSync(
+    process.execPath,
+    [script, "--root", directory, "--output", output, path],
+    {
+      cwd: directory,
+      encoding: "utf8",
+      maxBuffer: testOutputBuffer,
+    },
+  );
+}
+
+async function exists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 async function runAsync(path, { delayStdout = false } = {}) {
@@ -338,6 +361,46 @@ try {
     "preflight must exclude its previous output manifest",
   );
 
+  const outsideOutputTarget = join(outsideDirectory, "outside-output.json");
+  await writeFile(outsideOutputTarget, "sentinel\n");
+  const outputSymlink = join(directory, "output-symlink.json");
+  let outputSymlinkIsFile = true;
+  try {
+    await symlink(outsideOutputTarget, outputSymlink, "file");
+  } catch (error) {
+    if (error.code !== "EPERM") throw error;
+    outputSymlinkIsFile = false;
+    const fallbackTarget = join(outsideDirectory, "outside-output-target");
+    await mkdir(fallbackTarget);
+    await symlink(fallbackTarget, outputSymlink, "junction");
+  }
+  const symlinkOutputResult = runWithOutput(clearPath, outputSymlink);
+  check(
+    symlinkOutputResult.status === 3,
+    "final output symlink must be rejected",
+  );
+  if (outputSymlinkIsFile) {
+    check(
+      (await readFile(outsideOutputTarget, "utf8")) === "sentinel\n",
+      "final output symlink must not modify its outside target",
+    );
+  }
+
+  const outsideOutputDirectory = join(outsideDirectory, "outside-output-dir");
+  await mkdir(outsideOutputDirectory);
+  const outputJunction = join(directory, "output-junction");
+  await symlink(outsideOutputDirectory, outputJunction, "junction");
+  const escapedOutput = join(outputJunction, "manifest.json");
+  const junctionOutputResult = runWithOutput(clearPath, escapedOutput);
+  check(
+    junctionOutputResult.status === 3,
+    "output below an ancestor junction must be rejected",
+  );
+  check(
+    !(await exists(join(outsideOutputDirectory, "manifest.json"))),
+    "ancestor output junction must not create an outside manifest",
+  );
+
   await writeFile(
     join(outsideDirectory, "must-not-be-traversed.txt"),
     "This outside-root directory must be rejected before traversal.\n",
@@ -560,9 +623,10 @@ try {
     [stableSnapshot, stableSnapshot],
   );
   const stableRead = await readBoundedFile(
-    { path: "stable.txt", snapshot: stableSnapshot },
+    { path: "stable.txt" },
     10,
     async () => stableFile.handle,
+    async () => stableSnapshot,
   );
   check(!stableRead.changed, "stable file must not be marked changed");
   check(!stableRead.exceededLimit, "stable bounded file must fit its limit");
@@ -579,9 +643,10 @@ try {
     [grownBefore, grownBefore],
   );
   const staleRead = await readBoundedFile(
-    { path: "stale.txt", snapshot: stableSnapshot },
+    { path: "stale.txt" },
     10,
     async () => staleFile.handle,
+    async () => stableSnapshot,
   );
   check(staleRead.changed, "file changed after traversal must be rejected");
   check(
@@ -590,15 +655,36 @@ try {
   );
   check(staleFile.state().closed, "changed file handle must close");
 
+  const ctimeOnlySnapshot = { ...stableSnapshot, ctimeNs: 99n };
+  const ctimeFile = createFileHandle(
+    Buffer.from("clear"),
+    [ctimeOnlySnapshot, ctimeOnlySnapshot],
+  );
+  const ctimeRead = await readBoundedFile(
+    { path: "ctime-only.txt" },
+    10,
+    async () => ctimeFile.handle,
+    async () => stableSnapshot,
+  );
+  check(
+    ctimeRead.changed,
+    "ctime-only change between traversal and open must be rejected",
+  );
+  check(
+    ctimeRead.bytes.length === 0 && ctimeFile.state().readCalls === 0,
+    "ctime-only changed file must not be read",
+  );
+
   const grownAfter = { ...stableSnapshot, size: 6n, ctimeNs: 13n };
   const changingFile = createFileHandle(
     Buffer.from("clear"),
     [stableSnapshot, grownAfter],
   );
   const changingRead = await readBoundedFile(
-    { path: "changing.txt", snapshot: stableSnapshot },
+    { path: "changing.txt" },
     10,
     async () => changingFile.handle,
+    async () => stableSnapshot,
   );
   check(changingRead.changed, "file changed during scanning must be rejected");
   check(
@@ -612,9 +698,10 @@ try {
     [largeSnapshot, largeSnapshot],
   );
   const boundedRead = await readBoundedFile(
-    { path: "large.txt", snapshot: largeSnapshot },
+    { path: "large.txt" },
     4,
     async () => largeFile.handle,
+    async () => largeSnapshot,
   );
   check(boundedRead.exceededLimit, "bounded reader must detect byte limit");
   check(
@@ -631,9 +718,10 @@ try {
       [snapshot, snapshot],
     );
     const scan = await readBoundedFile(
-      { path: `aggregate-${index}.txt`, snapshot },
+      { path: `aggregate-${index}.txt` },
       boundedReadLimit(aggregateReadBytes, 4, 10),
       async () => file.handle,
+      async () => snapshot,
     );
     aggregateReadBytes += scan.bytes.length;
     aggregateReads.push(scan.bytes.length);

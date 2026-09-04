@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
-import { lstat, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, open, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +30,7 @@ const flags = [
 ];
 const usage =
   "Usage: node scripts/compile-readout-intent.mjs --source <source.json> --source-manifest <source-manifest.json> --authorization <authorization.json> --authorization-manifest <authorization-manifest.json> --receipt <readout-input-receipt.json> --intent <intent.json> --output <readout-plan.json>";
+const maxInputBytes = 2 * 1024 * 1024;
 
 function fail(message, status = 1) {
   console.error(message);
@@ -51,9 +52,62 @@ function parseArgs(values) {
   return parsed;
 }
 
+function inputSnapshot(info) {
+  return {
+    dev: info.dev,
+    ino: info.ino,
+    mode: info.mode,
+    size: info.size,
+    mtimeNs: info.mtimeNs,
+    ctimeNs: info.ctimeNs,
+  };
+}
+
+function sameInputSnapshot(left, right) {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mode === right.mode &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+async function readBoundedInput(path, maxBytes, openFile = open) {
+  const handle = await openFile(path, "r");
+  try {
+    const before = inputSnapshot(await handle.stat({ bigint: true }));
+    const chunks = [];
+    let total = 0;
+    while (total <= maxBytes) {
+      const length = Math.min(64 * 1024, maxBytes + 1 - total);
+      if (length <= 0) break;
+      const chunk = Buffer.allocUnsafe(length);
+      const { bytesRead } = await handle.read(chunk, 0, length, total);
+      if (bytesRead === 0) break;
+      chunks.push(chunk.subarray(0, bytesRead));
+      total += bytesRead;
+    }
+    if (total > maxBytes) {
+      throw new Error(`exceeds ${maxBytes}-byte input limit`);
+    }
+    const after = inputSnapshot(await handle.stat({ bigint: true }));
+    if (
+      !sameInputSnapshot(before, after) ||
+      BigInt(total) !== before.size
+    ) {
+      throw new Error("changed while being read");
+    }
+    return Buffer.concat(chunks, total);
+  } finally {
+    await handle.close();
+  }
+}
+
 async function readInput(path, label) {
   try {
-    const bytes = await readFile(resolve(path));
+    const bytes = await readBoundedInput(resolve(path), maxInputBytes);
     return {
       value: parseJsonBytes(bytes, label),
       byteLength: bytes.byteLength,
@@ -161,21 +215,21 @@ function runGate(command, args, label) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const [
-  sourceInput,
-  sourceManifestInput,
-  authorizationInput,
-  authorizationManifestInput,
-  receiptInput,
-  intentInput,
-] = await Promise.all([
-  readInput(args["--source"], "source"),
-  readInput(args["--source-manifest"], "source manifest"),
-  readInput(args["--authorization"], "authorization"),
-  readInput(args["--authorization-manifest"], "authorization manifest"),
-  readInput(args["--receipt"], "receipt"),
-  readInput(args["--intent"], "intent"),
-]);
+const sourceInput = await readInput(args["--source"], "source");
+const sourceManifestInput = await readInput(
+  args["--source-manifest"],
+  "source manifest",
+);
+const authorizationInput = await readInput(
+  args["--authorization"],
+  "authorization",
+);
+const authorizationManifestInput = await readInput(
+  args["--authorization-manifest"],
+  "authorization manifest",
+);
+const receiptInput = await readInput(args["--receipt"], "receipt");
+const intentInput = await readInput(args["--intent"], "intent");
 const output = await assertOutputBoundary(args["--output"]);
 const source = sourceInput.value;
 const authorization = authorizationInput.value;

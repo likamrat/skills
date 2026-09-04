@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   lstat,
   mkdir,
   open,
   opendir,
   realpath,
+  rename,
+  rm,
   writeFile,
 } from "node:fs/promises";
 import {
+  basename,
   dirname,
   extname,
   isAbsolute,
@@ -119,6 +122,7 @@ const inputRoots = args.map((path) => resolve(path));
 const sourceRoot = resolve(approvedRoot);
 const canonicalSourceRoot = await realpath(sourceRoot);
 const workspaceRoot = resolve(process.cwd());
+const canonicalWorkspaceRoot = await realpath(workspaceRoot);
 const resolvedOutput = output ? resolve(output) : null;
 let discoveredEntries = 0;
 let entryLimitReached = false;
@@ -138,6 +142,54 @@ function insideRoot(root, path) {
 
 function insideApprovedRoot(path) {
   return insideRoot(sourceRoot, path);
+}
+
+function outputError(message) {
+  console.error(message);
+  process.exit(3);
+}
+
+async function outputDestination(path) {
+  if (path === workspaceRoot || !insideRoot(workspaceRoot, path)) {
+    outputError("--output must stay inside the current workspace");
+  }
+
+  const parentFromWorkspace = relative(workspaceRoot, dirname(path));
+  const components = parentFromWorkspace.split(sep).filter(Boolean);
+  let canonicalParent = canonicalWorkspaceRoot;
+  for (const component of components) {
+    const next = join(canonicalParent, component);
+    let info;
+    try {
+      info = await lstat(next);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      try {
+        await mkdir(next);
+      } catch (mkdirError) {
+        if (mkdirError.code !== "EEXIST") throw mkdirError;
+      }
+      info = await lstat(next);
+    }
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      outputError("--output parent must not contain a symlink or non-directory");
+    }
+    canonicalParent = await realpath(next);
+    if (!insideRoot(canonicalWorkspaceRoot, canonicalParent)) {
+      outputError("--output parent must stay inside the current workspace");
+    }
+  }
+
+  const destination = join(canonicalParent, basename(path));
+  try {
+    const info = await lstat(destination);
+    if (info.isSymbolicLink() || !info.isFile()) {
+      outputError("--output must be a regular file, not a symlink");
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  return { destination, parent: canonicalParent };
 }
 
 function addTraversalFinding(path, rule, sortKey = path) {
@@ -190,7 +242,8 @@ function sameTraversalSnapshot(left, right) {
     left.ino === right.ino &&
     left.mode === right.mode &&
     left.size === right.size &&
-    left.mtimeNs === right.mtimeNs
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
   );
 }
 
@@ -201,15 +254,24 @@ function boundedReadLimit(totalBytes, maxFileBytes, maxTotalBytes) {
   );
 }
 
-async function readBoundedFile(file, maxBytes, openFile = open) {
+async function readBoundedFile(
+  file,
+  maxBytes,
+  openFile = open,
+  inspectFile = lstat,
+) {
   const handle = await openFile(file.path, "r");
   try {
     const before = fileSnapshot(await handle.stat({ bigint: true }));
-    if (!sameTraversalSnapshot(file.snapshot, before)) {
+    const current = fileSnapshot(
+      await inspectFile(file.path, { bigint: true }),
+    );
+    if (!sameTraversalSnapshot(current, before)) {
       return {
         bytes: Buffer.alloc(0),
         changed: true,
         exceededLimit: false,
+        size: before.size,
       };
     }
 
@@ -233,6 +295,7 @@ async function readBoundedFile(file, maxBytes, openFile = open) {
         !sameFileSnapshot(before, after) ||
         (!exceededLimit && BigInt(total) !== before.size),
       exceededLimit,
+      size: before.size,
     };
   } finally {
     await handle.close();
@@ -284,7 +347,6 @@ async function walk(path, depth) {
       path: resolvedPath,
       symlink: false,
       size: Number(info.size),
-      snapshot: fileSnapshot(info),
     });
   }
 }
@@ -332,7 +394,7 @@ for (const [index, file] of files.entries()) {
     sourceBytes = scan.bytes.length;
     totalBytes += sourceBytes;
     const fileLimitExceeded =
-      file.snapshot.size > BigInt(maxFileBytes) ||
+      scan.size > BigInt(maxFileBytes) ||
       sourceBytes > maxFileBytes;
     const totalLimitExceeded = sourceBytes > remainingTotalBytes;
     if (scan.changed) {
@@ -426,13 +488,19 @@ const manifest = { ...manifestBody, manifestSha256 };
 const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
 
 if (output) {
-  if (!insideRoot(workspaceRoot, resolvedOutput)) {
-    console.error("--output must stay inside the current workspace");
-    process.exit(3);
+  const target = await outputDestination(resolvedOutput);
+  const temporary = join(
+    target.parent,
+    `.${randomUUID()}.preflight-manifest.tmp`,
+  );
+  try {
+    await writeFile(temporary, serialized, { encoding: "utf8", flag: "wx" });
+    await rename(temporary, target.destination);
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
   }
-  await mkdir(dirname(resolvedOutput), { recursive: true });
-  await writeFile(resolvedOutput, serialized);
-  console.log(`Wrote ${resolvedOutput}`);
+  console.log(`Wrote ${target.destination}`);
 } else {
   await new Promise((resolveWrite, rejectWrite) => {
     process.stdout.write(serialized, (error) => {

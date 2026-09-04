@@ -13,6 +13,7 @@ const compilerSource = await readFile(compiler, "utf8");
 const receiptKind = "fde-readout-input-receipt/v1";
 const authorizationDecision = "approve";
 const authorizationScope = "compile-readout-plan-only";
+const maxInputBytes = 2 * 1024 * 1024;
 const provenance = await import("./readout-input-provenance.mjs");
 const example = JSON.parse(
   await readFile(
@@ -262,6 +263,45 @@ function expect(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function loadReadBoundedInput(scriptText) {
+  const normalized = scriptText.replaceAll("\r\n", "\n");
+  const start = normalized.indexOf("function inputSnapshot(");
+  const end = normalized.indexOf("\n\nasync function readInput", start);
+  if (start < 0 || end <= start) return null;
+  const source = normalized.slice(start, end);
+  return new Function(
+    "Buffer",
+    `"use strict"; ${source}; return readBoundedInput;`,
+  )(Buffer);
+}
+
+function createInputHandle(content, snapshots) {
+  let statIndex = 0;
+  let closed = false;
+  let largestRead = 0;
+  return {
+    handle: {
+      async stat() {
+        const snapshot = snapshots[Math.min(statIndex, snapshots.length - 1)];
+        statIndex += 1;
+        return snapshot;
+      },
+      async read(buffer, offset, length, position) {
+        largestRead = Math.max(largestRead, length);
+        const bytesRead = Math.min(length, Math.max(0, content.length - position));
+        content.copy(buffer, offset, position, position + bytesRead);
+        return { bytesRead };
+      },
+      async close() {
+        closed = true;
+      },
+    },
+    state() {
+      return { closed, largestRead };
+    },
+  };
+}
+
 async function expectAbsent(path) {
   try {
     await readFile(path);
@@ -359,6 +399,59 @@ try {
       );
     },
   );
+
+  await test("oversized compiler input fails before JSON parsing", async () => {
+    const sourceJson = serialize(compactSource);
+    const sourceText = `${sourceJson}${" ".repeat(
+      maxInputBytes + 1 - Buffer.byteLength(sourceJson),
+    )}`;
+    await expectFailure(
+      await run(directory, { sourceText }),
+      `exceeds ${maxInputBytes}-byte input limit`,
+    );
+  });
+
+  await test("compiler input growth is bounded by one sentinel byte", async () => {
+    const readBoundedInput = loadReadBoundedInput(compilerSource);
+    expect(readBoundedInput, "compiler must define a bounded input reader");
+    const initial = {
+      dev: 1n,
+      ino: 2n,
+      mode: 33188n,
+      size: 4n,
+      mtimeNs: 10n,
+      ctimeNs: 11n,
+    };
+    const grown = { ...initial, size: 6n, mtimeNs: 12n, ctimeNs: 13n };
+    const file = createInputHandle(
+      Buffer.from("123456"),
+      [initial, grown],
+    );
+    const rejected = await readBoundedInput(
+      "grown.json",
+      4,
+      async () => file.handle,
+    ).then(
+      () => false,
+      (error) => error.message.includes("exceeds 4-byte input limit"),
+    );
+    expect(
+      rejected,
+      "grown compiler input did not fail its byte limit",
+    );
+    expect(file.state().closed, "grown compiler input handle did not close");
+    expect(
+      file.state().largestRead <= 5,
+      "grown compiler input read beyond one sentinel byte",
+    );
+  });
+
+  await test("compiler reads bounded inputs sequentially", async () => {
+    expect(
+      !compilerSource.includes("await Promise.all(["),
+      "compiler still reads all inputs concurrently",
+    );
+  });
 
   await test("compilation requires manifests and receipt", async () => {
     const execution = await run(directory);
