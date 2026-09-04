@@ -62,6 +62,7 @@ const maxFileBytes = 2 * 1024 * 1024;
 const maxTotalBytes = 10 * 1024 * 1024;
 const maxTraversalDepth = 32;
 const maxDiscoveredEntries = 1000;
+const maxRecordedFindings = 512;
 const rules = [
   {
     id: "instruction-override",
@@ -126,6 +127,7 @@ const canonicalWorkspaceRoot = await realpath(workspaceRoot);
 const resolvedOutput = output ? resolve(output) : null;
 let discoveredEntries = 0;
 let entryLimitReached = false;
+let recordedFindings = 0;
 
 function insideRoot(root, path) {
   const resolvedRoot = resolve(root);
@@ -220,6 +222,7 @@ function fileSnapshot(info) {
     ino: info.ino,
     mode: info.mode,
     size: info.size,
+    birthtimeNs: info.birthtimeNs,
     mtimeNs: info.mtimeNs,
     ctimeNs: info.ctimeNs,
   };
@@ -231,19 +234,28 @@ function sameFileSnapshot(left, right) {
     left.ino === right.ino &&
     left.mode === right.mode &&
     left.size === right.size &&
+    left.birthtimeNs === right.birthtimeNs &&
     left.mtimeNs === right.mtimeNs &&
     left.ctimeNs === right.ctimeNs
   );
 }
 
 function sameTraversalSnapshot(left, right) {
-  return (
+  const sameStableFields =
     left.dev === right.dev &&
     left.ino === right.ino &&
     left.mode === right.mode &&
     left.size === right.size &&
-    left.mtimeNs === right.mtimeNs &&
-    left.ctimeNs === right.ctimeNs
+    left.birthtimeNs === right.birthtimeNs &&
+    left.mtimeNs === right.mtimeNs;
+  const freshWindowsCtimeSettlement =
+    process.platform === "win32" &&
+    left.ctimeNs === left.mtimeNs &&
+    right.ctimeNs > left.ctimeNs &&
+    right.ctimeNs - left.ctimeNs <= 1_000_000_000n;
+  return (
+    sameStableFields &&
+    (left.ctimeNs === right.ctimeNs || freshWindowsCtimeSettlement)
   );
 }
 
@@ -254,15 +266,45 @@ function boundedReadLimit(totalBytes, maxFileBytes, maxTotalBytes) {
   );
 }
 
+async function openTraversalFile(
+  path,
+  traversalSnapshot,
+  openFile = open,
+  inspectFile = lstat,
+) {
+  const handle = await openFile(path, "r");
+  const current = fileSnapshot(await inspectFile(path, { bigint: true }));
+  const opened = fileSnapshot(await handle.stat({ bigint: true }));
+  if (
+    !sameTraversalSnapshot(traversalSnapshot, current) ||
+    !sameTraversalSnapshot(traversalSnapshot, opened)
+  ) {
+    await handle.close();
+    return { changed: true, handle: null };
+  }
+  return { changed: false, handle };
+}
+
 async function readBoundedFile(
   file,
   maxBytes,
   openFile = open,
   inspectFile = lstat,
 ) {
-  const handle = await openFile(file.path, "r");
+  const handle = file.handle ?? (await openFile(file.path, "r"));
   try {
     const before = fileSnapshot(await handle.stat({ bigint: true }));
+    if (
+      file.snapshot &&
+      !sameTraversalSnapshot(file.snapshot, before)
+    ) {
+      return {
+        bytes: Buffer.alloc(0),
+        changed: true,
+        exceededLimit: false,
+        size: before.size,
+      };
+    }
     const current = fileSnapshot(
       await inspectFile(file.path, { bigint: true }),
     );
@@ -343,10 +385,25 @@ async function walk(path, depth) {
     return;
   }
   if (info.isFile()) {
+    let handle = null;
+    const traversalSnapshot = fileSnapshot(info);
+    if (supported.has(extname(resolvedPath).toLowerCase())) {
+      const opened = await openTraversalFile(
+        resolvedPath,
+        traversalSnapshot,
+      );
+      if (opened.changed) {
+        addTraversalFinding(resolvedPath, "file-changed-during-scan");
+        return;
+      }
+      handle = opened.handle;
+    }
     files.push({
       path: resolvedPath,
       symlink: false,
-      size: Number(info.size),
+      size: Number(traversalSnapshot.size),
+      snapshot: traversalSnapshot,
+      handle,
     });
   }
 }
@@ -369,6 +426,22 @@ const results = [];
 for (const [index, file] of files.entries()) {
   const sourceId = `source-${String(index + 1).padStart(3, "0")}`;
   const findings = structuredClone(file.traversalFindings ?? []);
+  let findingsLimited = false;
+  function addPatternFinding(finding) {
+    if (recordedFindings < maxRecordedFindings) {
+      findings.push(finding);
+      recordedFindings += 1;
+      return;
+    }
+    if (!findingsLimited) {
+      findings.push({
+        rule: "findings-limit",
+        severity: "block",
+        line: null,
+      });
+      findingsLimited = true;
+    }
+  }
   let sourceBytes = file.size;
   let sha256 = null;
 
@@ -383,6 +456,7 @@ for (const [index, file] of files.entries()) {
       line: null,
     });
   } else if (totalBytes > maxTotalBytes) {
+    await file.handle?.close();
     sourceBytes = 0;
     findings.push({ rule: "total-size-limit", severity: "block", line: null });
   } else {
@@ -435,7 +509,7 @@ for (const [index, file] of files.entries()) {
           for (const rule of rules) {
             rule.pattern.lastIndex = 0;
             if (rule.pattern.test(line)) {
-              findings.push({
+              addPatternFinding({
                 rule: rule.id,
                 severity: rule.severity,
                 line: lineIndex + 1,
@@ -476,9 +550,10 @@ const manifestBody = {
     maxTotalBytes,
     maxTraversalDepth,
     maxDiscoveredEntries,
+    maxRecordedFindings,
   },
   note:
-    "A clear result means no known pattern matched. It does not make source content trusted or authorize actions.",
+    "A clear result means no known pattern matched. A findings-limit block means additional findings were compacted. Neither result makes source content trusted or authorizes actions.",
   sources: results,
 };
 const manifestSha256 = createHash("sha256")

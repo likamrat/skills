@@ -337,21 +337,49 @@ export function validateReceipt(
   }
 }
 
-export function findForbiddenIntentField(value, path = "intent") {
-  if (Array.isArray(value)) {
-    for (const [index, item] of value.entries()) {
-      const match = findForbiddenIntentField(item, `${path}[${index}]`);
-      if (match) return match;
-    }
-    return null;
+function formatIntentPath(node, finalSegment) {
+  const segments = [finalSegment];
+  for (let current = node; current; current = current.parent) {
+    segments.push(current.segment);
   }
-  if (!isRecord(value)) return null;
-  for (const [key, item] of Object.entries(value)) {
-    if (forbiddenIntentFields.has(key)) {
-      return path === "intent" ? key : `${path}.${key}`;
+  return `intent${segments.reverse().join("")}`;
+}
+
+export function findForbiddenIntentField(value) {
+  const stack = [{ value, path: null, root: true }];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (Array.isArray(current.value)) {
+      for (let index = current.value.length - 1; index >= 0; index -= 1) {
+        stack.push({
+          value: current.value[index],
+          path: {
+            parent: current.path,
+            segment: `[${index}]`,
+          },
+          root: false,
+        });
+      }
+      continue;
     }
-    const match = findForbiddenIntentField(item, `${path}.${key}`);
-    if (match) return match;
+    if (!isRecord(current.value)) continue;
+    const entries = Object.entries(current.value);
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const [key, item] = entries[index];
+      if (forbiddenIntentFields.has(key)) {
+        return current.root
+          ? key
+          : formatIntentPath(current.path, `.${key}`);
+      }
+      stack.push({
+        value: item,
+        path: {
+          parent: current.path,
+          segment: `.${key}`,
+        },
+        root: false,
+      });
+    }
   }
   return null;
 }

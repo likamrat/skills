@@ -9,8 +9,14 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import {
+  closeSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+} from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
-import { basename, dirname, join, resolve, win32 } from "node:path";
+import { basename, dirname, join, resolve, sep, win32 } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -33,7 +39,31 @@ function check(condition, message) {
   if (!condition) failures.push(message);
 }
 
+function stabilizeSource(path) {
+  let info;
+  try {
+    info = lstatSync(path);
+  } catch {
+    return;
+  }
+  if (info.isSymbolicLink()) return;
+  if (info.isDirectory()) {
+    for (const entry of readdirSync(path)) {
+      stabilizeSource(join(path, entry));
+    }
+    return;
+  }
+  if (info.isFile()) {
+    const descriptor = openSync(path, "r");
+    closeSync(descriptor);
+    lstatSync(path);
+  }
+}
+
 function run(path) {
+  if (resolve(path).startsWith(`${resolve(directory)}${sep}`)) {
+    stabilizeSource(path);
+  }
   const result = spawnSync(
     process.execPath,
     [script, "--root", directory, path],
@@ -53,6 +83,7 @@ function run(path) {
 }
 
 function runWithOutput(path, output) {
+  stabilizeSource(path);
   return spawnSync(
     process.execPath,
     [script, "--root", directory, "--output", output, path],
@@ -75,6 +106,7 @@ async function exists(path) {
 }
 
 async function runAsync(path, { delayStdout = false } = {}) {
+  stabilizeSource(path);
   const childArgs = delayStdout
     ? [
         "--input-type=module",
@@ -178,6 +210,7 @@ function loadReadBoundedFile(scriptText) {
         typeof boundedReadLimit === "function"
           ? boundedReadLimit
           : (_totalBytes, maxFileBytes) => maxFileBytes,
+      openTraversalFile,
       readBoundedFile
     };`,
   )(Buffer);
@@ -557,6 +590,22 @@ try {
     readFile(counterpart),
   ]);
   const localScriptText = localScript.toString("utf8");
+  const walkStart = localScriptText.indexOf("async function walk(");
+  const walkSource = localScriptText.slice(
+    walkStart,
+    localScriptText.indexOf("\n\nfor (const root", walkStart),
+  );
+  check(
+    walkSource.includes(
+      "const traversalSnapshot = fileSnapshot(info);",
+    ) &&
+      /openTraversalFile\(\s*resolvedPath,\s*traversalSnapshot,\s*\)/.test(
+        walkSource,
+      ) &&
+      walkSource.includes("snapshot: traversalSnapshot") &&
+      !/^\s*info\s*=/m.test(walkSource),
+    "walk must preserve and pass its original traversal snapshot",
+  );
   const insideRoot = loadInsideRoot(localScriptText);
   check(
     !insideRoot(
@@ -608,7 +657,7 @@ try {
     "Windows exact-case children must remain inside",
   );
 
-  const { boundedReadLimit, readBoundedFile } =
+  const { boundedReadLimit, openTraversalFile, readBoundedFile } =
     loadReadBoundedFile(localScriptText);
   const stableSnapshot = {
     dev: 1n,
@@ -675,6 +724,33 @@ try {
     "ctime-only changed file must not be read",
   );
 
+  const replacementSnapshot = {
+    ...stableSnapshot,
+    dev: 9n,
+    ino: 99n,
+    ctimeNs: 100n,
+  };
+  const replacementFile = createFileHandle(
+    Buffer.from("clear"),
+    [replacementSnapshot, replacementSnapshot],
+  );
+  const replacementOpen = await openTraversalFile(
+    "replacement.txt",
+    stableSnapshot,
+    async () => replacementFile.handle,
+    async () => replacementSnapshot,
+  );
+  check(
+    replacementOpen.changed,
+    "file replaced between traversal and open must be rejected",
+  );
+  check(
+    replacementOpen.handle === null &&
+      replacementFile.state().readCalls === 0 &&
+      replacementFile.state().closed,
+    "replacement detected at open must not be read",
+  );
+
   const grownAfter = { ...stableSnapshot, size: 6n, ctimeNs: 13n };
   const changingFile = createFileHandle(
     Buffer.from("clear"),
@@ -730,6 +806,38 @@ try {
     aggregateReadBytes === 11 &&
       aggregateReads.join(",") === "2,2,2,2,2,1",
     "aggregate reads must stop at total budget plus one byte",
+  );
+
+  const findingsHeavyPath = join(directory, "findings-heavy.txt");
+  await writeFile(
+    findingsHeavyPath,
+    "https://example.com/review\n".repeat(30_000),
+  );
+  const findingsManifestPath = join(directory, "findings-manifest.json");
+  const findingsResult = runWithOutput(
+    findingsHeavyPath,
+    findingsManifestPath,
+  );
+  check(
+    findingsResult.status === 2,
+    "findings overflow must fail closed with block status",
+  );
+  const findingsManifestBytes = await readFile(findingsManifestPath);
+  const findingsManifest = JSON.parse(findingsManifestBytes.toString("utf8"));
+  check(
+    findingsManifestBytes.length <= 2 * 1024 * 1024,
+    "serialized manifest must remain within the compiler input limit",
+  );
+  check(
+    findingsManifest.sources[0].findings.some(
+      (finding) => finding.rule === "findings-limit",
+    ),
+    "findings overflow must record the findings-limit consequence",
+  );
+  check(
+    findingsManifest.sources[0].status === "block" &&
+      findingsManifest.status === "block",
+    "findings overflow must preserve explicit block precedence",
   );
   check(
     localScript.equals(counterpartScript),

@@ -453,6 +453,30 @@ try {
     );
   });
 
+  await test("deep intent provenance fails without RangeError", async () => {
+    const base = serialize(intent);
+    const depth = 20_000;
+    const deepValue =
+      '{"next":'.repeat(depth) +
+      '{"receipt":{}}' +
+      "}".repeat(depth);
+    const intentText = `${base.slice(0, -1)},"deep":${deepValue}}`;
+    const execution = await run(directory, { intentText });
+    expect(
+      execution.result.status !== 0,
+      "deep intent unexpectedly succeeded",
+    );
+    const diagnostics = `${execution.result.stdout}${execution.result.stderr}`;
+    expect(
+      diagnostics.includes(
+        "Intent cannot contain provenance or receipt fields",
+      ),
+      diagnostics,
+    );
+    expect(!diagnostics.includes("RangeError"), diagnostics);
+    await expectAbsent(execution.output);
+  });
+
   await test("compilation requires manifests and receipt", async () => {
     const execution = await run(directory);
     const output = join(directory, "missing-provenance-inputs.json");
