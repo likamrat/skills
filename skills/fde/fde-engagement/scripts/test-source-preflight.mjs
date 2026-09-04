@@ -95,6 +95,18 @@ function runWithOutput(path, output) {
   );
 }
 
+function runMany(paths) {
+  return spawnSync(
+    process.execPath,
+    [script, "--root", directory, ...paths],
+    {
+      cwd: directory,
+      encoding: "utf8",
+      maxBuffer: testOutputBuffer,
+    },
+  );
+}
+
 async function exists(path) {
   try {
     await access(path);
@@ -451,6 +463,41 @@ try {
         (finding) => finding.rule === "outside-approved-root",
       ),
     "outside-root directory must be rejected before traversal",
+  );
+
+  const outsideArguments = Array.from(
+    { length: 1_500 },
+    () => `..${sep}x`,
+  );
+  const outsideArgumentResult = runMany(outsideArguments);
+  check(
+    outsideArgumentResult.error === undefined,
+    `many outside-root arguments must execute: ${outsideArgumentResult.error?.message ?? ""}`,
+  );
+  check(
+    outsideArgumentResult.status === 2,
+    "many outside-root arguments must block",
+  );
+  const outsideArgumentManifest = JSON.parse(
+    outsideArgumentResult.stdout ?? "{}",
+  );
+  check(
+    outsideArgumentManifest.sources.length === 1001,
+    "outside-root results must stop at 1,000 plus one limit entry",
+  );
+  check(
+    outsideArgumentManifest.sources.at(-1)?.findings?.some(
+      (finding) => finding.rule === "discovered-entry-limit",
+    ),
+    "outside-root overflow must end with discovered-entry-limit",
+  );
+  check(
+    Buffer.byteLength(outsideArgumentResult.stdout) <= 2 * 1024 * 1024,
+    "outside-root overflow manifest must stay compiler-consumable",
+  );
+  check(
+    !outsideArgumentResult.stdout?.includes(outsideDirectory),
+    "outside-root overflow manifest must not echo paths",
   );
 
   const outsideLinkedRoot = join(outsideDirectory, "linked-root");

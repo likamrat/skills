@@ -63,6 +63,7 @@ const maxTotalBytes = 10 * 1024 * 1024;
 const maxTraversalDepth = 32;
 const maxDiscoveredEntries = 1000;
 const maxRecordedFindings = 512;
+const maxManifestBytes = 2 * 1024 * 1024;
 const rules = [
   {
     id: "instruction-override",
@@ -410,6 +411,7 @@ async function walk(path, depth) {
 
 for (const root of inputRoots) {
   if (!insideApprovedRoot(root)) {
+    if (!registerDiscoveredEntry(root)) break;
     addTraversalFinding(root, "outside-approved-root");
     continue;
   }
@@ -536,12 +538,12 @@ for (const [index, file] of files.entries()) {
   });
 }
 
-const status = results.some((item) => item.status === "block")
+let status = results.some((item) => item.status === "block")
   ? "block"
   : results.some((item) => item.status === "review")
     ? "review"
     : "clear";
-const manifestBody = {
+let manifestBody = {
   version: 1,
   generatedAt: new Date().toISOString(),
   status,
@@ -551,16 +553,45 @@ const manifestBody = {
     maxTraversalDepth,
     maxDiscoveredEntries,
     maxRecordedFindings,
+    maxManifestBytes,
   },
   note:
     "A clear result means no known pattern matched. A findings-limit block means additional findings were compacted. Neither result makes source content trusted or authorizes actions.",
   sources: results,
 };
-const manifestSha256 = createHash("sha256")
-  .update(JSON.stringify(manifestBody))
-  .digest("hex");
-const manifest = { ...manifestBody, manifestSha256 };
-const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
+
+function serializeManifest(body) {
+  const manifestSha256 = createHash("sha256")
+    .update(JSON.stringify(body))
+    .digest("hex");
+  return `${JSON.stringify({ ...body, manifestSha256 }, null, 2)}\n`;
+}
+
+let serialized = serializeManifest(manifestBody);
+if (Buffer.byteLength(serialized) > maxManifestBytes) {
+  status = "block";
+  manifestBody = {
+    ...manifestBody,
+    status: "block",
+    sources: [
+      {
+        sourceId: "source-001",
+        bytes: 0,
+        sha256: null,
+        trust: "untrusted-data",
+        status: "block",
+        findings: [
+          {
+            rule: "manifest-size-limit",
+            severity: "block",
+            line: null,
+          },
+        ],
+      },
+    ],
+  };
+  serialized = serializeManifest(manifestBody);
+}
 
 if (output) {
   const target = await outputDestination(resolvedOutput);
