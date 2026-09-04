@@ -295,6 +295,22 @@ function loadAliasesOutput(
   );
 }
 
+function loadSameTraversalSnapshot(scriptText, platform) {
+  const normalized = scriptText.replaceAll("\r\n", "\n");
+  const start = normalized.indexOf("function sameTraversalSnapshot(");
+  const end = normalized.indexOf("\n\nfunction boundedReadLimit", start);
+  check(
+    start >= 0 && end > start,
+    "preflight must define sameTraversalSnapshot",
+  );
+  if (start < 0 || end <= start) return () => false;
+  const source = normalized.slice(start, end);
+  return new Function(
+    "process",
+    `"use strict"; return (${source});`,
+  )({ platform });
+}
+
 function loadReadBoundedFile(scriptText) {
   const normalized = scriptText.replaceAll("\r\n", "\n");
   const start = normalized.indexOf("function fileSnapshot(");
@@ -1291,11 +1307,20 @@ try {
 
   const { boundedReadLimit, openTraversalFile, readBoundedFile } =
     loadReadBoundedFile(localScriptText);
+  const windowsTraversalSnapshot = loadSameTraversalSnapshot(
+    localScriptText,
+    "win32",
+  );
+  const nonWindowsTraversalSnapshot = loadSameTraversalSnapshot(
+    localScriptText,
+    "linux",
+  );
   const stableSnapshot = {
     dev: 1n,
     ino: 2n,
     mode: 33188n,
     size: 5n,
+    birthtimeNs: 9n,
     mtimeNs: 10n,
     ctimeNs: 11n,
   };
@@ -1336,7 +1361,29 @@ try {
   );
   check(staleFile.state().closed, "changed file handle must close");
 
-  const ctimeOnlySnapshot = { ...stableSnapshot, ctimeNs: 99n };
+  const ctimeOnlySnapshot = {
+    ...stableSnapshot,
+    ctimeNs: 2_000_000_012n,
+  };
+  check(
+    windowsTraversalSnapshot(stableSnapshot, ctimeOnlySnapshot),
+    "Windows forward ctime-only settlement must preserve a stable snapshot",
+  );
+  check(
+    !nonWindowsTraversalSnapshot(stableSnapshot, ctimeOnlySnapshot),
+    "non-Windows ctime-only changes must remain rejected",
+  );
+  check(
+    !windowsTraversalSnapshot(stableSnapshot, {
+      ...ctimeOnlySnapshot,
+      size: 6n,
+    }),
+    "Windows ctime settlement must not hide a stable-field change",
+  );
+  check(
+    !windowsTraversalSnapshot(ctimeOnlySnapshot, stableSnapshot),
+    "Windows backward ctime changes must remain rejected",
+  );
   const ctimeFile = createFileHandle(
     Buffer.from("clear"),
     [ctimeOnlySnapshot, ctimeOnlySnapshot],
@@ -1347,14 +1394,21 @@ try {
     async () => ctimeFile.handle,
     async () => stableSnapshot,
   );
-  check(
-    ctimeRead.changed,
-    "ctime-only change between traversal and open must be rejected",
-  );
-  check(
-    ctimeRead.bytes.length === 0 && ctimeFile.state().readCalls === 0,
-    "ctime-only changed file must not be read",
-  );
+  if (process.platform === "win32") {
+    check(
+      !ctimeRead.changed &&
+        ctimeRead.bytes.toString("utf8") === "clear" &&
+        ctimeFile.state().readCalls > 0,
+      "Windows ctime-only settlement must not false-block a stable file",
+    );
+  } else {
+    check(
+      ctimeRead.changed &&
+        ctimeRead.bytes.length === 0 &&
+        ctimeFile.state().readCalls === 0,
+      "non-Windows ctime-only changes must stop before reading",
+    );
+  }
 
   const replacementSnapshot = {
     ...stableSnapshot,

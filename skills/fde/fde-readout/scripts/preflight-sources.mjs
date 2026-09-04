@@ -354,9 +354,7 @@ function sameTraversalSnapshot(left, right) {
     left.mtimeNs === right.mtimeNs;
   const freshWindowsCtimeSettlement =
     process.platform === "win32" &&
-    left.ctimeNs === left.mtimeNs &&
-    right.ctimeNs > left.ctimeNs &&
-    right.ctimeNs - left.ctimeNs <= 1_000_000_000n;
+    right.ctimeNs > left.ctimeNs;
   return (
     sameStableFields &&
     (left.ctimeNs === right.ctimeNs || freshWindowsCtimeSettlement)
