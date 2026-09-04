@@ -324,6 +324,27 @@ try {
       ),
     "output-only directory must emit one explicit block",
   );
+  if (process.platform === "win32") {
+    const caseOnlyOutput = join(outputOnlyRoot, "MANIFEST.JSON");
+    const caseOnlyOutputResult = runWithOutput(
+      outputOnlyRoot,
+      caseOnlyOutput,
+    );
+    check(
+      caseOnlyOutputResult.status === 2,
+      "case-only output basename must remain excluded during traversal",
+    );
+    const caseOnlyManifest = JSON.parse(
+      await readFile(outputOnlyManifest, "utf8"),
+    );
+    check(
+      caseOnlyManifest.sources?.length === 1 &&
+        caseOnlyManifest.sources[0].findings?.some(
+          (finding) => finding.rule === "empty-input-root",
+        ),
+      "case-only existing output must preserve empty-input-root",
+    );
+  }
   await rm(outputOnlyRoot, { recursive: true, force: true });
 
   if (process.platform === "win32") {

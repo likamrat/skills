@@ -411,7 +411,7 @@ async function walk(path, depth) {
   if (entryLimitReached) return;
   const resolvedPath = resolve(path);
   if (!registerDiscoveredEntry(resolvedPath)) return;
-  if (resolvedOutput && resolvedPath === resolvedOutput) return;
+  if (resolvedOutput && sameLexicalPath(resolvedPath, resolvedOutput)) return;
 
   const pathFromSourceRoot = relative(sourceRoot, resolvedPath);
   const components = pathFromSourceRoot.split(sep).filter(Boolean);
