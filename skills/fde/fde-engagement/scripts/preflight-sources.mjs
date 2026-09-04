@@ -64,6 +64,16 @@ const maxTraversalDepth = 32;
 const maxDiscoveredEntries = 1000;
 const maxRecordedFindings = 512;
 const maxManifestBytes = 2 * 1024 * 1024;
+const inputAccessCodes = new Set([
+  "EACCES",
+  "EBUSY",
+  "EIO",
+  "ELOOP",
+  "ENOENT",
+  "ENOTDIR",
+  "EPERM",
+  "ESTALE",
+]);
 const rules = [
   {
     id: "instruction-override",
@@ -126,6 +136,7 @@ const canonicalSourceRoot = await realpath(sourceRoot);
 const workspaceRoot = resolve(process.cwd());
 const canonicalWorkspaceRoot = await realpath(workspaceRoot);
 const resolvedOutput = output ? resolve(output) : null;
+let outputIdentity = null;
 let discoveredEntries = 0;
 let entryLimitReached = false;
 let recordedFindings = 0;
@@ -162,9 +173,45 @@ function sameLexicalPath(
     : resolvedLeft === resolvedRight;
 }
 
+function sameFileIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
 function outputError(message) {
   console.error(message);
   process.exit(3);
+}
+
+async function captureOutputIdentity(path) {
+  if (!path) return null;
+  try {
+    const info = await lstat(path, { bigint: true });
+    if (info.isSymbolicLink() || !info.isFile()) return null;
+    return {
+      canonicalPath: await realpath(path),
+      snapshot: {
+        dev: info.dev,
+        ino: info.ino,
+      },
+    };
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function inputAccessError() {
+  console.error("Cannot access input source");
+  process.exit(3);
+}
+
+async function inputAccess(operation, fail = inputAccessError) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!inputAccessCodes.has(error?.code)) throw error;
+    return fail();
+  }
 }
 
 async function outputDestination(path) {
@@ -431,6 +478,13 @@ async function walk(path, depth) {
     return;
   }
   const canonicalPath = await realpath(resolvedPath);
+  if (
+    outputIdentity &&
+    (canonicalPath === outputIdentity.canonicalPath ||
+      sameFileIdentity(info, outputIdentity.snapshot))
+  ) {
+    return;
+  }
   if (!insideRoot(canonicalSourceRoot, canonicalPath)) {
     addTraversalFinding(resolvedPath, "outside-approved-root");
     return;
@@ -475,13 +529,14 @@ async function hasDuplicateInputRoot(paths) {
     let containsLink = false;
     for (const component of components) {
       componentPath = join(componentPath, component);
-      if ((await lstat(componentPath)).isSymbolicLink()) {
+      const componentInfo = await inputAccess(() => lstat(componentPath));
+      if (componentInfo.isSymbolicLink()) {
         containsLink = true;
         break;
       }
     }
     if (containsLink) continue;
-    const canonical = await realpath(root);
+    const canonical = await inputAccess(() => realpath(root));
     if (canonicalRoots.has(canonical)) return true;
     canonicalRoots.add(canonical);
   }
@@ -498,6 +553,8 @@ async function unsupportedSnapshot(file) {
   };
 }
 
+outputIdentity = await captureOutputIdentity(resolvedOutput);
+
 if (await hasDuplicateInputRoot(inputRoots)) {
   registerDiscoveredEntry(inputRoots[0]);
   addTraversalFinding(inputRoots[0], "duplicate-source-path");
@@ -509,7 +566,7 @@ if (await hasDuplicateInputRoot(inputRoots)) {
       continue;
     }
     const resultStart = files.length;
-    await walk(root, 0);
+    await inputAccess(() => walk(root, 0));
     if (files.length === resultStart && !entryLimitReached) {
       addTraversalFinding(root, "empty-input-root");
     }
@@ -553,7 +610,7 @@ for (const [index, file] of files.entries()) {
     const remainingTotalBytes = Math.max(0, maxTotalBytes - totalBytes);
     const supportedFormat = supported.has(extname(file.path).toLowerCase());
     if (!supportedFormat) {
-      const metadata = await unsupportedSnapshot(file);
+      const metadata = await inputAccess(() => unsupportedSnapshot(file));
       sourceBytes = metadata.size;
       totalBytes += sourceBytes;
       if (metadata.changed) {
@@ -589,9 +646,11 @@ for (const [index, file] of files.entries()) {
         line: null,
       });
     } else {
-      const scan = await readBoundedFile(
-        file,
-        boundedReadLimit(totalBytes, maxFileBytes, maxTotalBytes),
+      const scan = await inputAccess(() =>
+        readBoundedFile(
+          file,
+          boundedReadLimit(totalBytes, maxFileBytes, maxTotalBytes),
+        ),
       );
       sourceBytes = scan.bytes.length;
       totalBytes += sourceBytes;

@@ -62,7 +62,7 @@ function stabilizeSource(path) {
   }
 }
 
-function run(path) {
+function run(path, { expectManifest = true } = {}) {
   if (resolve(path).startsWith(`${resolve(directory)}${sep}`)) {
     stabilizeSource(path);
   }
@@ -76,10 +76,12 @@ function run(path) {
     },
   );
   let manifest;
-  try {
-    manifest = JSON.parse(result.stdout);
-  } catch {
-    failures.push(`preflight returned invalid JSON:\n${result.stdout}${result.stderr}`);
+  if (expectManifest) {
+    try {
+      manifest = JSON.parse(result.stdout);
+    } catch {
+      failures.push(`preflight returned invalid JSON:\n${result.stdout}${result.stderr}`);
+    }
   }
   return { ...result, manifest };
 }
@@ -206,11 +208,24 @@ function loadInsideRoot(scriptText) {
 function loadSameLexicalPath(scriptText) {
   const normalized = scriptText.replaceAll("\r\n", "\n");
   const start = normalized.indexOf("function sameLexicalPath(");
-  const end = normalized.indexOf("\n\nfunction outputError", start);
+  const end = normalized.indexOf("\n\nfunction sameFileIdentity", start);
   check(start >= 0 && end > start, "preflight must define sameLexicalPath");
   if (start < 0 || end <= start) return () => false;
   const source = normalized.slice(start, end);
   return new Function(`"use strict"; return (${source});`)();
+}
+
+function loadInputAccess(scriptText) {
+  const normalized = scriptText.replaceAll("\r\n", "\n");
+  const start = normalized.indexOf("async function inputAccess(");
+  const end = normalized.indexOf("\n\nasync function outputDestination", start);
+  check(start >= 0 && end > start, "preflight must define inputAccess");
+  if (start < 0 || end <= start) return async () => undefined;
+  const source = normalized.slice(start, end);
+  return new Function(
+    "inputAccessCodes",
+    `"use strict"; return (${source});`,
+  )(new Set(["EACCES"]));
 }
 
 function loadReadBoundedFile(scriptText) {
@@ -365,6 +380,50 @@ try {
     );
     await rm(caseAliasPath, { force: true });
   }
+
+  const outputIdentityRoot = join(directory, "output-identity-root");
+  await mkdir(outputIdentityRoot);
+  const outputIdentityTarget = join(directory, "output-identity-target.json");
+  await writeFile(outputIdentityTarget, "prior output\n");
+  const outputIdentityAlias = join(outputIdentityRoot, "alias.json");
+  await link(outputIdentityTarget, outputIdentityAlias);
+  const outputIdentityResult = runWithOutput(
+    outputIdentityRoot,
+    outputIdentityTarget,
+  );
+  check(
+    outputIdentityResult.status === 2,
+    "hard-link descendant matching output identity must remain excluded",
+  );
+  const outputIdentityManifest = JSON.parse(
+    await readFile(outputIdentityTarget, "utf8"),
+  );
+  check(
+    outputIdentityManifest.sources?.length === 1 &&
+      outputIdentityManifest.sources[0].findings?.some(
+        (finding) => finding.rule === "empty-input-root",
+      ),
+    "output identity alias must preserve output-only empty-root block",
+  );
+  await rm(outputIdentityRoot, { recursive: true, force: true });
+  await rm(outputIdentityTarget, { force: true });
+
+  const missingInput = join(directory, "missing-input.txt");
+  const missing = run(missingInput, { expectManifest: false });
+  check(
+    missing.status === 3,
+    "missing named input must use operational exit 3",
+  );
+  check(
+    missing.stderr.includes("Cannot access input source") &&
+      !missing.stderr.includes(missingInput) &&
+      !missing.stderr.includes(" at "),
+    "missing input failure must be pathless and contain no stack trace",
+  );
+  check(
+    !missing.stdout,
+    "missing input operational failure must not emit a review manifest",
+  );
 
   const duplicateRoot = runMany([
     clearPath,
@@ -895,6 +954,7 @@ try {
   );
   const insideRoot = loadInsideRoot(localScriptText);
   const sameLexicalPath = loadSameLexicalPath(localScriptText);
+  const inputAccess = loadInputAccess(localScriptText);
   check(
     sameLexicalPath(
       String.raw`C:\Approved\Source.txt`,
@@ -910,6 +970,28 @@ try {
       { resolve: win32.resolve, caseInsensitive: true },
     ),
     "Windows UNC case aliases must be detected without network access",
+  );
+  let inaccessibleFailed = false;
+  const inaccessible = await inputAccess(
+    async () => {
+      const error = new Error("denied");
+      error.code = "EACCES";
+      throw error;
+    },
+    () => {
+      inaccessibleFailed = true;
+      return "operational-failure";
+    },
+  );
+  check(
+    inaccessibleFailed && inaccessible === "operational-failure",
+    "inaccessible input must map to the pathless operational failure adapter",
+  );
+  check(
+    localScriptText.includes("function sameFileIdentity(") &&
+      localScriptText.includes("outputIdentity") &&
+      localScriptText.includes("Cannot access input source"),
+    "preflight must exclude canonical output identity and bound access errors",
   );
   check(
     !insideRoot(
